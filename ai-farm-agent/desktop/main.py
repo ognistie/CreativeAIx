@@ -1,0 +1,210 @@
+"""
+Entry point do Creative AIx Desktop.
+
+Inicia QApplication, carrega QML raiz e injeta `Bridge` como context
+property. Substitui completamente o antigo servidor Flask + browser.
+
+Uso:
+    python main.py            # via main.py raiz do projeto
+    python -m desktop.main    # direto (para debug)
+"""
+
+from __future__ import annotations
+
+import ctypes
+import os
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+
+import PySide6
+from PySide6.QtCore import QRectF, QTimer, QUrl, Qt
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QIcon, QPainter, QPixmap
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
+
+from desktop.bridge import Bridge
+from desktop.instance import InstanceServer, notify_running
+
+
+HERE = Path(__file__).parent
+QML_DIR = HERE / "qml"
+QML_ROOT = QML_DIR / "Main.qml"
+APP_ID = "ognistie.AIFarmAgent"       # o atalho (scripts/install_shortcuts.py) usa a mesma identidade
+SHUTDOWN_LIMIT_S = 5.0                # limpeza que travar nao segura o agente vivo
+
+
+def _setup_fonts(app: QGuiApplication) -> None:
+    """Fonte do sistema (Segoe UI Variable no Windows 11). Se nao existir,
+    o Qt escolhe a sans-serif padrao."""
+    # Windows 10 nao tem Segoe UI Variable; Cascadia vem com o Terminal.
+    QFont.insertSubstitutions("Segoe UI Variable Text", ["Segoe UI Variable", "Segoe UI"])
+    QFont.insertSubstitutions("Segoe UI Variable Display", ["Segoe UI Variable", "Segoe UI"])
+    QFont.insertSubstitutions("Cascadia Mono", ["Consolas", "Courier New"])
+    default = QFont("Segoe UI Variable Text", 10)
+    default.setStyleStrategy(QFont.PreferAntialias)
+    app.setFont(default)
+
+
+def brand_pixmap(size: int) -> QPixmap:
+    """A marca do app (BrandMark.qml) desenhada num tamanho."""
+    pix = QPixmap(size, size)
+    pix.fill(Qt.transparent)
+    p = QPainter(pix)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    pad = size * 0.08
+    gap = max(1.0, size * 0.10)
+    cell = (size - 2 * pad - gap) / 2
+    for i in range(4):
+        x = pad + (i % 2) * (cell + gap)
+        y = pad + (i // 2) * (cell + gap)
+        p.setBrush(QColor("#0A7CFF" if i == 3 else "#1D1D1F"))
+        p.drawRoundedRect(QRectF(x, y, cell, cell), cell * 0.28, cell * 0.28)
+    p.end()
+    return pix
+
+
+def _brand_icon() -> QIcon:
+    """Icone da janela/barra de tarefas."""
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 256):
+        icon.addPixmap(brand_pixmap(size))
+    return icon
+
+
+def _style_title_bar(window, bridge=None) -> None:
+    """Barra nativa na cor da paleta (desktop/titlebar.py), sem perder os controles da janela.
+    Com a bridge, a cor acompanha as mudancas de paleta feitas no Harness."""
+    if bridge is not None:
+        bridge.set_title_window(window)
+        return
+    from desktop.titlebar import style_title_bar
+    style_title_bar(window)
+
+
+def _quit_on_signals(app: QGuiApplication) -> None:
+    """Ctrl+C e fechar o terminal encerram o app. O loop do Qt nao devolve o controle ao Python
+    sozinho, entao o timer da a chance de o sinal ser atendido."""
+    for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), lambda *_: app.quit())
+    tick = QTimer(app)
+    tick.timeout.connect(lambda: None)
+    tick.start(200)
+
+
+def _shutdown(bridge: Bridge) -> None:
+    """Fechar o app: microfone, voz, sessao paga e tarefa param aqui. Se algo travar, o limite
+    encerra o processo de qualquer jeito."""
+    def give_up() -> None:
+        time.sleep(SHUTDOWN_LIMIT_S)
+        os._exit(0)
+    threading.Thread(target=give_up, daemon=True, name="shutdown-limit").start()
+    try:
+        bridge.shutdown()
+    except Exception as exc:
+        print(f"[desktop] falha ao encerrar: {type(exc).__name__}: {exc}")
+
+
+def run() -> int:
+    # Estilo "Basic": o estilo nativo do Windows ignora parte da
+    # customizacao (fundo de TextArea, ScrollBar) e gera avisos no console.
+    QQuickStyle.setStyle("Basic")
+    # Escala fracionaria (125%, 150%) sem arredondar — evita textos e
+    # bordas borrados/desproporcionais em notebooks.
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
+    # Identidade propria na barra de tarefas (senao o Windows agrupa como
+    # python.exe e mostra o icone do Python)
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+        except (AttributeError, OSError):
+            pass
+
+    app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+    app.setApplicationName("Creative AIx")
+    app.setOrganizationName("ognistie")
+    app.setApplicationDisplayName("Creative AIx")
+    app.setWindowIcon(_brand_icon())
+
+    if notify_running():
+        return 0                       # ja estava aberto: a janela existente veio para a frente
+
+    _setup_fonts(app)
+
+    # Python 3.14 no Windows pode nao localizar as DLLs usadas pelos plugins
+    # QML apenas com o import do PySide6. O handle precisa viver ate o fim.
+    if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
+        app._qt_dll_directory = os.add_dll_directory(  # type: ignore[attr-defined]
+            str(Path(PySide6.__file__).parent))
+
+    bridge = Bridge()
+
+    engine = QQmlApplicationEngine()
+    engine.addImportPath(str(QML_DIR))
+    engine.rootContext().setContextProperty("Bridge", bridge)
+
+    engine.load(QUrl.fromLocalFile(str(QML_ROOT)))
+    if not engine.rootObjects():
+        print("[desktop] falha ao carregar QML raiz:", QML_ROOT)
+        return 2
+
+    window = engine.rootObjects()[0]
+    # Abertura: janela propria por cima do app ja maximizado (ver
+    # SplashWindow.qml). Ocupa exatamente a area da janela maximizada (a tela
+    # sem a barra de tarefas): a barra de tarefas fica parada o tempo todo e o
+    # fade de saida so revela o app que esta atras. Mostrada antes para o app
+    # nao piscar sem ela.
+    splash = next((w for w in QGuiApplication.topLevelWindows()
+                   if w.objectName() == "splashWindow"), None)
+    # Abertura e janela na tela principal do Windows. Antes usava window.screen(), que antes de a janela
+    # aparecer pode ser qualquer monitor: com dois monitores a abertura surgia na segunda tela.
+    screen = app.primaryScreen() or window.screen()
+    if screen is not None:
+        area = screen.availableGeometry()
+        window.setScreen(screen)
+        window.setGeometry(area.x() + 40, area.y() + 40, min(window.width(), area.width() - 80),
+                           min(window.height(), area.height() - 80))
+    if splash is not None and bridge.splash_enabled():
+        if screen is not None:
+            splash.setScreen(screen)
+            splash.setGeometry(screen.availableGeometry())
+        splash.show()
+    window.showMaximized()
+    if splash is not None and splash.isVisible():
+        splash.raise_()
+        splash.requestActivate()
+    _style_title_bar(window, bridge)
+    # Mini chat: janela propria que assume a conversa quando o agente vai
+    # para outro app (ver desktop/window_mode.py)
+    mini = next((w for w in QGuiApplication.topLevelWindows()
+                 if w.objectName() == "miniChat"), None)
+    if mini is not None:
+        bridge.attach_windows(window, mini)
+
+    def show_existing() -> None:
+        if window.visibility() == window.Visibility.Minimized or not window.isVisible():
+            window.showMaximized()
+        window.raise_()
+        window.requestActivate()
+
+    instance = InstanceServer(show_existing, parent=app)
+    if not instance.listening:
+        print("[desktop] sem controle de instancia unica")
+    _quit_on_signals(app)
+    app.aboutToQuit.connect(lambda: _shutdown(bridge))
+
+    # Manter referencias vivas
+    app._bridge_ref = bridge  # type: ignore[attr-defined]
+    app._engine_ref = engine  # type: ignore[attr-defined]
+
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(run())

@@ -1,0 +1,17 @@
+{
+ "palette": {
+  "mode": "escuro",
+  "base": "#191E18",
+  "tones": [
+   "#4B4C2A",
+   "#6F724A",
+   "#324C37"
+  ],
+  "accent": "#BABF56",
+  "text": "#F4F4F7",
+  "glass_boost": 0.0,
+  "bright": "#BDBEAA",
+  "min_dim": 0.48,
+  "min_veil": 0.48
+ }
+}

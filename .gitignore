@@ -1,0 +1,104 @@
+# ════════════════════════════════════════════════════════════════
+#  Creative AIx — .gitignore
+# ════════════════════════════════════════════════════════════════
+
+# ─── Segredos (PRIORIDADE MAXIMA) ─────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+credentials.json
+secrets.json
+**/api_keys.txt
+**/auth_token*.txt
+
+# ─── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+pip-log.txt
+
+# Virtual env
+.venv/
+.venv-release/
+.repowise/
+venv/
+env/
+ENV/
+
+# ─── Artefatos de execucao (gerados em runtime) ───────────────────
+ai-farm-agent/captures/*
+!ai-farm-agent/captures/.gitkeep
+ai-farm-agent/reports/*
+!ai-farm-agent/reports/.gitkeep
+ai-farm-agent/logs/*
+!ai-farm-agent/logs/.gitkeep
+ai-farm-agent/data.db
+ai-farm-agent/data.sqlite
+ai-farm-agent/desktop/data/*
+!ai-farm-agent/desktop/data/.gitkeep
+ai-farm-agent/memory/evolution/
+
+# Workflows aprendidos sao especificos do usuario — NAO commitar
+ai-farm-agent/memory/workflows/*.json
+ai-farm-agent/memory/workflows/.corrupted/
+ai-farm-agent/memory/workflows/.legacy/
+!ai-farm-agent/memory/workflows/.gitkeep
+
+# ─── IDE / editor ────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# ─── OS ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── Testes / coverage ───────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ─── Logs locais ─────────────────────────────────────────────────
+*.log
+*.log.*
+
+# ─── Claude Code worktrees (gerado por agentes IA) ───────────────
+.claude/
+
+# ─── Lixo bizarro ────────────────────────────────────────────────
+[{]core,ui/
+reports/
+
+# Logs na raiz do repo (alem dos em ai-farm-agent/logs/)
+logs/
+
+# Memory pasta na raiz do repo (estrutura legada — fica fora)
+memory/
+
+# ─── Segundo cerebro (Obsidian) — dados de execucao locais ───────
+AI-Farm-agents/40 Execucoes/Planos/
+AI-Farm-agents/40 Execucoes/Sucesso/
+AI-Farm-agents/40 Execucoes/Falhas/
+AI-Farm-agents/.obsidian/workspace*.json
+AI-Farm-agents/50 Diario/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+AI-Farm-agents/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *.md
+AI-Farm-agents/Sem t*tulo*.canvas
+AI-Farm-agents/Sem t*tulo*.base
+
+# Material de divulgacao local (videos, prompts, imagens de rascunho)
+docs/marketing/
