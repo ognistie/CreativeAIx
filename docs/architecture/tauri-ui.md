@@ -268,7 +268,31 @@ Pendente para a Fase 4: `foreign_foreground()` (`window_mode.py`) compara com o 
 processo. No modo Tauri as janelas são de outro processo, então o sidecar precisa receber o PID da
 casca (variável de ambiente) para decidir quando pedir `windowRequest: enter_mini`.
 
-## 8. Próximo passo
+## 8. Fase 2 — feito (Rust ainda sem compilar)
 
-Fase 2: `desktop-tauri/` (Tauri 2 + React + TS + Vite), sidecar Python iniciado pelo Rust, cliente TS
-tipado com reconexão, janela principal com titlebar própria.
+- `desktop-tauri/`: Tauri 2 + React 18 + TS + Vite 6 + Tailwind 4. Duas janelas: `main`, sem moldura e
+  com titlebar própria, e `mini`, transparente, sempre no topo, fora da barra de tarefas, sem pegar
+  foco e oculta até a Fase 4.
+- `src-tauri/src/sidecar.rs`: sobe `main.py --ui tauri --headless` (com `--dev` em debug) sem janela
+  de console, lê a linha `CREATIVE_AIX_READY`, guarda as últimas 20 linhas de stderr para mostrar se
+  o núcleo cair, reinicia e encerra (fecha o stdin e mata depois de 5 s). Passa
+  `CREATIVE_AIX_SHELL_PID` para a Fase 4.
+- Comandos Rust: `core_info` (espera o anúncio, até 60 s) e `restart_core`. Instância única pelo
+  plugin `single-instance`.
+- CSP: `connect-src` só para `ws://127.0.0.1:*`. Capabilities mínimas, sem shell e sem fs.
+- `src/lib/core.ts`: cliente JSON-RPC tipado pelo `contract.gen.ts`. Espera a conexão abrir, casa
+  as respostas por id, tem timeout por chamada e reconecta com backoff pedindo porta e token de novo
+  (o núcleo reiniciado tem um token novo). 7 testes (vitest).
+- `scripts/export_tauri_contract.py` gera os tipos TS a partir do Python. `--check` roda na CI e em
+  `tests/test_bridge_contract.py`.
+- CI: novo job `tauri-ui` (contrato, `npm ci`, typecheck, testes, build e `cargo check`).
+- `scripts/setup.ps1 -WithTauri` confere `node`, `npm` e `cargo` e roda `npm ci`.
+
+**Não verificado:** esta máquina não tem Rust instalado, então `src-tauri` não foi compilado nem
+aberto. Typecheck, testes e build do frontend passaram. O `Cargo.lock` ainda não existe: depois do
+primeiro `cargo build`, commitar o lock e trocar o passo da CI para `cargo check --locked`.
+
+## 9. Próximo passo
+
+Fase 3: `scripts/export_theme_tokens.py` (de `Theme.qml` para `tokens.css`, os dois temas e as paletas)
+e os componentes base com shadcn/ui. Os tokens provisórios de `src/styles/index.css` saem nessa fase.

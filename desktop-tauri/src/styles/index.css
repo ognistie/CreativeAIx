@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* Fase 2: tokens provisorios copiados de ai-farm-agent/desktop/qml/components/Theme.qml (tema escuro e claro).
+   Fase 3 troca por tokens.css gerado a partir do Theme.qml (scripts/export_theme_tokens.py). */
+:root {
+  color-scheme: dark;
+  --bg-base: #011d1c;
+  --bg-surface: #0f2422;
+  --bg-surface-hi: #19302e;
+  --bg-hover: rgb(255 255 255 / 0.06);
+  --hairline: rgb(237 255 255 / 0.1);
+  --text-primary: #edfffe;
+  --text-secondary: #bbc7c6;
+  --accent: #16897e;
+  --success: #4cc56a;
+  --danger: #ff6b5f;
+  --warning: #f2a33a;
+  --focus-ring: #9fe6df;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg-base: #f4f8f6;
+    --bg-surface: #ffffff;
+    --bg-surface-hi: #e9efeb;
+    --bg-hover: rgb(0 0 0 / 0.04);
+    --hairline: rgb(0 56 51 / 0.12);
+    --text-primary: #102825;
+    --text-secondary: #4c625e;
+    --success: #28a745;
+    --danger: #e5372b;
+    --warning: #d97706;
+    --focus-ring: #156b64;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--bg-base);
+  --color-surface: var(--bg-surface);
+  --color-surface-hi: var(--bg-surface-hi);
+  --color-hover: var(--bg-hover);
+  --color-hairline: var(--hairline);
+  --color-fg: var(--text-primary);
+  --color-fg-muted: var(--text-secondary);
+  --color-accent: var(--accent);
+  --color-ok: var(--success);
+  --color-bad: var(--danger);
+  --color-warn: var(--warning);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+body.mini {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
