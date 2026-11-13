@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Titlebar } from "./components/Titlebar";
+import { applyAppearance, type Appearance } from "./lib/appearance";
 import { core, inTauri, restartCore } from "./lib/tauri";
 import { useCoreStatus } from "./lib/useCore";
 
@@ -32,6 +33,10 @@ export function App() {
 
   useEffect(() => {
     if (status !== "open") return;
+    core()
+      .call("appearance")
+      .then((a) => applyAppearance(a as Appearance))
+      .catch(() => {});
     core()
       .call("providerStatus")
       .then((r) => setProviders((r as { providers?: Provider[] }).providers ?? []))

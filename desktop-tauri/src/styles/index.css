@@ -1,53 +1,57 @@
 @import "tailwindcss";
+@import "./tokens.css";
 
-/* Fase 2: tokens provisorios copiados de ai-farm-agent/desktop/qml/components/Theme.qml (tema escuro e claro).
-   Fase 3 troca por tokens.css gerado a partir do Theme.qml (scripts/export_theme_tokens.py). */
-:root {
-  color-scheme: dark;
-  --bg-base: #011d1c;
-  --bg-surface: #0f2422;
-  --bg-surface-hi: #19302e;
-  --bg-hover: rgb(255 255 255 / 0.06);
-  --hairline: rgb(237 255 255 / 0.1);
-  --text-primary: #edfffe;
-  --text-secondary: #bbc7c6;
-  --accent: #16897e;
-  --success: #4cc56a;
-  --danger: #ff6b5f;
-  --warning: #f2a33a;
-  --focus-ring: #9fe6df;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg-base: #f4f8f6;
-    --bg-surface: #ffffff;
-    --bg-surface-hi: #e9efeb;
-    --bg-hover: rgb(0 0 0 / 0.04);
-    --hairline: rgb(0 56 51 / 0.12);
-    --text-primary: #102825;
-    --text-secondary: #4c625e;
-    --success: #28a745;
-    --danger: #e5372b;
-    --warning: #d97706;
-    --focus-ring: #156b64;
-  }
-}
+/* tokens.css e gerado a partir do Theme.qml (scripts/export_theme_tokens.py). Aqui so o mapeamento
+   para as classes do Tailwind e o basico da pagina. Cor nova: crie no Theme.qml e regenere. */
 
 @theme inline {
   --color-canvas: var(--bg-base);
+  --color-sidebar: var(--bg-sidebar);
   --color-surface: var(--bg-surface);
   --color-surface-hi: var(--bg-surface-hi);
+  --color-glass: var(--bg-glass);
+  --color-glass-hi: var(--bg-glass-hi);
+  --color-glass-edge: var(--glass-edge);
   --color-hover: var(--bg-hover);
+  --color-pressed: var(--bg-pressed);
+  --color-chip: var(--bg-chip);
+  --color-row-hover: var(--bg-row-hover);
   --color-hairline: var(--hairline);
+  --color-hairline-hi: var(--hairline-hi);
+  --color-edge: var(--edge);
   --color-fg: var(--text-primary);
   --color-fg-muted: var(--text-secondary);
+  --color-fg-subtle: var(--text-tertiary);
+  --color-fg-inverse: var(--text-inverse);
+  --color-primary: var(--primary);
   --color-accent: var(--accent);
   --color-ok: var(--success);
   --color-bad: var(--danger);
   --color-warn: var(--warning);
-  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --color-focus: var(--focus-ring);
+  --color-tone-1: var(--tone-1);
+  --color-tone-2: var(--tone-2);
+  --color-tone-3: var(--tone-3);
+
+  --radius-r1: var(--r1);
+  --radius-r2: var(--r2);
+  --radius-r3: var(--r3);
+  --radius-r4: var(--r4);
+  --radius-composer: var(--r-composer);
+
+  --text-xs: var(--size-xs);
+  --text-sm: var(--size-sm);
+  --text-md: var(--size-md);
+  --text-lg: var(--size-lg);
+  --text-xl: var(--size-xl);
+  --text-hero: var(--size-hero);
+
+  --font-sans: var(--font-sans-family);
+  --font-display: var(--font-display-family);
+  --font-mono: var(--font-mono-family);
+
+  --ease-standard: var(--ease-standard);
+  --ease-out: var(--ease-out);
 }
 
 html,
@@ -60,7 +64,8 @@ body {
   margin: 0;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-sans-family);
+  font-size: var(--size-md);
   -webkit-font-smoothing: antialiased;
   user-select: none;
 }
@@ -74,11 +79,49 @@ body.mini {
   outline-offset: 2px;
 }
 
+/* Movimento: uma gramatica so (Theme.qml). Duracao 0 com data-motion="off" ou reduced-motion. */
+.motion-fast {
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-standard);
+}
+.motion-normal {
+  transition-duration: var(--dur-normal);
+  transition-timing-function: var(--ease-out);
+}
+.press:active {
+  transform: scale(var(--press));
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+.animate-enter {
+  animation: enter-up var(--dur-panel) var(--ease-out) both;
+}
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: 0ms !important;
+  transition-duration: 0ms !important;
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
   }
 }

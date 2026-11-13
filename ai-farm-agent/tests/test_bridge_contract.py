@@ -74,10 +74,11 @@ class BridgeContract(unittest.TestCase):
         b._emit("windowRequest", '{"action": "restore_main"}')     # so da casca Tauri: ignorado no Qt
         self.assertEqual(got, ['{"n": 1}', True])
 
-    def test_tauri_contract_types_are_current(self):
-        script = APP / "scripts" / "export_tauri_contract.py"
-        out = subprocess.run([sys.executable, str(script), "--check"], capture_output=True, text=True, timeout=120)
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr[-1500:])
+    def test_tauri_generated_files_are_current(self):
+        for name in ("export_tauri_contract.py", "export_theme_tokens.py"):
+            script = APP / "scripts" / name
+            out = subprocess.run([sys.executable, str(script), "--check"], capture_output=True, text=True, timeout=120)
+            self.assertEqual(out.returncode, 0, name + ": " + out.stdout + out.stderr[-1500:])
 
 
 if __name__ == "__main__":

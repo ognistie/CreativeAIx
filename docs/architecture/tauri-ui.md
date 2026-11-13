@@ -294,7 +294,27 @@ Inteligente de Aplicativos do Windows bloqueia os scripts de build sem assinatur
 (os error 4551). Por isso a casca ainda não foi aberta localmente (`npm run tauri dev`): só compila
 pela CI até o bloqueio ser resolvido.
 
-## 9. Próximo passo
+## 9. Fase 3 — feito
 
-Fase 3: `scripts/export_theme_tokens.py` (de `Theme.qml` para `tokens.css`, os dois temas e as paletas)
-e os componentes base com shadcn/ui. Os tokens provisórios de `src/styles/index.css` saem nessa fase.
+- `scripts/export_theme_tokens.py` lê o `Theme.qml` com o mesmo parser do `check_contrast.py` e gera
+  `desktop-tauri/src/styles/tokens.css`: os dois temas, as 13 paletas (escuro e claro), espaçamento,
+  raios com escala, tipografia e durações. Também gera `src/lib/icons.gen.ts` com os 60 desenhos do
+  `Icon.qml`. O `Theme.qml` continua sendo a fonte única e o AA medido nele (442 medidas) vale para as
+  duas interfaces. `--check` roda na CI e em `tests/test_bridge_contract.py`.
+- A aparência salva no Harness (`Bridge.appearance`) vira atributos no `<html>` (`data-theme`,
+  `data-palette`, `data-radius`, `data-motion`) e a variável `--accent`, com a mesma validação do
+  `Theme.applyAppearance`.
+- Componentes base em `src/components/ui/`, com Radix por baixo no padrão shadcn/ui (cva +
+  tailwind-merge): `Button`, `IconButton`, `Chip`, `TogglePill`, `Segmented`, `Field`, `Spinner`,
+  `Skeleton`, `StatusDot`, `EmptyState`, `GlassPanel`, `AppDialog`, `AppMenu`, `Hint`, `Icon`. Foco
+  visível, teclado e leitor de tela vêm do Radix. O `StatusDot` sempre mostra ícone junto da cor.
+  Movimento respeita `data-motion="off"` e `prefers-reduced-motion`.
+- Galeria em `#galeria` (`npm run dev` e abrir `http://127.0.0.1:1420/#galeria`): todos os
+  componentes nos dois temas, nas paletas e nos três estilos de canto, sem precisar do núcleo.
+- Mudança em relação ao QML: o botão `danger` usa fundo translúcido com texto na cor de perigo, porque
+  texto branco sobre `#FF6B5F` não chega a 4.5:1.
+
+## 10. Próximo passo
+
+Fase 4: telas e mini chat (TaskView, Composer, PlanCard, PhaseStepper, TaskOrb e o MiniChat com
+redesign a partir do atual), usando os componentes base.
