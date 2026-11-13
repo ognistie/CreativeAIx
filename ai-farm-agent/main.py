@@ -105,7 +105,43 @@ def _require_env(var: str, hint: str) -> None:
 # Diretorios necessarios
 
 
+def _ui_choice(argv: list) -> tuple:
+    """(ui, headless, dev): `--ui qt|tauri` na linha de comando vence `ui.shell` do config.yaml; padrao qt."""
+    ui = ''
+    if '--ui' in argv:
+        i = argv.index('--ui')
+        ui = argv[i + 1] if i + 1 < len(argv) else ''
+    if not ui:
+        try:
+            import yaml
+            cfg = yaml.safe_load((BASE_DIR.parent / 'config.yaml').read_text(encoding='utf-8')) or {}
+            ui = str((cfg.get('ui') or {}).get('shell') or '')
+        except Exception:
+            ui = ''
+    ui = ui if ui in ('qt', 'tauri') else 'qt'
+    return ui, '--headless' in argv, '--dev' in argv
+
+
+def _run_headless(dev: bool) -> int:
+    """Nucleo sem janela para a casca Tauri: so o pipe recebe porta e token; o resto vai para o log."""
+    ready = sys.stdout
+    if ready is None:
+        _show_error('O modo headless precisa ser aberto pela interface Tauri.')
+        return 2
+    _send_output_to_log()
+    from desktop.server import serve_headless
+    return serve_headless(dev=dev, ready_stream=ready)
+
+
 def main() -> int:
+    ui, headless, dev = _ui_choice(sys.argv[1:])
+    if ui == 'tauri' and headless:
+        _require_env('ANTHROPIC_API_KEY', 'Configure ANTHROPIC_API_KEY no .env do projeto.')
+        for folder in ('captures', 'reports', 'desktop/data'):
+            (BASE_DIR / folder).mkdir(parents=True, exist_ok=True)
+        return _run_headless(dev)
+    if ui == 'tauri':
+        print('  Interface Tauri: abra pelo desktop-tauri (npm run tauri dev). Abrindo a interface Qt.')
     if _without_console():
         _send_output_to_log()
     _require_env('ANTHROPIC_API_KEY', 'Configure ANTHROPIC_API_KEY no .env do projeto.')

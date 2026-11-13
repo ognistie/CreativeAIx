@@ -217,15 +217,58 @@ Linhas de QML hoje: 10.607. A ordem segue a Fase 4 do prompt.
 | Empacotar Python com Nuitka (faster-whisper, piper, pywin32) | alto | spike isolado na Fase 5; o instalador atual (venv + `iniciar.cmd`) continua valendo |
 | Duas UIs para manter durante a migração | médio | contrato único (`BridgeCore`); o QML não ganha funcionalidade nova enquanto houver migração |
 
-## 6. Decisões em aberto (do usuário)
+## 6. Decisões (fechadas em 2026-11-13)
 
-1. React ou Svelte para o frontend. O prompt diz React, e esta Fase 0 assume React.
-2. Biblioteca do WebSocket: `websockets` (proposta) ou `aiohttp`.
-3. Mini chat com a mesma aparência do QML ou com redesign já na Fase 4.
-4. Rust e Node não estão instalados por padrão no Windows: confirmar que podem entrar no
-   `scripts/setup.ps1` como requisitos de desenvolvimento, só para quem mexe na interface.
+1. **Frontend: React 18 + TypeScript + Vite**, com Tailwind, shadcn/ui (Radix) e Framer Motion.
+   Ecossistema maior para os componentes que o projeto usa (diálogo, menu, paleta de comandos,
+   markdown, grafo de notas).
+2. **WebSocket: `websockets`.** Puro Python, asyncio, sem dependência nativa. Combina com o resto
+   das threads do núcleo e não puxa um framework web inteiro como o `aiohttp`.
+3. **Mini chat: redesign a partir do atual.** Mesmo comportamento (canto inferior direito, sem foco,
+   ignora o mouse durante a tarefa, orbe, voz, parar) e a mesma identidade visual, com o acabamento
+   novo do design system.
+4. **Rust e Node: requisitos só de desenvolvimento da interface.** O `scripts/setup.ps1` ganha um
+   modo opcional (`-WithTauri`) que confere `node`, `npm` e `cargo` e instala as dependências de
+   `desktop-tauri/`. Quem só usa o app continua sem precisar de nenhum dos dois.
 
-## 7. Próximo passo
+## 7. Fase 1 — feito
 
-Fase 1: testes de contrato do Bridge atual, depois a extração do `BridgeCore`, depois
-`desktop/server.py`, `--headless` e os testes do servidor. Tudo aditivo; `--ui qt` continua padrão.
+O que mudou em relação à proposta do §4:
+
+- **Eventos usam o nome do Signal** (`planReady`, `voiceLevel`...), não os nomes `snake_case` da
+  coluna "Nome proposto" do §2.1. Assim o QML e o React falam o mesmo vocabulário, e o teste de
+  contrato compara um com o outro diretamente.
+- **`BridgeCore` é um mixin**, não um objeto que o Bridge guarda (`Bridge(QObject, BridgeCore)`).
+  O estado fica em `self`, então `scripts/smoke_ui.py`, `capture_ui.py` e `sandbox_escape_check.py`,
+  que montam o Bridge com `__new__`, continuam funcionando sem mudança. O `BridgeCore` não tem
+  `__init__` (a preparação fica em `_setup_core()`), porque o `QObject.__init__` é cooperativo e
+  chamaria esse init pela MRO.
+
+Arquivos:
+
+| Arquivo | O que é |
+| --- | --- |
+| `desktop/bridge_core.py` | a lógica dos Slots, sem Qt, gerada mecanicamente a partir do `bridge.py` original |
+| `desktop/bridge.py` | Signals, `@Slot`s que repassam para o core e o que é de janela Qt (mini chat, titlebar, cursor) |
+| `desktop/server.py` | `Dispatcher` (JSON-RPC com aridade e tipos conferidos), `EventServer` (WebSocket), `HeadlessBridge`, `serve_headless` |
+| `main.py` | `--ui qt\|tauri`, `--headless`, `--dev`; padrão vem de `ui.shell` no `config.yaml` (`qt`) |
+| `tests/fixtures/bridge_contract.txt` | as 125 assinaturas Qt do Bridge, congeladas antes da extração |
+| `tests/test_bridge_contract.py` | Qt inalterado, RPC = Slots públicos, eventos = Signals, core sem Qt |
+| `tests/test_event_server.py` | token, silêncio, Origin, tipos, eventos, throttle de `voiceLevel`, linha de handshake |
+
+Handshake do modo headless: uma única linha no stdout,
+`CREATIVE_AIX_READY {"port": .., "token": .., "protocol": 1}`. Todo o resto vai para `logs/app.log`,
+então o token nunca é gravado em log. Quando a casca fecha o stdin, o núcleo encerra.
+
+Medido no smoke (`main.py --ui tauri --headless` real): handshake em 4,7 s, `providerStatus`,
+`uiSettings`, `loadConversations` e `librarySearch` respondidos pelo WebSocket, e saída limpa (código 0)
+ao fechar o stdin.
+
+Pendente para a Fase 4: `foreign_foreground()` (`window_mode.py`) compara com o PID do próprio
+processo. No modo Tauri as janelas são de outro processo, então o sidecar precisa receber o PID da
+casca (variável de ambiente) para decidir quando pedir `windowRequest: enter_mini`.
+
+## 8. Próximo passo
+
+Fase 2: `desktop-tauri/` (Tauri 2 + React + TS + Vite), sidecar Python iniciado pelo Rust, cliente TS
+tipado com reconexão, janela principal com titlebar própria.
