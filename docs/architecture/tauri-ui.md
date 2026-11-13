@@ -288,9 +288,11 @@ casca (variável de ambiente) para decidir quando pedir `windowRequest: enter_mi
 - CI: novo job `tauri-ui` (contrato, `npm ci`, typecheck, testes, build e `cargo check`).
 - `scripts/setup.ps1 -WithTauri` confere `node`, `npm` e `cargo` e roda `npm ci`.
 
-**Não verificado:** esta máquina não tem Rust instalado, então `src-tauri` não foi compilado nem
-aberto. Typecheck, testes e build do frontend passaram. O `Cargo.lock` ainda não existe: depois do
-primeiro `cargo build`, commitar o lock e trocar o passo da CI para `cargo check --locked`.
+**Compilação:** `cargo check` passou na CI (job `tauri-ui`, Windows). O `Cargo.lock` está commitado
+e a CI usa `--locked`. Nesta máquina o Rust e o Build Tools estão instalados, mas o Controle
+Inteligente de Aplicativos do Windows bloqueia os scripts de build sem assinatura que o cargo gera
+(os error 4551). Por isso a casca ainda não foi aberta localmente (`npm run tauri dev`): só compila
+pela CI até o bloqueio ser resolvido.
 
 ## 9. Próximo passo
 
