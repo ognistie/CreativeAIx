@@ -6,7 +6,12 @@ import { cn } from "./lib/cn";
 import { dispatchTask, useTask, wireTaskEvents, wireVoiceEvents } from "./lib/stores";
 import { core } from "./lib/tauri";
 import { useCoreEvent, useCoreStatus } from "./lib/useCore";
+import { AboutView } from "./views/AboutView";
+import { BrainView } from "./views/BrainView";
+import { ActivityView } from "./views/ActivityView";
 import { HistoryView } from "./views/HistoryView";
+import { LibraryView } from "./views/LibraryView";
+import { YouView } from "./views/YouView";
 import { SettingsView } from "./views/SettingsView";
 import { startTask, TaskView } from "./views/task/TaskView";
 import { wireMainWindow } from "./lib/windowing";
@@ -130,7 +135,7 @@ export function App() {
               onClick={() => setCollapsed((c) => !c)}
               className="absolute left-3 top-3 z-10"
             />
-            <PageView page={page} />
+            <PageView page={page} go={setPage} />
           </main>
         </div>
       </div>
@@ -138,12 +143,22 @@ export function App() {
   );
 }
 
-function PageView({ page }: { page: Page }) {
+function PageView({ page, go }: { page: Page; go: (p: Page) => void }) {
   switch (page) {
     case "task":
       return <TaskView />;
     case "history":
       return <HistoryView />;
+    case "activity":
+      return <ActivityView onAnswer={() => go("task")} />;
+    case "you":
+      return <YouView onOpenBrain={() => go("brain")} />;
+    case "library":
+      return <LibraryView />;
+    case "brain":
+      return <BrainView onOpenYou={() => go("you")} />;
+    case "about":
+      return <AboutView />;
     case "settings":
       return <SettingsView />;
     default:
