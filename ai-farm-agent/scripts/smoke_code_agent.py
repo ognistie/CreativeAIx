@@ -2495,8 +2495,11 @@ def test_window_mode():
     off = wm.WindowMode(FakeWindow(), FakeWindow(), enabled=False)
     off.set_running(True)
     check("ui.mini_chat: false desliga a troca", not off._timer.isActive())
+    # A deteccao saiu para desktop/foreground.py (sem Qt), usada tambem pela interface Tauri
     src = Path(wm.__file__).read_text(encoding="utf-8")
-    check("compara o processo da janela com o do app", "pid.value == os.getpid()" in src)
+    fg = (Path(wm.__file__).parent / "foreground.py").read_text(encoding="utf-8")
+    check("compara o processo da janela com o do app",
+          "pid.value in mine" in fg and "{os.getpid()}" in fg and wm.foreign_foreground.__module__ == "desktop.foreground")
     check("minimiza sem ativar outra janela (SW_SHOWMINNOACTIVE)", "SW_SHOWMINNOACTIVE = 7" in src)
 
     qml = Path(wm.__file__).parent / "qml"

@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -90,6 +91,9 @@ class McpProtocolTests(unittest.TestCase):
                 self.assertIn("Foi interrompido: gerar planilha", status())
                 self.assertEqual(ledger.load("interrupted")["state"], "running")
                 ledger.finish("interrupted", "failed")
+                # A tarefa mais recente vem da data do arquivo: o relogio de arquivos do Windows anda de
+                # ~15 ms em ~15 ms, e duas escritas no mesmo tique empatam (a ordem vira alfabetica).
+                time.sleep(0.05)
                 ledger.finish("finished", "completed")
                 self.assertIn("Terminei: gerar relatório", status())
 

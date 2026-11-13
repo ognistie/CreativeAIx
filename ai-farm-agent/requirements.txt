@@ -6,6 +6,7 @@
 
 # UI Desktop (PySide6 + QML)
 PySide6>=6.6.0
+websockets>=16.1,<17   # interface Tauri: servidor local do nucleo (desktop/server.py)
 
 # Core / LLM
 anthropic>=0.125.0,<1

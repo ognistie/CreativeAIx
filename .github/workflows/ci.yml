@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
 
 permissions:
@@ -40,3 +40,40 @@ jobs:
           if git ls-files | grep -E '(^|/)\.env$|\.pem$|\.key$'; then
             echo "Sensitive file tracked"; exit 1
           fi
+
+  tauri-ui:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop-tauri/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ai-farm-agent/requirements-windows-py311.lock.txt
+      - name: Contract types match the Python core
+        run: |
+          python -m pip install -r ../ai-farm-agent/requirements-windows-py311.lock.txt
+          python ../ai-farm-agent/scripts/export_tauri_contract.py --check
+          python ../ai-farm-agent/scripts/export_theme_tokens.py --check
+      - name: Install
+        run: npm ci
+      - name: Typecheck and test
+        run: |
+          npm run typecheck
+          npm test
+      - name: Build frontend
+        run: npx vite build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cargo check
+        working-directory: desktop-tauri/src-tauri
+        run: |
+          cargo check --locked
+          cargo check --locked --features updater

@@ -1,0 +1,330 @@
+/* Gerado por ai-farm-agent/scripts/export_theme_tokens.py a partir de Theme.qml. Nao edite a mao. */
+
+:root {
+  color-scheme: dark;
+  --accent: #16897e;
+  --art-ink-hover: #000000;
+  --sp1: 4px;
+  --sp2: 8px;
+  --sp3: 12px;
+  --sp4: 16px;
+  --sp5: 24px;
+  --sp6: 32px;
+  --r-scale: 1;
+  --r1: calc(6px * var(--r-scale));
+  --r2: calc(10px * var(--r-scale));
+  --r3: calc(16px * var(--r-scale));
+  --r4: calc(20px * var(--r-scale));
+  --r-composer: calc(22px * var(--r-scale));
+  --size-xs: 11px;
+  --size-sm: 12px;
+  --size-md: 14px;
+  --size-lg: 16px;
+  --size-xl: 20px;
+  --size-hero: 34px;
+  --font-sans-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-display-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-mono-family: "Cascadia Mono", Consolas, monospace;
+  --dur-fast: 140ms;
+  --dur-normal: 220ms;
+  --dur-panel: 320ms;
+  --dur-slow: 400ms;
+  --stagger: 40ms;
+  --content-max: 760px;
+  --press: 0.985;
+  --ease-standard: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+}
+
+:root,
+[data-theme="escuro"] {
+  --bg-sidebar: rgb(1 19 18 / 0.58);
+  --bg-surface: #0f2422;
+  --bg-glass: rgb(1 29 28 / 0.7);
+  --bg-glass-hi: rgb(0 43 41 / 0.84);
+  --glass-edge: rgb(237 255 255 / 0.1);
+  --bg-surface-hi: #19302e;
+  --bg-hover: rgb(255 255 255 / 0.06);
+  --bg-pressed: rgb(255 255 255 / 0.1);
+  --bg-chip: rgb(255 255 255 / 0.06);
+  --bg-row-hover: rgb(255 255 255 / 0.08);
+  --hairline: rgb(237 255 255 / 0.1);
+  --hairline-hi: rgb(237 255 255 / 0.18);
+  --sheen: rgb(255 255 255 / 0.045);
+  --shadow: rgb(0 0 0 / 0.35);
+  --edge: rgb(237 255 255 / 0.08);
+  --shadow-soft: rgb(0 0 0 / 0.0);
+  --text-primary: #edfffe;
+  --text-secondary: #bbc7c6;
+  --text-tertiary: #a8b8b6;
+  --text-inverse: #011d1c;
+  --primary: #edfffe;
+  --success: #4cc56a;
+  --danger: #ff6b5f;
+  --warning: #f2a33a;
+  --phosphor: #fde9ff;
+  --focus-ring: #9fe6df;
+}
+
+[data-theme="claro"] {
+  color-scheme: light;
+  --bg-sidebar: rgb(249 251 249 / 0.7);
+  --bg-surface: #ffffff;
+  --bg-glass: rgb(251 252 251 / 0.74);
+  --bg-glass-hi: rgb(255 255 255 / 0.88);
+  --glass-edge: rgb(255 255 255 / 0.9);
+  --bg-surface-hi: #e9efeb;
+  --bg-hover: rgb(0 0 0 / 0.04);
+  --bg-pressed: rgb(0 0 0 / 0.07);
+  --bg-chip: rgb(255 255 255 / 0.5);
+  --bg-row-hover: rgb(255 255 255 / 0.6);
+  --hairline: rgb(0 56 51 / 0.12);
+  --hairline-hi: rgb(0 56 51 / 0.2);
+  --sheen: rgb(255 255 255 / 0.0);
+  --shadow: rgb(89 64 115 / 0.06);
+  --edge: rgb(0 0 0 / 0.0);
+  --shadow-soft: rgb(5 31 28 / 0.045);
+  --text-primary: #102825;
+  --text-secondary: #4c625e;
+  --text-tertiary: #4f6561;
+  --text-inverse: #ffffff;
+  --primary: #102825;
+  --success: #28a745;
+  --danger: #e5372b;
+  --warning: #d97706;
+  --phosphor: #6b3a73;
+  --focus-ring: #156b64;
+}
+
+:root,
+[data-palette="abismo"],
+[data-theme="escuro"][data-palette="abismo"] {
+  --tone-0: #011d1c;
+  --tone-1: #003734;
+  --tone-2: #0e4a47;
+  --tone-3: #3a2e4a;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="ameixa"] {
+  --tone-0: #160b14;
+  --tone-1: #4a1c3a;
+  --tone-2: #6e2a4a;
+  --tone-3: #3a1a4a;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="nevoa"] {
+  --tone-0: #0b1715;
+  --tone-1: #1e4a40;
+  --tone-2: #2c5a50;
+  --tone-3: #20403e;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="matcha"] {
+  --tone-0: #10140c;
+  --tone-1: #34482a;
+  --tone-2: #4a5236;
+  --tone-3: #2c4030;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="seda"] {
+  --tone-0: #170e14;
+  --tone-1: #6a3038;
+  --tone-2: #5e2a4e;
+  --tone-3: #3e2a66;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="aurora"] {
+  --tone-0: #120f17;
+  --tone-1: #7a3e3a;
+  --tone-2: #7a5a2a;
+  --tone-3: #4a3a78;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="brisa"] {
+  --tone-0: #0e141b;
+  --tone-1: #2a4f6e;
+  --tone-2: #2e5e4c;
+  --tone-3: #3f3c70;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="coral"] {
+  --tone-0: #161013;
+  --tone-1: #8a3f3a;
+  --tone-2: #7a5540;
+  --tone-3: #6e3f62;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="menta"] {
+  --tone-0: #0f1613;
+  --tone-1: #2e6a54;
+  --tone-2: #4c6b2e;
+  --tone-3: #2f4f78;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="lavanda"] {
+  --tone-0: #13111a;
+  --tone-1: #4e3f80;
+  --tone-2: #703f66;
+  --tone-3: #3a4c7a;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="areia"] {
+  --tone-0: #17140f;
+  --tone-1: #7a6236;
+  --tone-2: #73513d;
+  --tone-3: #4e5a3e;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="oceano"] {
+  --tone-0: #0e141a;
+  --tone-1: #255c86;
+  --tone-2: #2a6e72;
+  --tone-3: #3e3a7a;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="escuro"][data-palette="aurora-boreal"] {
+  --tone-0: #0e1516;
+  --tone-1: #2a6e5a;
+  --tone-2: #2f4f78;
+  --tone-3: #5a3f78;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"],
+[data-theme="claro"][data-palette="abismo"] {
+  --tone-0: #f4f7f4;
+  --tone-1: #cfe6df;
+  --tone-2: #e3eee6;
+  --tone-3: #e4ddef;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="ameixa"] {
+  --tone-0: #f8f3f5;
+  --tone-1: #e9c9d8;
+  --tone-2: #f1d3dc;
+  --tone-3: #d9c8e6;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="nevoa"] {
+  --tone-0: #f6f5ee;
+  --tone-1: #cfe7dd;
+  --tone-2: #e4efe3;
+  --tone-3: #d6e6e4;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="matcha"] {
+  --tone-0: #f5f2e8;
+  --tone-1: #d2dfb8;
+  --tone-2: #e8e2cc;
+  --tone-3: #c9d9b4;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="seda"] {
+  --tone-0: #fbf4f1;
+  --tone-1: #f6c7b8;
+  --tone-2: #f3cad6;
+  --tone-3: #dccbf2;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="aurora"] {
+  --tone-0: #fbf7f4;
+  --tone-1: #f8c3ae;
+  --tone-2: #f9d29a;
+  --tone-3: #d7c6f4;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="brisa"] {
+  --tone-0: #f5f8fb;
+  --tone-1: #b9ddf6;
+  --tone-2: #c7eedc;
+  --tone-3: #d9d0f7;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="coral"] {
+  --tone-0: #fbf6f3;
+  --tone-1: #f7b4a8;
+  --tone-2: #f6d5b8;
+  --tone-3: #f2c4dd;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="menta"] {
+  --tone-0: #f4faf7;
+  --tone-1: #bde8d5;
+  --tone-2: #ddf0c4;
+  --tone-3: #c6ddf4;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="lavanda"] {
+  --tone-0: #f8f6fc;
+  --tone-1: #d9ccf7;
+  --tone-2: #f3d0e8;
+  --tone-3: #c9d6f7;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="areia"] {
+  --tone-0: #fbf8f2;
+  --tone-1: #f2ddb8;
+  --tone-2: #efcbb0;
+  --tone-3: #dce3cf;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="oceano"] {
+  --tone-0: #f3f7fa;
+  --tone-1: #a9cfef;
+  --tone-2: #b5e3e6;
+  --tone-3: #c8c4f2;
+  --bg-base: var(--tone-0);
+}
+
+[data-theme="claro"][data-palette="aurora-boreal"] {
+  --tone-0: #f4f8f8;
+  --tone-1: #b3ebd9;
+  --tone-2: #bfd5f7;
+  --tone-3: #e2c8f4;
+  --bg-base: var(--tone-0);
+}
+
+[data-radius="reto"] { --r-scale: 0.35; }
+[data-radius="redondo"] { --r-scale: 1.6; }
+
+[data-motion="off"] {
+  --dur-fast: 0ms;
+  --dur-normal: 0ms;
+  --dur-panel: 0ms;
+  --dur-slow: 0ms;
+  --stagger: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-normal: 0ms;
+    --dur-panel: 0ms;
+    --dur-slow: 0ms;
+    --stagger: 0ms;
+  }
+}
