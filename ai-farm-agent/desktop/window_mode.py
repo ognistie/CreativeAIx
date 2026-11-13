@@ -22,13 +22,7 @@ from ctypes import wintypes
 from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QWindow
 
-# Janelas do proprio Windows que nao contam como "o agente foi para outro app"
-_SHELL_CLASSES = {
-    "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW",
-    "Windows.UI.Core.CoreWindow", "ForegroundStaging", "MultitaskingViewFrame",
-    "XamlExplorerHostIslandWindow", "TaskSwitcherWnd", "NotifyIconOverflowWindow",
-    "TopLevelWindowForOverflowXamlIsland",
-}
+from desktop.foreground import SHELL_CLASSES as _SHELL_CLASSES, foreign_foreground  # noqa: F401
 
 SW_SHOWMINNOACTIVE = 7
 WDA_NONE, WDA_EXCLUDEFROMCAPTURE = 0x0, 0x11
@@ -38,25 +32,6 @@ DWMWCP_DONOTROUND = 1
 DWMWA_COLOR_NONE = 0xFFFFFFFE      # sem borda do Windows: a janela e transparente (so a orbe e o painel)
 MARGIN = 16
 POLL_MS = 350
-
-
-def foreign_foreground() -> bool:
-    """True se a janela em primeiro plano e de outro programa (nao do shell)."""
-    if sys.platform != "win32":
-        return False
-    u = ctypes.windll.user32
-    h = u.GetForegroundWindow()
-    if not h:
-        return False
-    pid = wintypes.DWORD()
-    u.GetWindowThreadProcessId(h, ctypes.byref(pid))
-    if pid.value == os.getpid():
-        return False
-    cls = ctypes.create_unicode_buffer(256)
-    u.GetClassNameW(h, cls, 256)
-    if cls.value in _SHELL_CLASSES:
-        return False
-    return bool(u.IsWindowVisible(h)) and u.GetWindowTextLengthW(h) > 0
 
 
 def _dwm_set(hwnd: int, attribute: int, value: int) -> None:

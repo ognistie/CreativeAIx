@@ -273,15 +273,50 @@ class EventServer:
                 pass                              # cliente saiu antes da resposta
 
 
+FOREGROUND_POLL_S = 0.35          # mesmo intervalo do window_mode.py (Qt)
+
+
 class HeadlessBridge(BridgeCore):
-    """BridgeCore sem Qt: cada evento vai para o servidor."""
+    """BridgeCore sem Qt: cada evento vai para o servidor.
+
+    Mini chat: com uma tarefa rodando, quando outro app vai para a frente (o agente abriu o Excel, o
+    navegador...), pede a casca para trocar para o mini chat (`windowRequest: enter_mini`), uma vez por
+    execucao, como o WindowMode faz no Qt. As janelas sao da casca, entao o PID dela conta como nosso.
+    """
 
     def __init__(self, server: EventServer) -> None:
         self._server = server
+        self._watch_stop: Optional[threading.Event] = None
         self._setup_core()
 
     def _emit(self, name: str, payload: Any = None) -> None:
+        if name == "runningChanged":
+            self._watch_foreground(bool(payload))
         self._server.publish(name, payload)
+
+    def _mini_enabled(self) -> bool:
+        return self._ui_cfg().get("mini_chat", True) is not False
+
+    def _watch_foreground(self, running: bool) -> None:
+        if self._watch_stop is not None:
+            self._watch_stop.set()
+            self._watch_stop = None
+        if not running or not self._mini_enabled():
+            return
+        stop = threading.Event()
+        self._watch_stop = stop
+
+        def watch() -> None:
+            from desktop.foreground import foreign_foreground, shell_pids
+            mine = shell_pids()
+            while not stop.wait(FOREGROUND_POLL_S):
+                try:
+                    if foreign_foreground(mine):
+                        self._server.publish("windowRequest", json.dumps({"action": "enter_mini"}))
+                        return
+                except Exception:
+                    return
+        threading.Thread(target=watch, daemon=True, name="foreground-watch").start()
 
 
 def serve_headless(*, dev: bool = False, ready_stream=None, stop_on_stdin_eof: bool = True) -> int:

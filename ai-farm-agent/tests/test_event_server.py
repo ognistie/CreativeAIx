@@ -187,3 +187,46 @@ class ReadyLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ForegroundWatchTests(unittest.TestCase):
+    def _bridge(self, mini=True):
+        published = []
+
+        class Srv:
+            def publish(self, name, payload=None):
+                published.append((name, payload))
+
+        class B(S.HeadlessBridge):
+            def _setup_core(self):
+                pass
+
+            def _ui_cfg(self):
+                return {"mini_chat": mini}
+
+        return B(Srv()), published
+
+    def test_asks_for_mini_once_when_another_app_takes_the_front(self):
+        import time
+        b, published = self._bridge()
+        with patch.object(S, "FOREGROUND_POLL_S", 0.01), patch("desktop.foreground.foreign_foreground", return_value=True):
+            b._emit("runningChanged", True)
+            time.sleep(0.2)
+        requests = [p for n, p in published if n == "windowRequest"]
+        self.assertEqual(requests, [json.dumps({"action": "enter_mini"})])
+        self.assertIn(("runningChanged", True), published)
+
+    def test_no_request_when_disabled_or_stopped(self):
+        import time
+        b, published = self._bridge(mini=False)
+        with patch.object(S, "FOREGROUND_POLL_S", 0.01), patch("desktop.foreground.foreign_foreground", return_value=True):
+            b._emit("runningChanged", True)
+            time.sleep(0.1)
+        self.assertFalse([n for n, _ in published if n == "windowRequest"])
+
+    def test_shell_pid_counts_as_ours(self):
+        from desktop import foreground
+        with patch.dict("os.environ", {"CREATIVE_AIX_SHELL_PID": "4242"}):
+            self.assertIn(4242, foreground.shell_pids())
+        with patch.dict("os.environ", {"CREATIVE_AIX_SHELL_PID": "abc"}):
+            self.assertEqual(foreground.shell_pids(), {__import__("os").getpid()})

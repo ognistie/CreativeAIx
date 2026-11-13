@@ -1,4 +1,5 @@
 mod sidecar;
+mod mini_window;
 
 use sidecar::{CoreInfo, Sidecar};
 use std::sync::Arc;
@@ -45,7 +46,15 @@ pub fn run() {
             app.manage(sidecar);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![core_info, restart_core])
+        .invoke_handler(tauri::generate_handler![
+            core_info,
+            restart_core,
+            mini_window::enter_mini,
+            mini_window::set_mini_busy,
+            mini_window::restore_main,
+            mini_window::close_mini,
+            mini_window::quick_entry
+        ])
         .build(tauri::generate_context!())
         .expect("falha ao montar a casca Tauri");
 

@@ -314,7 +314,36 @@ pela CI até o bloqueio ser resolvido.
 - Mudança em relação ao QML: o botão `danger` usa fundo translúcido com texto na cor de perigo, porque
   texto branco sobre `#FF6B5F` não chega a 4.5:1.
 
-## 10. Próximo passo
+## 10. Fase 4 — parte 1 (tarefa, mini chat, histórico, configurações)
 
-Fase 4: telas e mini chat (TaskView, Composer, PlanCard, PhaseStepper, TaskOrb e o MiniChat com
-redesign a partir do atual), usando os componentes base.
+- `src/lib/taskStore.ts`: o estado da TaskView.qml como reducer puro, com os mesmos eventos e as mesmas
+  regras (arquivar o pedido anterior, perguntas e limitações, revisão do plano, notas só de avisos e
+  erros durante a execução). 7 testes.
+- Shell (`App.tsx`): barra lateral com navegação, conversas (abrir, renomear, apagar), busca e os
+  atalhos do QML (Ctrl+N, Ctrl+H, Ctrl+B, Ctrl+, , Ctrl+\, Esc para parar).
+- Tela de Tarefa: saudação e sugestões, Composer (Enter envia, Simular, Relatório, Conversa,
+  microfone com nível e tempo), conversa anterior, etapas, plano, passos ao vivo, revisão do plano,
+  resultado com arquivos criados, uso e custo.
+- Histórico (resumo, filtros, busca, passos e evidência de cada execução) e Configurações (núcleo e
+  provedores, instruções, execução, voz, Claude Code/Codex, interface, atalhos).
+- Mini chat com redesign a partir do atual:
+  - Python: `desktop/foreground.py` (sem Qt) sai de `window_mode.py`; o `HeadlessBridge` observa o
+    primeiro plano durante a tarefa e pede `windowRequest: enter_mini` uma vez por execução,
+    contando o PID da casca como nosso.
+  - Rust (`src-tauri/src/mini_window.rs`): mostrar sem ativar (`SW_SHOWNOACTIVATE` +
+    `WS_EX_NOACTIVATE`), ignorar cliques durante a tarefa, minimizar a principal sem ativar, posição no
+    canto da área de trabalho, acesso rápido com foco.
+  - A principal manda o estado da tarefa ao mini chat por evento Tauri e recebe dele os pedidos.
+- Modo demonstração (`?demo`, também em `mini.html?demo`): núcleo falso para revisar as telas no
+  navegador, sem Python. Usado para conferir a tela de Tarefa, o Histórico, as Configurações e o mini
+  chat.
+
+Pendente na Fase 4: Atividade, Cérebro, Você, Diário, Biblioteca, AI Research Lab, Harness e Sobre
+(mostram um aviso de "ainda só na interface Qt"); anexar arquivos no Composer (precisa do diálogo de
+arquivos do Tauri); a paleta de comandos (Ctrl+K). O comportamento real das janelas (foco, cliques,
+posição) só pode ser conferido com a casca aberta, o que nesta máquina depende do Smart App Control.
+
+## 11. Próximo passo
+
+Fase 4, parte 2: as telas restantes, na ordem Atividade, Cérebro, Diário, Harness, Lab, Biblioteca,
+Você e Sobre.

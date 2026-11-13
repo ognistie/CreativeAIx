@@ -74,11 +74,15 @@ body.mini {
   background: transparent;
 }
 
-:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 2px;
+/* Em @layer base: as classes do Tailwind (ex.: outline-none num campo com borda propria) vencem. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
 }
 
+@layer components {
 /* Movimento: uma gramatica so (Theme.qml). Duracao 0 com data-motion="off" ou reduced-motion. */
 .motion-fast {
   transition-duration: var(--dur-fast);
@@ -90,6 +94,7 @@ body.mini {
 }
 .press:active {
   transform: scale(var(--press));
+}
 }
 
 @keyframes skeleton-pulse {
@@ -108,8 +113,10 @@ body.mini {
     transform: translateY(6px) scale(0.985);
   }
 }
+@layer components {
 .animate-enter {
   animation: enter-up var(--dur-panel) var(--ease-out) both;
+}
 }
 [data-motion="off"] *,
 [data-motion="off"] *::before,
