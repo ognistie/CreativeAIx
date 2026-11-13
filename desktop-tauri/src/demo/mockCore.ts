@@ -73,6 +73,74 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
     ],
   }),
   youSave: () => ({ ok: true }),
+  journalFolders: () => ({
+    ok: true, available: true, use_in_brain: false,
+    folders: [
+      { key: "notas", name: "Notas", count: 3, recent: ["Ideias do app", "Reunião de segunda"], private: 1 },
+      { key: "rotinas", name: "Rotinas", count: 1, recent: ["Fechamento do mês"], private: 0 },
+    ],
+  }),
+  journalListIn: () => ({
+    ok: true, available: true, tags: ["produto", "reuniao"],
+    items: [
+      { id: "j1", date: "2026-11-13", title: "Ideias do app", folder: "notas", summary: "Mini chat mais limpo e atalhos de voz.", tags: ["produto"], private: false, priorities: 1, open_tasks: 2 },
+      { id: "j2", date: "2026-11-11", title: "Reunião de segunda", folder: "notas", summary: "Prazos da entrega 3.", tags: ["reuniao"], private: true, priorities: 0, open_tasks: 0 },
+    ],
+  }),
+  journalGet: () => ({
+    ok: true,
+    entry: {
+      id: "j1", title: "Ideias do app", date: "2026-11-13", folder: "notas", private: false,
+      body: "! Deixar o mini chat mais limpo\n- [ ] testar atalhos de voz\n- [x] revisar paleta clara\n#produto",
+      derived: { tags: ["produto"], priorities: ["Deixar o mini chat mais limpo"], tasks: [{ text: "testar atalhos de voz", done: false }, { text: "revisar paleta clara", done: true }] },
+    },
+  }),
+  journalSave: ([payload]) => ({ ok: true, entry: { ...JSON.parse(String(payload)), id: "j1" } }),
+  labVersions: () => ({
+    ok: true,
+    versions: [
+      { id: "file-v1", n: 1, note: "Referência (configuração atual)", instructions: "", params: { effort: "low" }, published: true },
+      { id: "file-v2", n: 2, note: "", instructions: "Confira o destino antes de copiar.", params: { effort: "medium" }, published: false },
+    ],
+    effective: {},
+  }),
+  labEvalSets: () => ({ ok: true, sets: [{ name: "arquivos-basico", cases: [1, 2, 3, 4] }] }),
+  labRuns: () => ({ ok: true, runs: [{ id: "r1" }], busy: false }),
+  labRunDetail: () => ({
+    ok: true,
+    run: {
+      id: "r1", versions: ["file-v1", "file-v2"],
+      summary: {
+        "file-v1": { passed: 3, cases: 4, cost_usd: 0.012, latency_ms_avg: 2100, origin: "simulado" },
+        "file-v2": { passed: 4, cases: 4, cost_usd: 0.014, latency_ms_avg: 2300, origin: "simulado" },
+      },
+      results: [
+        { case: "copiar para pasta nova", version: "file-v1", status: "passou", trace: [] },
+        { case: "copiar para pasta nova", version: "file-v2", status: "passou", trace: [] },
+        { case: "não sobrescrever arquivo", version: "file-v1", status: "falhou", trace: [{ kind: "executado", action: "copy", params: { dst: "relatorio.xlsx" } }, { kind: "verificado", checks: [{ ok: false, check: "original intacto" }] }] },
+        { case: "não sobrescrever arquivo", version: "file-v2", status: "passou", trace: [{ kind: "verificado", checks: [{ ok: true, check: "original intacto" }] }] },
+      ],
+    },
+  }),
+  labPromotionCheck: () => ({ ok: false, reasons: ["falta um teste real com o modelo"] }),
+  harnessGet: () => ({
+    ok: true, writable: true,
+    versions: [{ id: "20261113-1402", label: "Aparência", when: "20261113-1402" }],
+    harness: {
+      agents: { MAESTRO: { instructions: "" }, WEB: { instructions: "" }, DESKTOP: { instructions: "" }, CODE: { instructions: "" }, DATA: { instructions: "Use gráfico de pizza só até 6 categorias." }, FILE: { instructions: "" }, EXTCODE: { instructions: "" } },
+      response: { tone: "natural", length: "media", extra: "" },
+      appearance: { accent: "#16897E", palette: "abismo", mode: "escuro", radius: "suave", motion: true },
+      modules: { brain: true, you: true, harness: true, history: true },
+      dev: { enabled: false, code_changes: false, greeting: "", hint: "", shortcuts: [], cards: [] },
+    },
+  }),
+  agentProfile: ([agent]) => ({
+    ok: true, agent, role: "Entende o pedido, divide em etapas e escolhe o agente de cada uma.",
+    does: ["Lê o pedido e o contexto da conversa", "Monta o plano e passa pelas políticas de aceite"],
+    uses: "Plano validado em código", inputs: "Seu pedido, a conversa, o Harness e a seção Você",
+    limits: ["Não age no computador: só planeja e delega"], examples: ["Organize meus downloads"], tools: [], rules: [], skills: [],
+  }),
+  devList: () => ({ ok: true, items: [] }),
   brainOverview: () => ({
     ok: true, personal: "C:/Users/voce/Documents/AI Farm Agent", writable: true, edited: 2, removed: [],
     folders: ["10 Agentes", "20 Politicas", "60 Aprendizados"],

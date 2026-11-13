@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Titlebar } from "./components/Titlebar";
-import { AppDialog, AppMenu, Button, EmptyState, Field, HintProvider, Icon, IconButton, type IconName } from "./components/ui";
+import { AppDialog, AppMenu, Button, Field, HintProvider, Icon, IconButton, type IconName } from "./components/ui";
 import { applyAppearance, type Appearance } from "./lib/appearance";
 import { cn } from "./lib/cn";
 import { dispatchTask, useTask, wireTaskEvents, wireVoiceEvents } from "./lib/stores";
@@ -10,6 +10,9 @@ import { AboutView } from "./views/AboutView";
 import { BrainView } from "./views/BrainView";
 import { ActivityView } from "./views/ActivityView";
 import { HistoryView } from "./views/HistoryView";
+import { HarnessView } from "./views/HarnessView";
+import { JournalView } from "./views/JournalView";
+import { LabView } from "./views/LabView";
 import { LibraryView } from "./views/LibraryView";
 import { YouView } from "./views/YouView";
 import { SettingsView } from "./views/SettingsView";
@@ -50,6 +53,7 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [current, setCurrent] = useState("");
+  const [modules, setModules] = useState<Record<string, boolean>>({});
 
   const refreshConversations = useCallback(() => {
     core()
@@ -65,6 +69,10 @@ export function App() {
   useEffect(() => {
     if (status !== "open") return;
     core().call("appearance").then((a) => applyAppearance(a as Appearance)).catch(() => {});
+    core()
+      .call("harnessGet")
+      .then((r) => setModules(((r as { harness?: { modules?: Record<string, boolean> } }).harness?.modules) ?? {}))
+      .catch(() => {});
     refreshConversations();
   }, [status, refreshConversations]);
 
@@ -122,6 +130,7 @@ export function App() {
               setPage={setPage}
               task={task}
               conversations={conversations}
+              modules={modules}
               current={current}
               onNew={newConversation}
               onOpen={openConversation}
@@ -135,7 +144,7 @@ export function App() {
               onClick={() => setCollapsed((c) => !c)}
               className="absolute left-3 top-3 z-10"
             />
-            <PageView page={page} go={setPage} />
+            <PageView page={page} go={setPage} onHarness={(m) => setModules(m)} />
           </main>
         </div>
       </div>
@@ -143,7 +152,7 @@ export function App() {
   );
 }
 
-function PageView({ page, go }: { page: Page; go: (p: Page) => void }) {
+function PageView({ page, go, onHarness }: { page: Page; go: (p: Page) => void; onHarness: (modules: Record<string, boolean>) => void }) {
   switch (page) {
     case "task":
       return <TaskView />;
@@ -155,20 +164,18 @@ function PageView({ page, go }: { page: Page; go: (p: Page) => void }) {
       return <YouView onOpenBrain={() => go("brain")} />;
     case "library":
       return <LibraryView />;
+    case "harness":
+      return <HarnessView onChanged={(h) => onHarness(h.modules)} />;
+    case "lab":
+      return <LabView />;
+    case "journal":
+      return <JournalView />;
     case "brain":
       return <BrainView onOpenYou={() => go("you")} />;
     case "about":
       return <AboutView />;
     case "settings":
       return <SettingsView />;
-    default:
-      return (
-        <div className="grid h-full place-items-center">
-          <EmptyState icon="monitor" title="Esta tela ainda está só na interface Qt">
-            Ela chega na interface nova nas próximas entregas da Fase 4. Até lá, use <code>--ui qt</code>.
-          </EmptyState>
-        </div>
-      );
   }
 }
 
@@ -177,6 +184,7 @@ function Sidebar(props: {
   setPage: (p: Page) => void;
   task: ReturnType<typeof useTask>;
   conversations: Conversation[];
+  modules: Record<string, boolean>;
   current: string;
   onNew: () => void;
   onOpen: (id: string) => void;
@@ -197,7 +205,7 @@ function Sidebar(props: {
       )}
       {[1, 2, 3].map((g) => (
         <div key={g} className="mt-3 flex flex-col gap-0.5 border-t border-hairline pt-3 first-of-type:border-0">
-          {NAV.filter((n) => n.group === g).map((n) => (
+          {NAV.filter((n) => n.group === g && props.modules[n.page] !== false).map((n) => (
             <NavButton key={n.page} icon={n.icon} label={n.label} hint={n.key} active={page === n.page} onClick={() => setPage(n.page)} />
           ))}
         </div>

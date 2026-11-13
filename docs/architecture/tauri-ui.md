@@ -338,12 +338,22 @@ pela CI até o bloqueio ser resolvido.
   navegador, sem Python. Usado para conferir a tela de Tarefa, o Histórico, as Configurações e o mini
   chat.
 
-Pendente na Fase 4: Atividade, Cérebro, Você, Diário, Biblioteca, AI Research Lab, Harness e Sobre
-(mostram um aviso de "ainda só na interface Qt"); anexar arquivos no Composer (precisa do diálogo de
-arquivos do Tauri); a paleta de comandos (Ctrl+K). O comportamento real das janelas (foco, cliques,
-posição) só pode ser conferido com a casca aberta, o que nesta máquina depende do Smart App Control.
+Parte 2 (feita): Atividade, Cérebro, Você, Diário, Biblioteca, AI Research Lab, Harness e Sobre. As
+11 telas do QML existem na interface nova, sobre os mesmos métodos do Bridge. A barra lateral respeita
+os módulos do Harness. O Cérebro usa `react-markdown` sem HTML cru e só aceita links `nota:` e `http(s)`.
+
+Ainda fora da interface Tauri (continuam na Qt):
+- anexar arquivos no Composer e importar papel de parede: precisam do diálogo de arquivos do Tauri;
+- abrir links externos (Biblioteca, Sobre): precisa do plugin `opener`, por enquanto o endereço aparece
+  para copiar;
+- papel de parede, intensidade das luzes e desfoque do fundo (Ambient/ShaderWallpaper);
+- paleta de comandos (Ctrl+K global) e telas de introdução (IntroCard);
+- detalhes das CLIs em Configurações > Claude Code e Codex (a conferência roda, o detalhe não aparece).
+
+O comportamento real das janelas (foco, cliques, posição do mini chat) só pode ser conferido com a casca
+aberta, o que nesta máquina depende do Smart App Control.
 
 ## 11. Próximo passo
 
-Fase 4, parte 2: as telas restantes, na ordem Atividade, Cérebro, Diário, Harness, Lab, Biblioteca,
-Você e Sobre.
+Fase 5: empacotamento (núcleo com Nuitka, instalador NSIS/MSI, auto-update assinado) e as medições
+contra a interface Qt. Os itens da lista acima entram junto, porque vários dependem de plugins do Tauri.
