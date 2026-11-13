@@ -7,6 +7,8 @@ export interface Appearance {
   accent?: string;
   radius?: string;
   motion?: boolean;
+  ambient?: number;
+  blur?: boolean;
 }
 
 const MODES = new Set(["escuro", "claro"]);
@@ -20,4 +22,6 @@ export function applyAppearance(a: Appearance | null | undefined, root: HTMLElem
   if (a.radius && RADII.has(a.radius)) root.dataset.radius = a.radius;
   if (typeof a.motion === "boolean") root.dataset.motion = a.motion ? "on" : "off";
   if (a.accent && HEX.test(a.accent)) root.style.setProperty("--accent", a.accent);
+  if (typeof a.ambient === "number") root.style.setProperty("--ambient", String(Math.max(0, Math.min(1, a.ambient))));
+  if (typeof a.blur === "boolean") root.dataset.blur = a.blur ? "on" : "off";
 }

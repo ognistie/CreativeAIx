@@ -1,4 +1,5 @@
-import { GlassPanel } from "../components/ui";
+import { GlassPanel, Icon } from "../components/ui";
+import { openExternal } from "../lib/tauri";
 import { Page } from "./Page";
 
 // AboutView.qml
@@ -57,8 +58,9 @@ export function AboutView() {
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
         {LINKS.map((l) => (
           <li key={l.l}>
-            <span className="text-fg-muted">{l.l}: </span>
-            <span className="select-text text-accent">{l.u.replace(/^https:\/\//, "")}</span>
+            <button type="button" onClick={() => void openExternal(l.u)} className="flex items-center gap-1 text-accent hover:underline">
+              <Icon name="external" size={12} /> {l.l}
+            </button>
           </li>
         ))}
       </ul>

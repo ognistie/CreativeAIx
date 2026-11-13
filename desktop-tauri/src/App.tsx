@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { Titlebar } from "./components/Titlebar";
 import { AppDialog, AppMenu, Button, Field, HintProvider, Icon, IconButton, type IconName } from "./components/ui";
 import { applyAppearance, type Appearance } from "./lib/appearance";
@@ -29,9 +30,9 @@ const NAV: Array<{ page: Page; label: string; icon: IconName; group: 1 | 2 | 3; 
   { page: "activity", label: "Atividade", icon: "chart", group: 1 },
   { page: "brain", label: "Cérebro", icon: "brain", group: 2, key: "Ctrl B" },
   { page: "you", label: "Você", icon: "user", group: 2 },
-  { page: "journal", label: "Diário", icon: "file-text", group: 2 },
-  { page: "library", label: "Biblioteca", icon: "box", group: 2 },
-  { page: "lab", label: "AI Research Lab", icon: "sparkle", group: 3 },
+  { page: "journal", label: "Diário", icon: "notebook", group: 2 },
+  { page: "library", label: "Biblioteca", icon: "book", group: 2 },
+  { page: "lab", label: "AI Research Lab", icon: "flask", group: 3 },
   { page: "harness", label: "Harness", icon: "sliders", group: 3 },
 ];
 
@@ -54,6 +55,8 @@ export function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [current, setCurrent] = useState("");
   const [modules, setModules] = useState<Record<string, boolean>>({});
+  const [palette, setPalette] = useState(false);
+  const [deep, setDeep] = useState<{ topic?: string; entry?: string; at: number }>({ at: 0 });
 
   const refreshConversations = useCallback(() => {
     core()
@@ -109,13 +112,25 @@ export function App() {
       else if (e.ctrlKey && k === "b") setPage("brain");
       else if (e.ctrlKey && k === ",") setPage("settings");
       else if (e.ctrlKey && k === "\\") setCollapsed((c) => !c);
+      else if (e.ctrlKey && k === "k" && page !== "brain") setPalette((o) => !o);
       else if (k === "escape" && task.busy) void core().call("forceStop");
       else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newConversation, task.busy]);
+  }, [newConversation, task.busy, page]);
+
+  const paletteBase = useMemo<PaletteItem[]>(
+    () => [
+      { id: "new", title: "Nova conversa", area: "Ação", icon: "plus", hint: "Ctrl N", run: newConversation },
+      ...NAV.filter((n) => modules[n.page] !== false).map((n) => ({ id: n.page, title: n.label, area: "Ir para", icon: n.icon, hint: n.key, run: () => setPage(n.page) })),
+      { id: "settings", title: "Configurações", area: "Ir para", icon: "settings" as IconName, hint: "Ctrl ,", run: () => setPage("settings") },
+      { id: "about", title: "Sobre", area: "Ir para", icon: "info" as IconName, run: () => setPage("about") },
+      ...conversations.map((c) => ({ id: `c:${c.id}`, title: c.title, area: "Conversa", icon: "message" as IconName, run: () => openConversation(c.id) })),
+    ],
+    [newConversation, modules, conversations, openConversation],
+  );
 
   return (
     <HintProvider>
@@ -137,6 +152,7 @@ export function App() {
             />
           )}
           <main className="relative min-w-0 flex-1 bg-canvas">
+            <div aria-hidden className="ambient pointer-events-none absolute inset-0" />
             <IconButton
               icon={collapsed ? "chevron-right" : "list"}
               label={collapsed ? "Mostrar barra lateral (Ctrl \\)" : "Esconder barra lateral (Ctrl \\)"}
@@ -144,7 +160,16 @@ export function App() {
               onClick={() => setCollapsed((c) => !c)}
               className="absolute left-3 top-3 z-10"
             />
-            <PageView page={page} go={setPage} onHarness={(m) => setModules(m)} />
+            <div className="relative h-full">
+              <PageView page={page} go={setPage} deep={deep} onHarness={(m) => setModules(m)} />
+            </div>
+            <CommandPalette
+              open={palette}
+              onOpenChange={setPalette}
+              base={paletteBase}
+              onTopic={useCallback((id: string) => (setDeep({ topic: id, at: Date.now() }), setPage("library")), [])}
+              onDiary={useCallback((id: string) => (setDeep({ entry: id, at: Date.now() }), setPage("journal")), [])}
+            />
           </main>
         </div>
       </div>
@@ -152,7 +177,7 @@ export function App() {
   );
 }
 
-function PageView({ page, go, onHarness }: { page: Page; go: (p: Page) => void; onHarness: (modules: Record<string, boolean>) => void }) {
+function PageView({ page, go, deep, onHarness }: { page: Page; go: (p: Page) => void; deep: { topic?: string; entry?: string; at: number }; onHarness: (modules: Record<string, boolean>) => void }) {
   switch (page) {
     case "task":
       return <TaskView />;
@@ -163,13 +188,13 @@ function PageView({ page, go, onHarness }: { page: Page; go: (p: Page) => void; 
     case "you":
       return <YouView onOpenBrain={() => go("brain")} />;
     case "library":
-      return <LibraryView />;
+      return <LibraryView key={`lib-${deep.at}`} openTopic={deep.topic} />;
     case "harness":
       return <HarnessView onChanged={(h) => onHarness(h.modules)} />;
     case "lab":
       return <LabView />;
     case "journal":
-      return <JournalView />;
+      return <JournalView key={`diary-${deep.at}`} initialEntry={deep.entry} />;
     case "brain":
       return <BrainView onOpenYou={() => go("you")} />;
     case "about":

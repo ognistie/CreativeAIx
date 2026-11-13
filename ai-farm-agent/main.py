@@ -66,6 +66,8 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR.parent / '.env')
 load_dotenv(BASE_DIR / '.env')
+# App instalado (interface Tauri): a pasta do programa nao e o lugar das chaves do usuario.
+load_dotenv(Path(os.environ.get('APPDATA') or Path.home()) / 'Creative AIx' / '.env')
 
 
 def _without_console() -> bool:

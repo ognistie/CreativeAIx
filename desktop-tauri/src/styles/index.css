@@ -132,3 +132,19 @@ body.mini {
     transition-duration: 0ms !important;
   }
 }
+
+/* Ambient.qml: luzes da paleta atras dos paineis. --ambient = intensidade (Harness); 0 = so a base. */
+:root {
+  --ambient: 0.55;
+}
+.ambient {
+  background:
+    radial-gradient(55% 45% at 12% 8%, var(--tone-1), transparent 70%),
+    radial-gradient(45% 40% at 88% 18%, var(--tone-3), transparent 70%),
+    radial-gradient(60% 50% at 55% 105%, var(--tone-2), transparent 70%);
+  opacity: var(--ambient);
+}
+/* Sem desfoque (Harness > Aparencia, ou GPU fraca): o vidro vira superficie solida. */
+[data-blur="off"] * {
+  backdrop-filter: none !important;
+}

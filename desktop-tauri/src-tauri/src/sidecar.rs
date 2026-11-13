@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -15,6 +16,8 @@ use std::time::{Duration, Instant};
 const READY_PREFIX: &str = "CREATIVE_AIX_READY ";
 const STDERR_TAIL: usize = 20;
 const STOP_GRACE: Duration = Duration::from_secs(5);
+/// Nucleo empacotado (scripts/build_core.py): <recursos>/core/creative-aix-core.exe
+const PACKAGED_CORE: &str = "creative-aix-core.exe";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CoreInfo {
@@ -38,13 +41,16 @@ struct Running {
 pub struct Sidecar {
     shared: Arc<(Mutex<Shared>, Condvar)>,
     running: Mutex<Option<Running>>,
+    resource_dir: Option<PathBuf>,
 }
 
 impl Sidecar {
-    pub fn new() -> Self {
+    /// `resource_dir`: pasta de recursos do app instalado (onde fica o nucleo empacotado).
+    pub fn new(resource_dir: Option<PathBuf>) -> Self {
         Self {
             shared: Arc::new((Mutex::new(Shared::default()), Condvar::new())),
             running: Mutex::new(None),
+            resource_dir,
         }
     }
 
@@ -64,11 +70,11 @@ impl Sidecar {
             s.generation
         };
 
-        let launch = Launch::resolve()?;
-        let mut cmd = Command::new(&launch.python);
-        cmd.arg(&launch.main_py)
+        let launch = Launch::resolve(self.resource_dir.as_deref())?;
+        let mut cmd = Command::new(&launch.program);
+        cmd.args(&launch.args)
             .args(["--ui", "tauri", "--headless"])
-            .current_dir(&launch.app_dir)
+            .current_dir(&launch.dir)
             .env("PYTHONUNBUFFERED", "1")
             .env("PYTHONIOENCODING", "utf-8")
             // Fase 4: o nucleo usa o PID da casca para saber quando o agente foi para outro app.
@@ -88,7 +94,7 @@ impl Sidecar {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("nao consegui abrir o nucleo ({}): {e}", launch.python.display()))?;
+            .map_err(|e| format!("nao consegui abrir o nucleo ({}): {e}", launch.program.display()))?;
         let stdout = child.stdout.take().ok_or("sem stdout do nucleo")?;
         let stderr = child.stderr.take().ok_or("sem stderr do nucleo")?;
         let stdin = child.stdin.take();
@@ -121,7 +127,21 @@ impl Sidecar {
                     if announced {
                         continue; // o nucleo nao deve escrever mais nada aqui; so drena
                     }
-                    if let Some(json) = line.strip_prefix(READY_PREFIX) {
+                    let Some(json) = line.strip_prefix(READY_PREFIX) else {
+                        // Antes do anuncio, o que sair aqui e erro de subida (ex.: chave ausente):
+                        // guarda junto do stderr para a tela mostrar se o nucleo cair.
+                        let (lock, _) = &*shared;
+                        if let Ok(mut s) = lock.lock() {
+                            if s.generation == generation && !line.trim().is_empty() {
+                                if s.stderr.len() == STDERR_TAIL {
+                                    s.stderr.pop_front();
+                                }
+                                s.stderr.push_back(line.clone());
+                            }
+                        }
+                        continue;
+                    };
+                    {
                         let parsed = serde_json::from_str::<CoreInfo>(json)
                             .map_err(|e| format!("anuncio do nucleo invalido: {e}"));
                         let (lock, cvar) = &*shared;
@@ -214,24 +234,33 @@ impl Sidecar {
     }
 }
 
-/// Onde estao o Python e o main.py.
-/// Ordem: CREATIVE_AIX_PYTHON / CREATIVE_AIX_APP; depois o repositorio (desenvolvimento).
-/// Fase 5 acrescenta o nucleo empacotado (Nuitka) ao lado do executavel.
+/// O que executar para subir o nucleo.
+/// Ordem: CREATIVE_AIX_PYTHON / CREATIVE_AIX_APP (desenvolvimento manual); o nucleo empacotado nos
+/// recursos do app instalado; o repositorio (desenvolvimento, `npm run tauri dev`).
 struct Launch {
-    python: PathBuf,
-    main_py: PathBuf,
-    app_dir: PathBuf,
+    program: PathBuf,
+    args: Vec<OsString>,
+    dir: PathBuf,
 }
 
 impl Launch {
-    fn resolve() -> Result<Self, String> {
+    fn resolve(resource_dir: Option<&Path>) -> Result<Self, String> {
+        let forced = std::env::var_os("CREATIVE_AIX_PYTHON").is_some() || std::env::var_os("CREATIVE_AIX_APP").is_some();
+        if !forced {
+            if let Some(core_dir) = resource_dir.map(|r| r.join("core")) {
+                let exe = core_dir.join(PACKAGED_CORE);
+                if exe.is_file() {
+                    return Ok(Self { program: exe, args: Vec::new(), dir: core_dir });
+                }
+            }
+        }
         let app_dir = match std::env::var_os("CREATIVE_AIX_APP") {
             Some(dir) => PathBuf::from(dir),
             None => repo_root().join("ai-farm-agent"),
         };
         let main_py = app_dir.join("main.py");
         if !main_py.is_file() {
-            return Err(format!("main.py nao encontrado em {}", app_dir.display()));
+            return Err(format!("nucleo nao encontrado: nem {PACKAGED_CORE} nos recursos nem main.py em {}", app_dir.display()));
         }
         let python = match std::env::var_os("CREATIVE_AIX_PYTHON") {
             Some(p) => PathBuf::from(p),
@@ -244,7 +273,7 @@ impl Launch {
                 }
             }
         };
-        Ok(Self { python, main_py, app_dir })
+        Ok(Self { program: python, args: vec![main_py.into_os_string()], dir: app_dir })
     }
 }
 

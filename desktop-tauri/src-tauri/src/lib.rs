@@ -1,5 +1,6 @@
 mod sidecar;
 mod mini_window;
+mod update;
 
 use sidecar::{CoreInfo, Sidecar};
 use std::sync::Arc;
@@ -29,7 +30,7 @@ async fn restart_core(sidecar: State<'_, Arc<Sidecar>>) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Instancia unica: abrir de novo so traz a janela principal para frente.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(main) = app.get_webview_window("main") {
@@ -38,8 +39,12 @@ pub fn run() {
                 let _ = main.set_focus();
             }
         }))
+        // Anexos do Composer (escolher arquivos) e links externos (so https, ver capabilities)
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init());
+    let app = update::plugin(builder)
         .setup(|app| {
-            let sidecar = Arc::new(Sidecar::new());
+            let sidecar = Arc::new(Sidecar::new(app.path().resource_dir().ok()));
             if let Err(err) = sidecar.start() {
                 eprintln!("[core] {err}");
             }
@@ -53,7 +58,9 @@ pub fn run() {
             mini_window::set_mini_busy,
             mini_window::restore_main,
             mini_window::close_mini,
-            mini_window::quick_entry
+            mini_window::quick_entry,
+            update::check_update,
+            update::install_update
         ])
         .build(tauri::generate_context!())
         .expect("falha ao montar a casca Tauri");

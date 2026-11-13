@@ -1,0 +1,145 @@
+name: Release (instalador Tauri)
+
+# Gera o instalador da interface Tauri: nucleo Python compilado com Nuitka + casca Tauri (NSIS por usuario).
+# Roda em tag v*, manualmente, ou quando os arquivos de empacotamento mudam numa branch feat/**.
+on:
+  push:
+    tags: ["v*"]
+    branches: ["feat/**"]
+    paths:
+      - ".github/workflows/release.yml"
+      - "ai-farm-agent/scripts/build_core.py"
+      - "ai-farm-agent/scripts/smoke_packaged_core.py"
+      - "desktop-tauri/src-tauri/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ai-farm-agent/requirements-windows-py311.lock.txt
+      - name: Python dependencies (reviewed lock) + Nuitka
+        run: |
+          python -m pip install -r ai-farm-agent/requirements-windows-py311.lock.txt
+          python -m pip install "nuitka>=2.7,<3" "ordered-set>=4.1,<5" "zstandard>=0.23,<1"
+          python -m nuitka --version
+
+      - name: Nuitka cache
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-${{ runner.os }}-${{ hashFiles('ai-farm-agent/requirements-windows-py311.lock.txt') }}
+          restore-keys: nuitka-${{ runner.os }}-
+
+      - name: Build the core (Nuitka)
+        run: python ai-farm-agent/scripts/build_core.py
+
+      - name: Smoke the packaged core
+        run: python ai-farm-agent/scripts/smoke_packaged_core.py build/core-bundle/core/creative-aix-core.exe 10 | Tee-Object -FilePath build/core-smoke.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop-tauri/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Frontend dependencies
+        working-directory: desktop-tauri
+        run: npm ci
+
+      # Atualizacao automatica: so com os segredos configurados (chave privada nunca entra no repositorio)
+      - name: Updater config (optional)
+        id: updater
+        shell: pwsh
+        env:
+          PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if ($env:HAS_KEY -eq 'true' -and $env:PUBKEY) {
+            $conf = @{
+              bundle = @{ createUpdaterArtifacts = $true }
+              plugins = @{ updater = @{
+                pubkey = $env:PUBKEY
+                endpoints = @("https://github.com/${{ github.repository }}/releases/latest/download/latest.json")
+              } }
+            } | ConvertTo-Json -Depth 5
+            Set-Content -Path desktop-tauri/src-tauri/tauri.updater.conf.json -Value $conf -Encoding utf8
+            "args=--features updater --config src-tauri/tauri.updater.conf.json" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "Sem TAURI_SIGNING_PRIVATE_KEY/TAURI_UPDATER_PUBKEY: instalador sem atualizacao automatica."
+            "args=" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build the installer (Tauri)
+        working-directory: desktop-tauri
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.release.conf.json ${{ steps.updater.outputs.args }}
+
+      # Abre o app de verdade (casca + WebView2 + nucleo empacotado) e mede a memoria depois de 20 s.
+      - name: Run the shell and measure
+        shell: pwsh
+        env:
+          ANTHROPIC_API_KEY: sk-ant-ci-not-a-real-key
+        run: |
+          $exe = Resolve-Path desktop-tauri/src-tauri/target/release/creative-aix-desktop.exe
+          $t0 = Get-Date
+          $app = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 20
+          $core = Get-Process creative-aix-core -ErrorAction SilentlyContinue
+          $kids = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedgewebview2.exe' }
+          $web = ($kids | ForEach-Object { (Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue).WorkingSet64 } | Measure-Object -Sum).Sum
+          $shell = (Get-Process -Id $app.Id -ErrorAction SilentlyContinue).WorkingSet64
+          $coreMem = ($core | Measure-Object WorkingSet64 -Sum).Sum
+          $report = [ordered]@{
+            shell_alive = [bool](Get-Process -Id $app.Id -ErrorAction SilentlyContinue)
+            core_running = [bool]$core
+            shell_mb = [math]::Round($shell / 1MB, 1)
+            webview_mb = [math]::Round($web / 1MB, 1)
+            core_mb = [math]::Round($coreMem / 1MB, 1)
+            total_mb = [math]::Round(($shell + $web + $coreMem) / 1MB, 1)
+          }
+          $report | ConvertTo-Json | Tee-Object -FilePath build/shell-run.json
+          Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 6
+          if (Get-Process creative-aix-core -ErrorAction SilentlyContinue) { Write-Error "o nucleo continuou vivo depois de a casca fechar"; exit 1 }
+          if (-not $report.shell_alive -or -not $report.core_running) { Write-Error "a casca ou o nucleo nao subiu"; exit 1 }
+
+      - name: Sizes
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe | Select-Object -First 1
+          $core = (Get-ChildItem build/core-bundle -Recurse -File | Measure-Object Length -Sum).Sum
+          $front = (Get-ChildItem desktop-tauri/dist -Recurse -File | Measure-Object Length -Sum).Sum
+          $shell = (Get-Item desktop-tauri/src-tauri/target/release/creative-aix-desktop.exe).Length
+          $sizes = [ordered]@{
+            installer_mb = [math]::Round($nsis.Length / 1MB, 1)
+            core_bundle_mb = [math]::Round($core / 1MB, 1)
+            shell_exe_mb = [math]::Round($shell / 1MB, 1)
+            frontend_kb = [math]::Round($front / 1KB, 0)
+          }
+          $sizes | ConvertTo-Json | Tee-Object -FilePath build/sizes.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: creative-aix-windows
+          path: |
+            desktop-tauri/src-tauri/target/release/bundle/nsis/*.exe
+            desktop-tauri/src-tauri/target/release/bundle/nsis/*.sig
+            build/core-smoke.json
+            build/sizes.json
+            build/shell-run.json
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Spinner, StatusDot } from "../components/ui";
-import { core, inTauri, restartCore } from "../lib/tauri";
+import { checkUpdate, core, inTauri, installUpdate, restartCore, type UpdateInfo } from "../lib/tauri";
 import { useCoreEvent, useCoreStatus } from "../lib/useCore";
 import { Page, Row, Section, Switch } from "./Page";
 
@@ -27,6 +27,22 @@ interface Provider {
 }
 
 const MAX_INSTRUCTIONS = 1500;
+
+interface CodingTool {
+  tool: string;
+  name: string;
+  installed: boolean;
+  version: string;
+  logged_in: boolean;
+  detail: string;
+  login_help: string;
+  install_help: string;
+}
+
+const mcpHint = (m: unknown) => {
+  const v = (m ?? {}) as { ok?: boolean; tools?: string[]; error?: string };
+  return v.ok ? `Respondendo com ${v.tools?.length ?? 0} ferramentas.` : v.error || "Não respondeu.";
+};
 const pretty = (k?: string) => (k ? k.split("+").map((x) => (x === "space" ? "Espaço" : x[0]!.toUpperCase() + x.slice(1))).join(" + ") : "—");
 
 export function SettingsView() {
@@ -36,6 +52,7 @@ export function SettingsView() {
   const [providers, setProviders] = useState<Provider[]>([]);
   const [coding, setCoding] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
+  const [update, setUpdate] = useState<UpdateInfo | null | "checking" | "none" | "installing">(null);
 
   useEffect(() => {
     if (status !== "open") return;
@@ -79,6 +96,45 @@ export function SettingsView() {
             </Button>
           )}
         </Row>
+        {inTauri && (
+          <Row
+            label="Atualizações"
+            hint={
+              update === "none"
+                ? "Você está na versão mais nova."
+                : update && typeof update === "object"
+                  ? `Versão ${update.version} disponível. O pacote é conferido pela assinatura antes de instalar.`
+                  : "Procura uma versão nova assinada."
+            }
+          >
+            {update && typeof update === "object" ? (
+              <Button
+                size="compact"
+                variant="primary"
+                onClick={() => {
+                  setUpdate("installing");
+                  installUpdate().catch((e: unknown) => (setError(String(e)), setUpdate(null)));
+                }}
+              >
+                Instalar e reiniciar
+              </Button>
+            ) : (
+              <Button
+                size="compact"
+                icon="refresh"
+                disabled={update === "checking" || update === "installing"}
+                onClick={() => {
+                  setUpdate("checking");
+                  checkUpdate()
+                    .then((u) => setUpdate(u ?? "none"))
+                    .catch((e: unknown) => (setError(String(e)), setUpdate(null)));
+                }}
+              >
+                {update === "checking" ? "Procurando…" : update === "installing" ? "Instalando…" : "Procurar"}
+              </Button>
+            )}
+          </Row>
+        )}
         {providers.map((p) => (
           <Row key={p.name} label={p.name} hint={p.configured ? p.use : p.next}>
             <StatusDot status={p.configured ? "ok" : "warn"} />
@@ -133,14 +189,26 @@ export function SettingsView() {
             <Row label="Deixar o Claude e o Codex consultarem o Cérebro (MCP)">
               <Switch label="MCP do Cérebro" checked={s.coding_mcp} onChange={(v) => save({ coding_mcp: v })} />
             </Row>
-            <Row
-              label="Conferir as CLIs instaladas"
-              hint={coding ? (coding.ok === false ? String(coding.error ?? "Falhou.") : "Conferido. Detalhes na interface Qt por enquanto.") : "Leva cerca de 1 s por CLI."}
-            >
+            <Row label="Conferir as CLIs instaladas" hint={coding?.ok === false ? String(coding.error ?? "Falhou.") : "Leva cerca de 1 s por CLI."}>
               <Button size="compact" icon="refresh" onClick={() => void core().call("codingAgentsCheck")}>
                 Conferir
               </Button>
             </Row>
+            {Array.isArray(coding?.tools) &&
+              (coding.tools as CodingTool[]).map((t) => (
+                <Row
+                  key={t.tool}
+                  label={`${t.name}${t.version ? ` · ${t.version}` : ""}`}
+                  hint={!t.installed ? t.install_help : !t.logged_in ? t.login_help : t.detail || "Instalado e com sessão."}
+                >
+                  <StatusDot status={t.installed && t.logged_in ? "ok" : t.installed ? "warn" : "failed"} />
+                </Row>
+              ))}
+            {coding?.mcp != null && (
+              <Row label="Servidor MCP do Cérebro" hint={mcpHint(coding.mcp)}>
+                <StatusDot status={(coding.mcp as { ok?: boolean }).ok ? "ok" : "warn"} />
+              </Row>
+            )}
           </Section>
 
           <Section title="Interface">

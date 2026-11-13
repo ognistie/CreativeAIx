@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Chip, EmptyState, Field, GlassPanel, Icon, Skeleton } from "../components/ui";
-import { core } from "../lib/tauri";
+import { core, openExternal } from "../lib/tauri";
 import { Page } from "./Page";
 
 // LibraryView.qml: trilha de temas de AI Engineering (conteudo estatico do core/library.py, sem rede).
@@ -42,7 +42,7 @@ const fmtDate = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("pt-BR", { day: "numeric", month: "long", year: "numeric" });
 };
 
-export function LibraryView() {
+export function LibraryView({ openTopic }: { openTopic?: string } = {}) {
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState("");
   const [items, setItems] = useState<Topic[] | null>(null);
@@ -53,8 +53,14 @@ export function LibraryView() {
   useEffect(() => {
     core()
       .call("librarySearch", "", "", "")
-      .then((r) => setAll((r as { items?: Topic[] }).items ?? []))
+      .then((r) => {
+        const items = (r as { items?: Topic[] }).items ?? [];
+        setAll(items);
+        const hit = openTopic && items.find((t) => t.id === openTopic);
+        if (hit) setOpen(hit);
+      })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -189,7 +195,9 @@ function TopicView({
                 {[r.authors, r.venue, r.year].filter(Boolean).join(" · ")} · {r.kind}
               </p>
               {r.note && <p className="mt-1.5 text-sm text-fg">{r.note}</p>}
-              <p className="mt-1.5 break-all text-xs text-accent">{r.url}</p>
+              <button type="button" onClick={() => void openExternal(r.url)} className="mt-1.5 flex items-center gap-1 break-all text-left text-xs text-accent hover:underline">
+                <Icon name="external" size={11} /> {r.url.replace(/^https:\/\//, "")}
+              </button>
             </li>
           ))}
         </ul>

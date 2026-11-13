@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Hint, Icon, IconButton, TogglePill } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { useVoice } from "../../lib/stores";
-import { core } from "../../lib/tauri";
+import { core, inTauri, pickFiles } from "../../lib/tauri";
 
 // Composer.qml: caixa de pedido. Enter envia, Shift+Enter quebra linha. Microfone grava e envia como
 // mensagem de audio; "Conversa" deixa o microfone aberto. Simular e Relatorio vao junto do pedido.
@@ -35,6 +35,26 @@ export function Composer({
   const recording = voice.state === "recording";
   const canSend = !running && text.trim().length > 0;
   const [recSeconds, setRecSeconds] = useState(0);
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const addFiles = (paths: string[]) => {
+    setAttachments((cur) => [...cur, ...paths.filter((p) => p && !cur.includes(p))].slice(-6));
+    input.current?.focus();
+  };
+
+  // Arrastar arquivos para a janela tambem anexa (evento da casca Tauri)
+  useEffect(() => {
+    if (!inTauri || compact) return;
+    let off: (() => void) | undefined;
+    void import("@tauri-apps/api/webview").then(({ getCurrentWebview }) =>
+      getCurrentWebview()
+        .onDragDropEvent((e) => {
+          if (e.payload.type === "drop") addFiles(e.payload.paths);
+        })
+        .then((u) => (off = u)),
+    );
+    return () => off?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compact]);
 
   useEffect(() => {
     if (prefill) {
@@ -62,9 +82,20 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [text]);
 
-  const send = () => {
+  const send = async () => {
     if (!canSend) return;
-    onSubmit(text.trim(), { dryRun, report });
+    let t = text.trim();
+    if (attachments.length) {
+      // Os anexos ficam na conversa (o assistente pode ler) e o pedido cita o caminho para os agentes
+      try {
+        const ok = (await core().call("attachFiles", JSON.stringify(attachments))) as string[];
+        if (ok.length) t += ["", "", "Arquivos anexados:", ...ok.map((x) => `- ${x}`)].join("\n");
+      } catch {
+        /* sem anexos: o pedido segue so com o texto */
+      }
+      setAttachments([]);
+    }
+    onSubmit(t, { dryRun, report });
     setText("");
   };
 
@@ -96,7 +127,7 @@ export function Composer({
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              send();
+              void send();
             }
           }}
           placeholder={voice.live ? "Conversa ao vivo: pode falar (ou digitar)..." : placeholder}
@@ -105,7 +136,25 @@ export function Composer({
         />
       )}
       {voice.error && <p className="px-4 pb-1 text-sm text-bad">{voice.error}</p>}
+      {attachments.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5 px-3 pb-1" aria-label="Anexos">
+          {attachments.map((a) => (
+            <li key={a} className="flex items-center gap-1.5 rounded-full bg-chip py-1 pl-2.5 pr-1 text-xs text-fg" title={a}>
+              <Icon name="file" size={12} />
+              <span className="max-w-[180px] truncate">{a.split(/[\\/]/).pop()}</span>
+              <button type="button" aria-label={`Remover ${a}`} onClick={() => setAttachments((c) => c.filter((x) => x !== a))} className="grid size-5 place-items-center rounded-full hover:bg-hover">
+                <Icon name="x" size={10} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="flex items-center gap-1.5 px-2.5 pb-2.5 pt-1">
+        {!compact && inTauri && (
+          <Hint text="Anexar arquivos (ou arraste para cá)">
+            <IconButton icon="plus" label="Anexar arquivos" flat className="size-7" onClick={() => void pickFiles().then(addFiles)} />
+          </Hint>
+        )}
         {!compact && (
           <>
             <TogglePill checked={dryRun} onCheckedChange={setDryRun} icon="eye" title="Só planeja, sem executar nada">
@@ -140,7 +189,7 @@ export function Composer({
         ) : (
           <button
             type="button"
-            onClick={send}
+            onClick={() => void send()}
             disabled={!canSend}
             aria-label="Enviar pedido"
             className="press motion-fast grid size-[34px] place-items-center rounded-full bg-primary text-fg-inverse transition-opacity disabled:opacity-30"

@@ -41,6 +41,21 @@ npm run contract:check  # a CI falha se estiver desatualizado
 Os métodos têm os mesmos nomes dos `@Slot`s do `desktop/bridge.py` e os eventos, os mesmos nomes dos
 Signals. O mesmo pedido funciona no QML e aqui.
 
+## Instalador
+
+O workflow `.github/workflows/release.yml` faz tudo na CI (tag `v*` ou manual). Para gerar localmente:
+
+```powershell
+python ai-farm-agent/scripts/build_core.py
+python ai-farm-agent/scripts/smoke_packaged_core.py build/core-bundle/core/creative-aix-core.exe
+cd desktop-tauri
+npx tauri build --config src-tauri/tauri.release.conf.json
+```
+
+Sai um instalador NSIS por usuário em `src-tauri/target/release/bundle/nsis/`. As chaves do usuário
+ficam em `%APPDATA%\Creative AIx\.env`. Atualização automática e medições:
+[docs/architecture/tauri-ui.md](../docs/architecture/tauri-ui.md), seção 11.
+
 ## Estrutura
 
 | Caminho | O que é |

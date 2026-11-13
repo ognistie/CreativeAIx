@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimo para as duas janelas: titlebar propria e mostrar/esconder o mini chat. Sem shell nem fs.",
+  "description": "Minimo para as duas janelas: titlebar propria e mostrar/esconder o mini chat. Sem shell nem fs; escolher arquivos e abrir so links https.",
   "windows": ["main", "mini"],
   "permissions": [
     "core:default",
@@ -12,6 +12,11 @@
     "core:window:allow-close",
     "core:window:allow-show",
     "core:window:allow-hide",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "dialog:allow-open",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
   ]
 }

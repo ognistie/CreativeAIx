@@ -4,6 +4,7 @@ import { agentLabel } from "../lib/agents";
 import { applyAppearance } from "../lib/appearance";
 import { cn } from "../lib/cn";
 import { core } from "../lib/tauri";
+import { IntroCard } from "../components/IntroCard";
 import { useCoreEvent } from "../lib/useCore";
 import { Page, Switch } from "./Page";
 
@@ -155,6 +156,7 @@ export function HarnessView({ onChanged }: { onChanged?: (h: Harness) => void })
       }
     >
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad">{error}</p>}
+      <IntroCard which="harness" />
       {!writable && <p className="mb-4 rounded-r2 bg-warn/10 p-3 text-sm text-fg">A pasta do seu cérebro não está disponível: dá para ver, mas não salvar.</p>}
 
       <Creator disabled={dirty || !writable} onApplied={() => (load(), say("Mudança aplicada"))} />
@@ -233,7 +235,24 @@ export function HarnessView({ onChanged }: { onChanged?: (h: Harness) => void })
         <Labeled label="Movimento">
           <Switch label="Movimento" checked={!!saved.appearance.motion} onChange={(v) => setAppearance("motion", v)} />
         </Labeled>
-        <p className="mt-3 text-xs text-fg-subtle">Papel de parede, intensidade das luzes e desfoque: por enquanto, na interface Qt.</p>
+        <Labeled label="Luzes">
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={Number(saved.appearance.ambient ?? 0.55)}
+            onChange={(e) => applyAppearance({ ambient: Number(e.target.value) })}
+            onPointerUp={(e) => setAppearance("ambient", Number((e.target as HTMLInputElement).value))}
+            onKeyUp={(e) => setAppearance("ambient", Number((e.target as HTMLInputElement).value))}
+            aria-label="Intensidade das luzes de fundo"
+            className="w-48 accent-[var(--accent)]"
+          />
+        </Labeled>
+        <Labeled label="Desfoque">
+          <Switch label="Vidro com desfoque" checked={saved.appearance.blur !== false} onChange={(v) => setAppearance("blur", v)} />
+        </Labeled>
+        <p className="mt-3 text-xs text-fg-subtle">Papel de parede com foto: por enquanto, na interface Qt.</p>
       </Block>
 
       <Block title="Barra lateral" note="Escolha as telas que aparecem. O Harness fica sempre na barra lateral. Vale depois de Salvar.">

@@ -353,7 +353,92 @@ Ainda fora da interface Tauri (continuam na Qt):
 O comportamento real das janelas (foco, cliques, posição do mini chat) só pode ser conferido com a casca
 aberta, o que nesta máquina depende do Smart App Control.
 
-## 11. Próximo passo
+## 11. Fase 5 — empacotamento e medições
 
-Fase 5: empacotamento (núcleo com Nuitka, instalador NSIS/MSI, auto-update assinado) e as medições
-contra a interface Qt. Os itens da lista acima entram junto, porque vários dependem de plugins do Tauri.
+### O que entrou
+
+- **Plugins do Tauri:** `dialog` (anexar arquivos no Composer, pelo botão + ou arrastando para a janela) e
+  `opener` (links externos da Biblioteca, do Sobre e das notas do Cérebro). Capability do opener limitada a
+  `https://*`.
+- **Núcleo empacotado** (`ai-farm-agent/scripts/build_core.py`): Nuitka `--standalone` só do modo headless.
+  PySide6 e os arquivos da interface Qt ficam de fora. O pacote repete o layout do repositório
+  (`core/` com o executável, `config.yaml` e os dados; `AI-Farm-agents/` ao lado), então
+  `Path(__file__).parent.parent/config.yaml` e `brain.vault_path = "../AI-Farm-agents"` continuam valendo
+  sem mudar o núcleo.
+- **Sidecar** (`sidecar.rs`): no app instalado roda `<recursos>/core/creative-aix-core.exe`; em
+  desenvolvimento continua no `main.py` do repositório. O que o núcleo escrever no stdout antes do anúncio
+  (ex.: "ANTHROPIC_API_KEY não configurada") entra na mensagem de erro mostrada na tela.
+- **Chaves do usuário:** o `main.py` também lê `%APPDATA%\Creative AIx\.env`, porque a pasta do programa
+  não é lugar de segredo. Os `.env` de antes continuam valendo.
+- **Instalador:** NSIS por usuário (`installMode: currentUser`). O MSI saiu, porque instala em
+  `Program Files`, onde o núcleo não consegue gravar histórico, logs e capturas.
+  Configuração em `src-tauri/tauri.release.conf.json`, separada para o `cargo check` e o `tauri dev`
+  não dependerem do build do núcleo.
+- **Auto-update assinado** (`src-tauri/src/update.rs`, feature `updater`): sem a feature, os comandos
+  respondem "sem atualização" e nada sai para a rede. Configurações > Atualizações procura e instala.
+- **Workflow `release.yml`:** compila o núcleo, roda `smoke_packaged_core.py` no `.exe` (anúncio, token,
+  métodos pelo WebSocket, saída ao fechar o stdin), gera o instalador e publica os tamanhos
+  (`sizes.json`) como artefato. Roda em tag `v*`, manualmente ou quando os arquivos de empacotamento mudam.
+- **Testes:** `tests/test_packaging.py` confere o comando do Nuitka, o nome do executável igual ao do
+  `sidecar.rs` e os recursos do instalador apontando para a saída do build.
+
+### Para ligar a atualização automática (ação sua, uma vez)
+
+1. Gerar o par de chaves: `npx tauri signer generate -w ~/.tauri/creative-aix.key`
+2. No GitHub, em Settings > Secrets and variables > Actions:
+   - segredo `TAURI_SIGNING_PRIVATE_KEY` (conteúdo da chave privada) e
+     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`;
+   - variável `TAURI_UPDATER_PUBKEY` (conteúdo do `.pub`).
+3. Publicar o instalador, o `.sig` e o `latest.json` num Release do GitHub. O app procura em
+   `releases/latest/download/latest.json`.
+
+A chave privada nunca entra no repositório. Assinatura de código do Windows (Authenticode, para o
+SmartScreen não avisar) precisa de um certificado e fica como passo separado.
+
+### Medições (nesta máquina, `scripts/measure_ui.py`, mediana de 3)
+
+| Métrica | Qt (interface + núcleo) | Tauri: núcleo headless | Tauri: casca |
+| --- | --- | --- | --- |
+| Até a primeira janela / até o núcleo pronto | 6,84 s | 1,58 s | na CI (`shell-run.json`) |
+| Memória | 396 MB | 136 MB | na CI (`shell-run.json`) |
+| Ida e volta de um método (p50 / p95) | chamada direta | 1,8 ms / 9,9 ms | — |
+| Frontend (JS, gzip) | — | — | ~194 KB |
+| Instalador | não existe hoje (venv + `iniciar.cmd`) | — | sai no `sizes.json` do release |
+
+O Qt foi medido com `QT_QPA_PLATFORM=offscreen` (sem janela na tela), do início do processo até o
+`showMaximized` da janela principal. A casca Tauri (WebView2) não roda nesta máquina por causa do
+Smart App Control; o número total da interface Tauri é o do núcleo mais o da casca, e precisa ser medido
+com o app aberto (no Gerenciador de Tarefas, somando `creative-aix-desktop.exe`, os processos
+`msedgewebview2.exe` dele e o `creative-aix-core.exe`).
+
+### Não verificado ainda
+
+- O Rust desta fase (plugins, sidecar empacotado, updater) e o `release.yml` só rodam na CI depois do
+  commit. O `cargo check` local continua bloqueado pelo Smart App Control.
+- O build com Nuitka nunca rodou: dependências com binários (`faster-whisper`/`ctranslate2`, `piper`,
+  `onnxruntime`, `pywinauto`/`comtypes`) costumam pedir ajustes no primeiro build. O smoke do workflow
+  mostra o que faltar.
+- Dados do núcleo instalado (histórico, sessões, configurações) ficam na pasta do programa, que é do
+  usuário (instalação por usuário). Conferido no template NSIS do Tauri: o desinstalador e as
+  atualizações apagam só os arquivos que instalaram, então esses dados sobrevivem.
+
+### Pendências da Fase 4 resolvidas nesta fase
+
+- Paleta de comandos (Ctrl+K): páginas, conversas, temas da Biblioteca e entradas do Diário. No Cérebro,
+  Ctrl+K continua sendo a busca de notas, como no QML.
+- Introduções ("Como usar") do Cérebro, Você, Diário e Harness, lembradas pelo `introSeen`.
+- Configurações > Claude Code e Codex mostra cada CLI (instalada, versão, sessão) e o MCP do Cérebro.
+- Fundo com as luzes da paleta, intensidade e desfoque, ajustáveis no Harness.
+- Anexos e links externos (ver acima).
+
+Fica na interface Qt só o papel de parede com foto: mostrar a imagem exige liberar o protocolo de
+arquivos do WebView para a pasta pessoal do usuário (onde ficam as fotos importadas), um escopo amplo
+demais para o ganho.
+
+O `release.yml` também abre o app de verdade depois do build, mede a memória da casca, do WebView2 e
+do núcleo (`shell-run.json`) e confere que o núcleo encerra quando a casca é fechada à força.
+
+## 12. Próximo passo
+
+Rodar o `release.yml`, ajustar o Nuitka até o smoke do `.exe` passar e registrar aqui os números de
+`sizes.json` e `shell-run.json`. Depois, decidir quando trocar o padrão para `ui.shell: tauri`.

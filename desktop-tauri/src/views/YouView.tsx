@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Skeleton } from "../components/ui";
 import { core } from "../lib/tauri";
+import { IntroCard } from "../components/IntroCard";
 import { Page } from "./Page";
 
 // YouView.qml: secoes do perfil que vao junto dos pedidos. Salva sozinho (1 s depois de parar de digitar).
@@ -32,6 +33,7 @@ export function YouView({ onOpenBrain }: { onOpenBrain?: () => void }) {
   return (
     <Page title="Você" subtitle="O que os agentes devem saber sobre você. Escreva do seu jeito: salva sozinho e vale para as próximas tarefas.">
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad">{error}</p>}
+      <IntroCard which="you" />
       {!writable && <p className="mb-4 rounded-r2 bg-warn/10 p-3 text-sm text-fg">A pasta do seu cérebro não está disponível: dá para ler, mas não salvar.</p>}
       {!sections ? (
         <div className="space-y-3">

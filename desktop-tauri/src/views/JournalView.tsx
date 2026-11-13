@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppDialog, Button, Chip, EmptyState, Field, GlassPanel, Icon, IconButton, Skeleton, Spinner } from "../components/ui";
 import { cn } from "../lib/cn";
 import { core } from "../lib/tauri";
+import { IntroCard } from "../components/IntroCard";
 import { useCoreEvent } from "../lib/useCore";
 import { Page, Switch } from "./Page";
 
@@ -50,7 +51,7 @@ const fmtDay = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short" });
 };
 
-export function JournalView() {
+export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [useInBrain, setUseInBrain] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -71,6 +72,9 @@ export function JournalView() {
     });
   }, []);
   useEffect(loadFolders, [loadFolders]);
+  useEffect(() => {
+    if (initialEntry) void call(core().call("journalGet", initialEntry)).then((r) => r.ok && setEntry(r.entry as Entry));
+  }, [initialEntry]);
 
   const loadList = useCallback(() => {
     if (!folder) return;
@@ -144,6 +148,7 @@ export function JournalView() {
       }
     >
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad">{error}</p>}
+      {!folder && <IntroCard which="diary" />}
       {!folder ? (
         available === null ? (
           <Skeleton className="h-40 rounded-r4" />

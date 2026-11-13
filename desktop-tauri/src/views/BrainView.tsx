@@ -3,7 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AppDialog, AppMenu, Button, Chip, EmptyState, Field, Icon, IconButton, Segmented, Skeleton } from "../components/ui";
 import { cn } from "../lib/cn";
-import { core } from "../lib/tauri";
+import { core, openExternal } from "../lib/tauri";
+import { IntroCard } from "../components/IntroCard";
 
 // BrainView.qml: o segundo cerebro. Arvore de notas (fabrica, editadas, suas), leitura em markdown,
 // edicao com [[ligacoes]], mapa, ligacoes e mencoes, e as sugestoes que os agentes propoem.
@@ -529,9 +530,9 @@ function Markdown({ md, onNote }: { md: string; onNote: (title: string) => void 
                 {children}
               </button>
             ) : (
-              <span className="text-accent" title={href}>
+              <button type="button" title={href} onClick={() => href && void openExternal(href)} className="text-accent underline decoration-accent/40 underline-offset-2">
                 {children}
-              </span>
+              </button>
             ),
           h1: ({ children }) => <h2 className="mb-2 mt-6 font-display text-xl font-medium">{children}</h2>,
           h2: ({ children }) => <h3 className="mb-2 mt-6 font-display text-lg font-medium">{children}</h3>,
@@ -577,8 +578,9 @@ function LinkList({ title, empty, items, onOpen }: { title: string; empty: strin
 
 function Welcome({ ov, onOpenYou, onMap }: { ov: Overview; onOpenYou?: () => void; onMap: () => void }) {
   return (
-    <div className="grid h-full place-items-center px-8">
-      <div className="animate-enter max-w-lg text-center">
+    <div className="h-full overflow-y-auto px-8 pt-12">
+      <IntroCard which="brain" />
+      <div className="animate-enter mx-auto mt-10 max-w-lg text-center">
         <h1 className="font-display text-[28px] font-medium tracking-[-0.03em] text-fg">Seu segundo cérebro</h1>
         <p className="mt-2 text-md text-fg-muted">
           Os agentes consultam estas notas para planejar cada tarefa. Edite, ligue com [[colchetes duplos]] e crie as suas: o que vem de fábrica nunca é apagado.

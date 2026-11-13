@@ -74,4 +74,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Cargo check
         working-directory: desktop-tauri/src-tauri
-        run: cargo check --locked
+        run: |
+          cargo check --locked
+          cargo check --locked --features updater
