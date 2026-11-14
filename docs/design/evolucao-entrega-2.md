@@ -1,6 +1,6 @@
 # Evolução do AI Farm Agent — Entrega 2 (pré-requisito de segurança e Lab inicial)
 
-> Briefing: [prompt-evolucao-ai-farm-agent.md](prompt-evolucao-ai-farm-agent.md). Entrega anterior: [evolucao-entrega-1.md](evolucao-entrega-1.md).
+> Briefing: [prompt-evolucao-creative-aix.md](prompt-evolucao-creative-aix.md). Entrega anterior: [evolucao-entrega-1.md](evolucao-entrega-1.md).
 > Data: 2026-11-12. Escopo: limite operacional do Lab (isolamento do QML proposto) e etapa 4 (Lab inicial).
 
 ## 1. Pré-requisito de segurança: QML proposto não age fora

@@ -6,7 +6,7 @@ Observe o AI Farm Agent em execução, entenda como a pessoa realmente navega e 
 
 Entregue mudanças aplicadas na plataforma e verificadas visualmente. Mudanças em tokens, fontes, cores e animações são parte do trabalho quando sustentam uma melhoria de composição. O aceite depende do resultado das telas completas, da clareza dos fluxos e da comparação com a versão inicial.
 
-Este briefing cobre o redesign da plataforma existente, inclusive as telas já presentes de Lab, Biblioteca e Diário. O [briefing geral de evolução](prompt-evolucao-ai-farm-agent.md) serve como contexto de produto. Funcionalidades futuras, treinamento de agentes, conteúdo editorial novo e mudanças nas regras de execução ficam fora desta rodada. Preserve os dados, as configurações salvas e os contratos de integração. Use a experiência existente como base para decidir o que manter, reorganizar, simplificar ou redesenhar.
+Este briefing cobre o redesign da plataforma existente, inclusive as telas já presentes de Lab, Biblioteca e Diário. O [briefing geral de evolução](prompt-evolucao-creative-aix.md) serve como contexto de produto. Funcionalidades futuras, treinamento de agentes, conteúdo editorial novo e mudanças nas regras de execução ficam fora desta rodada. Preserve os dados, as configurações salvas e os contratos de integração. Use a experiência existente como base para decidir o que manter, reorganizar, simplificar ou redesenhar.
 
 ## 1. Abra e observe toda a plataforma antes de editar
 

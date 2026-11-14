@@ -24,8 +24,8 @@ O trabalho é dividido em fases. Cada fase termina num ponto estável: o app abr
 ```text
 Contexto
 O Creative AIx (ver README.md) é um assistente multiagente para Windows. O núcleo é Python 3.11:
-ai-farm-agent/core, ai-farm-agent/agents e o cofre AI-Farm-agents/. A interface atual é PySide6 + QML
-(ai-farm-agent/desktop). A ligação entre núcleo e interface passa por três peças:
+app/core, app/agents e o cofre vault/. A interface atual é PySide6 + QML
+(app/desktop). A ligação entre núcleo e interface passa por três peças:
 - desktop/event_bus.py: pub/sub thread-safe; o Controller publica eventos (phase, plan_ready, step_start,
   step_done, task_done, log, ...)
 - desktop/controller.py: orquestra as execuções
@@ -38,15 +38,15 @@ igual ou melhor que o atual. É uma melhoria, não uma reescrita: a estrutura ex
 funcionando durante toda a migração.
 
 Regras que não podem ser quebradas
-1. Não alterar a lógica de ai-farm-agent/core, ai-farm-agent/agents nem o cofre AI-Farm-agents/.
+1. Não alterar a lógica de app/core, app/agents nem o cofre vault/.
    Mudanças no núcleo só para expor dados que já existem, sempre aditivas, e justificadas no PR.
 2. A interface PySide6/QML continua sendo o padrão e continua funcionando até a nova ter paridade.
    A escolha entre as duas é feita por flag/config (ex.: `ui: qt | tauri` no config.yaml e
    `--ui tauri` no main.py), com padrão `qt`.
 3. O contrato da interface é o que o Bridge já expõe: os Signals e @Slots de desktop/bridge.py.
    Não inventar outro. A nova camada é um espelho desse contrato pela rede.
-4. A CI precisa continuar verde: `python ai-farm-agent/scripts/check_release.py --code-only`, testes em
-   ai-farm-agent/tests e pip-audit. Testes novos entram em ai-farm-agent/tests.
+4. A CI precisa continuar verde: `python app/scripts/check_release.py --code-only`, testes em
+   app/tests e pip-audit. Testes novos entram em app/tests.
 5. Segurança: o servidor local escuta apenas em 127.0.0.1, em porta aleatória, e exige um token aleatório
    por sessão que o Tauri recebe na inicialização do sidecar. Validar a origem. As capabilities do Tauri
    ficam no mínimo: sem shell aberto, sem fs amplo. As políticas e validadores em Python continuam sendo
@@ -68,17 +68,17 @@ Fase 0 — Leitura e plano
 - Não escrever código nesta fase.
 
 Fase 1 — Servidor de eventos (Python, aditivo)
-- Criar ai-farm-agent/desktop/server.py: servidor WebSocket assíncrono que assina o EventBus e expõe
+- Criar app/desktop/server.py: servidor WebSocket assíncrono que assina o EventBus e expõe
   os mesmos métodos dos @Slots em JSON-RPC 2.0 (request/response e notificações de evento).
 - Reaproveitar a lógica do Bridge sem duplicá-la. Se for preciso, extrair para uma classe sem Qt, como
   BridgeCore, que o Bridge (Qt) e o server usam igualmente. O comportamento do Bridge não muda.
-- Novo modo de execução headless: `python ai-farm-agent/main.py --ui tauri --headless` sobe só o núcleo
+- Novo modo de execução headless: `python app/main.py --ui tauri --headless` sobe só o núcleo
   e o servidor, imprime no stdout `{"port":..., "token":...}` e fica ouvindo.
 - Testes: handshake com token, token inválido recusado, um evento do bus chegando ao cliente, e uma
   chamada de método com retorno.
 
 Fase 2 — Casca Tauri
-- Nova pasta na raiz: desktop-tauri/ (src-tauri em Rust + src em React/TS). Não mexer na estrutura atual.
+- Nova pasta na raiz: ui/ (src-tauri em Rust + src em React/TS). Não mexer na estrutura atual.
 - O Rust sobe o sidecar Python (em desenvolvimento, o venv; em release, o binário Nuitka), lê porta e
   token, repassa ao frontend e mata o sidecar ao fechar. Se o sidecar cair, mostrar o erro na UI e
   oferecer reiniciar.

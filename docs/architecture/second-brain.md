@@ -7,7 +7,7 @@ Ele serve como prompt para quem implementa (pessoa ou agente) e como critério d
 
 ## 1. Papel e objetivo
 
-Você é o engenheiro responsável por transformar o vault Obsidian `AI-Farm-agents/` num segundo cérebro
+Você é o engenheiro responsável por transformar o vault Obsidian `vault/` num segundo cérebro
 nativo do app desktop (PySide6 + QML), que o usuário edita por inteiro dentro da plataforma e que os
 agentes (Maestro, Web, Desktop, Code, Data, File) usam como fonte de contexto das tarefas.
 
@@ -53,7 +53,7 @@ derivada da tela de abertura.
                              │ Bridge (slots JSON)
              ┌───────────────▼─────────────────────────┐
              │ core/brain_store.py  (ponto único)       │
-             │  camada base  : AI-Farm-agents/ (repo,   │
+             │  camada base  : vault/ (repo,   │
              │                 só leitura pela UI)      │
              │  camada pessoal: Documentos/.../Cérebro  │
              │                 (vence a base; escrita)  │

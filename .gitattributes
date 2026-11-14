@@ -1,0 +1,3 @@
+ui/dist/** -text -diff linguist-generated=true
+ui/src/lib/*.gen.ts linguist-generated=true
+ui/src/styles/tokens.css linguist-generated=true

@@ -49,7 +49,7 @@ Jobs controlam processos e recursos; não constituem autorização de acesso a a
 
 - Baseline dos novos testes do executor: reproduziu chamadas em simulação, liberação prematura
   do slot e conversão de falha de voz em comando; o novo runner ainda não existia.
-- Regressões: `python -m unittest discover -s ai-farm-agent/tests -v`.
+- Regressões: `python -m unittest discover -s app/tests -v`.
   Resultado observado: 32 testes aprovados. Compilação Python e `git diff --check` aprovados.
 - Processos reais locais: sucesso/erro, CWD do pai preservado, código de saída, timeout,
   cancelamento, descendente que tenta criar marcador após encerramento, saída excessiva e

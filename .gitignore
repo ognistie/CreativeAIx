@@ -24,6 +24,7 @@ __pycache__/
 .eggs/
 build/
 dist/
+!ui/dist/
 .Python
 pip-log.txt
 
@@ -36,23 +37,23 @@ env/
 ENV/
 
 # ─── Artefatos de execucao (gerados em runtime) ───────────────────
-ai-farm-agent/captures/*
-!ai-farm-agent/captures/.gitkeep
-ai-farm-agent/reports/*
-!ai-farm-agent/reports/.gitkeep
-ai-farm-agent/logs/*
-!ai-farm-agent/logs/.gitkeep
-ai-farm-agent/data.db
-ai-farm-agent/data.sqlite
-ai-farm-agent/desktop/data/*
-!ai-farm-agent/desktop/data/.gitkeep
-ai-farm-agent/memory/evolution/
+app/captures/*
+!app/captures/.gitkeep
+app/reports/*
+!app/reports/.gitkeep
+app/logs/*
+!app/logs/.gitkeep
+app/data.db
+app/data.sqlite
+app/desktop/data/*
+!app/desktop/data/.gitkeep
+app/memory/evolution/
 
 # Workflows aprendidos sao especificos do usuario — NAO commitar
-ai-farm-agent/memory/workflows/*.json
-ai-farm-agent/memory/workflows/.corrupted/
-ai-farm-agent/memory/workflows/.legacy/
-!ai-farm-agent/memory/workflows/.gitkeep
+app/memory/workflows/*.json
+app/memory/workflows/.corrupted/
+app/memory/workflows/.legacy/
+!app/memory/workflows/.gitkeep
 
 # ─── IDE / editor ────────────────────────────────────────────────
 .idea/
@@ -84,21 +85,21 @@ htmlcov/
 [{]core,ui/
 reports/
 
-# Logs na raiz do repo (alem dos em ai-farm-agent/logs/)
+# Logs na raiz do repo (alem dos em app/logs/)
 logs/
 
 # Memory pasta na raiz do repo (estrutura legada — fica fora)
 memory/
 
 # ─── Segundo cerebro (Obsidian) — dados de execucao locais ───────
-AI-Farm-agents/40 Execucoes/Planos/
-AI-Farm-agents/40 Execucoes/Sucesso/
-AI-Farm-agents/40 Execucoes/Falhas/
-AI-Farm-agents/.obsidian/workspace*.json
-AI-Farm-agents/50 Diario/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
-AI-Farm-agents/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *.md
-AI-Farm-agents/Sem t*tulo*.canvas
-AI-Farm-agents/Sem t*tulo*.base
+vault/40 Execucoes/Planos/
+vault/40 Execucoes/Sucesso/
+vault/40 Execucoes/Falhas/
+vault/.obsidian/workspace*.json
+vault/50 Diario/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+vault/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *.md
+vault/Sem t*tulo*.canvas
+vault/Sem t*tulo*.base
 
 # Material de divulgacao local (videos, prompts, imagens de rascunho)
 docs/marketing/

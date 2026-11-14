@@ -202,7 +202,7 @@ Linhas de QML hoje: 10.607. A ordem segue a Fase 4 do prompt.
    `single-instance` do Tauri na casca, e um mutex nomeado do Win32 no sidecar.
 8. **Tokens de design**: `Theme.qml` continua sendo a fonte única, porque `scripts/check_contrast.py`
    mede o AA lendo esse arquivo. Um script (`scripts/export_theme_tokens.py`) gera
-   `desktop-tauri/src/styles/tokens.css` a partir dele, e a CI confere se o arquivo gerado está em dia.
+   `ui/src/styles/tokens.css` a partir dele, e a CI confere se o arquivo gerado está em dia.
 
 ## 5. Riscos
 
@@ -229,7 +229,7 @@ Linhas de QML hoje: 10.607. A ordem segue a Fase 4 do prompt.
    novo do design system.
 4. **Rust e Node: requisitos só de desenvolvimento da interface.** O `scripts/setup.ps1` ganha um
    modo opcional (`-WithTauri`) que confere `node`, `npm` e `cargo` e instala as dependências de
-   `desktop-tauri/`. Quem só usa o app continua sem precisar de nenhum dos dois.
+   `ui/`. Quem só usa o app continua sem precisar de nenhum dos dois.
 
 ## 7. Fase 1 — feito
 
@@ -270,7 +270,7 @@ casca (variável de ambiente) para decidir quando pedir `windowRequest: enter_mi
 
 ## 8. Fase 2 — feito (Rust ainda sem compilar)
 
-- `desktop-tauri/`: Tauri 2 + React 18 + TS + Vite 6 + Tailwind 4. Duas janelas: `main`, sem moldura e
+- `ui/`: Tauri 2 + React 18 + TS + Vite 6 + Tailwind 4. Duas janelas: `main`, sem moldura e
   com titlebar própria, e `mini`, transparente, sempre no topo, fora da barra de tarefas, sem pegar
   foco e oculta até a Fase 4.
 - `src-tauri/src/sidecar.rs`: sobe `main.py --ui tauri --headless` (com `--dev` em debug) sem janela
@@ -297,7 +297,7 @@ pela CI até o bloqueio ser resolvido.
 ## 9. Fase 3 — feito
 
 - `scripts/export_theme_tokens.py` lê o `Theme.qml` com o mesmo parser do `check_contrast.py` e gera
-  `desktop-tauri/src/styles/tokens.css`: os dois temas, as 13 paletas (escuro e claro), espaçamento,
+  `ui/src/styles/tokens.css`: os dois temas, as 13 paletas (escuro e claro), espaçamento,
   raios com escala, tipografia e durações. Também gera `src/lib/icons.gen.ts` com os 60 desenhos do
   `Icon.qml`. O `Theme.qml` continua sendo a fonte única e o AA medido nele (442 medidas) vale para as
   duas interfaces. `--check` roda na CI e em `tests/test_bridge_contract.py`.
@@ -360,10 +360,10 @@ aberta, o que nesta máquina depende do Smart App Control.
 - **Plugins do Tauri:** `dialog` (anexar arquivos no Composer, pelo botão + ou arrastando para a janela) e
   `opener` (links externos da Biblioteca, do Sobre e das notas do Cérebro). Capability do opener limitada a
   `https://*`.
-- **Núcleo empacotado** (`ai-farm-agent/scripts/build_core.py`): Nuitka `--standalone` só do modo headless.
+- **Núcleo empacotado** (`app/scripts/build_core.py`): Nuitka `--standalone` só do modo headless.
   PySide6 e os arquivos da interface Qt ficam de fora. O pacote repete o layout do repositório
-  (`core/` com o executável, `config.yaml` e os dados; `AI-Farm-agents/` ao lado), então
-  `Path(__file__).parent.parent/config.yaml` e `brain.vault_path = "../AI-Farm-agents"` continuam valendo
+  (`core/` com o executável, `config.yaml` e os dados; `vault/` ao lado), então
+  `Path(__file__).parent.parent/config.yaml` e `brain.vault_path = "../vault"` continuam valendo
   sem mudar o núcleo.
 - **Sidecar** (`sidecar.rs`): no app instalado roda `<recursos>/core/creative-aix-core.exe`; em
   desenvolvimento continua no `main.py` do repositório. O que o núcleo escrever no stdout antes do anúncio
@@ -442,3 +442,29 @@ do núcleo (`shell-run.json`) e confere que o núcleo encerra quando a casca é 
 
 Rodar o `release.yml`, ajustar o Nuitka até o smoke do `.exe` passar e registrar aqui os números de
 `sizes.json` e `shell-run.json`. Depois, decidir quando trocar o padrão para `ui.shell: tauri`.
+
+## 13. Decisão final: a interface React dentro do app Qt (2026-11-14)
+
+O Controle Inteligente de Aplicativos do Windows bloqueia executáveis sem assinatura. Sem desligá-lo
+e sem certificado de código, a casca Tauri não roda na máquina de desenvolvimento nem na dos usuários.
+Por isso o app oficial continua sendo o Python + Qt, e a interface React passa a rodar dentro dele:
+
+- `app/desktop/web_host.py`: janelas Qt com QtWebEngine (principal + mini chat). `python.exe` e
+  `QtWebEngineProcess.exe` (assinado pela The Qt Company) não são bloqueados.
+- `WebBridge` é o `Bridge` do app QML (atalhos, voz, `WindowMode`) com cada evento também indo para o
+  servidor local; os métodos de janela são executados na thread da interface.
+- A página só carrega do esquema `app://` servido pelo Python (`ui/dist`); porta e token entram por
+  script injetado; links https vão para o navegador; fotos de papel de parede saem por
+  `app://wallpaper/<id>`, resolvidas pelo `core/wallpapers.py`, sem expor caminhos de disco.
+- Principal e mini chat trocam o estado da tarefa por `BroadcastChannel` (mesma origem).
+- `config.yaml > ui.shell: web` é o padrão; `--ui qt` abre a interface QML anterior.
+- `ui/dist` vai no repositório (o app não precisa de Node); a CI confere que corresponde ao código.
+- `app/scripts/snapshot_web_ui.py` abre o app de verdade sem janela na tela, navega por todas as telas,
+  salva as capturas e falha se o núcleo não conectar.
+
+A casca Tauri (`ui/src-tauri`) e o empacotamento continuam no repositório para quando houver
+certificado de assinatura; não são o caminho principal.
+
+Repositório reorganizado: `ai-farm-agent/` → `app/`, `AI-Farm-agents/` → `vault/`, `desktop-tauri/` → `ui/`.
+A pasta pessoal `Documentos/AI Farm Agent` e o `APP_ID` do atalho mantêm o nome antigo para não perder
+dados nem quebrar atalhos já instalados.

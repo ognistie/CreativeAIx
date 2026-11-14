@@ -33,7 +33,7 @@ do procedimento. Separar essas duas evidências é requisito da próxima entrega
 
 ## Evidência local
 
-Comando: `python -m unittest discover -s ai-farm-agent/tests -v`.
+Comando: `python -m unittest discover -s app/tests -v`.
 Python local: 3.14; openpyxl: 3.1.5. A CI usa Python 3.12 e executa a mesma suíte.
 Os oito primeiros casos tiveram 1 aprovação, 3 falhas e 4 erros antes do patch
 (após corrigir o diretório temporário do ambiente). Após o patch passaram os oito.

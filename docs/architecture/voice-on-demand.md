@@ -243,10 +243,10 @@ Depois de adicionar a chave, teste opcional **pago**, com frase sintética, sem 
 reprodução automática:
 
 ```powershell
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/smoke_live_voice.py --allow-live
+.\.venv\Scripts\python.exe app/scripts/smoke_live_voice.py --allow-live
 ```
 
-Salva `voice.wav` e `result.json` em `ai-farm-agent/memory/live-voice-smoke/` (ignorado).
+Salva `voice.wav` e `result.json` em `app/memory/live-voice-smoke/` (ignorado).
 Ouvir o WAV é necessário para validar qualidade/pronúncia. O teste não roda na CI nem no gate padrão.
 
 **Limites da narração:** pronúncia e naturalidade não foram avaliadas por uma pessoa. Bufferização

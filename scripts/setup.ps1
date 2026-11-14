@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $venvPath = Join-Path $repoRoot '.venv'
 $venvPython = Join-Path $venvPath 'Scripts/python.exe'
-$lockPath = Join-Path $repoRoot 'ai-farm-agent/requirements-windows-py311.lock.txt'
+$lockPath = Join-Path $repoRoot 'app/requirements-windows-py311.lock.txt'
 if (-not (Test-Path -LiteralPath $venvPython)) {
     if ($PythonExecutable -eq 'py') {
         & $PythonExecutable -3.11 -m venv $venvPath
@@ -18,8 +18,19 @@ if ($LASTEXITCODE -ne 0) { throw 'Versao Python diferente da validada.' }
 if ($LASTEXITCODE -ne 0) { throw 'Falha na instalacao das dependencias.' }
 & $venvPython -m pip check
 if ($LASTEXITCODE -ne 0) { throw 'Dependencias inconsistentes.' }
-& $venvPython (Join-Path $PSScriptRoot '..\ai-farm-agent\scripts\install_shortcuts.py')
+& $venvPython (Join-Path $PSScriptRoot '..\app\scripts\install_shortcuts.py')
 if ($LASTEXITCODE -ne 0) { Write-Warning 'Atalhos nao criados; o app ainda abre por iniciar.cmd.' }
+# Interface do app (ui/dist ja vem pronta no repositorio). Com Node instalado, gera de novo a partir do codigo.
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Push-Location (Join-Path $repoRoot 'ui')
+    try {
+        npm ci --no-fund --no-audit
+        if ($LASTEXITCODE -eq 0) { npm run build }
+        if ($LASTEXITCODE -ne 0) { Write-Warning 'Nao deu para gerar a interface; o app usa a ui/dist do repositorio.' }
+    } finally {
+        Pop-Location
+    }
+}
 if ($WithTauri) {
     # Interface Tauri (desenvolvimento): Node e Rust so para quem mexe na interface nova.
     foreach ($tool in 'node', 'npm', 'cargo') {
@@ -27,13 +38,13 @@ if ($WithTauri) {
             throw "Interface Tauri: '$tool' nao encontrado. Instale Node.js LTS e Rust (rustup) e rode de novo com -WithTauri."
         }
     }
-    Push-Location (Join-Path $repoRoot 'desktop-tauri')
+    Push-Location (Join-Path $repoRoot 'ui')
     try {
         npm ci
         if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar as dependencias da interface Tauri.' }
     } finally {
         Pop-Location
     }
-    Write-Output 'Interface Tauri pronta: cd desktop-tauri; npm run tauri dev'
+    Write-Output 'Interface Tauri pronta: cd ui; npm run tauri dev'
 }
 Write-Output 'Ambiente preparado. Configure .env e abra o Creative AIx pelo atalho na Area de Trabalho.'

@@ -104,12 +104,12 @@ security:
 privacy:
   capture_enabled: false
 
-# Segundo cerebro (Obsidian). Caminho relativo a pasta ai-farm-agent/.
+# Segundo cerebro (Obsidian). Caminho relativo a pasta app/.
 # Os agentes leem playbooks/politicas/tarefas de referencia e o app grava
 # planos, validacoes e execucoes. Se a pasta nao existir, o app segue sem.
 brain:
   enabled: true
-  vault_path: "../AI-Farm-agents"
+  vault_path: "../vault"
   # Seu cerebro (fora do repositorio): notas que voce cria ou edita no app, secao Voce,
   # Harness e o indice de busca. "" = Documentos/AI Farm Agent/Cerebro
   personal_enabled: true
@@ -170,7 +170,7 @@ coding_agents:
 
 # Interface desktop
 ui:
-  shell: qt                    # qt (padrao) | tauri: interface nova, aberta pelo desktop-tauri (docs/architecture/tauri-ui.md)
+  shell: web                   # web (padrao): interface React no app Qt | qt: interface QML anterior
   splash: true                 # tela de abertura ("pressione qualquer tecla para entrar")
   mini_chat: true              # quando o agente vai para outra janela, a conversa fica num mini chat no canto
   stop_hotkey: "ctrl+alt+x"    # atalho global para parar a execucao (o mini chat nao recebe cliques enquanto o agente trabalha)

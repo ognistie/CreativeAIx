@@ -13,7 +13,7 @@ pessoa pede tarefas em linguagem natural (texto ou voz) e um Maestro distribui o
 
 ## 2. Contexto que você precisa conhecer (leia o código, não suponha)
 
-- Entrada do app: `ai-farm-agent/main.py` → `desktop/main.py` → `desktop/qml/Main.qml`; ponte Python↔QML em `desktop/bridge.py`.
+- Entrada do app: `app/main.py` → `desktop/main.py` → `desktop/qml/Main.qml`; ponte Python↔QML em `desktop/bridge.py`.
 - Execução: `desktop/controller.py` (resolve, Maestro, agentes, motor `core/automation.py`), registro durável `core/task_ledger.py`.
 - Segurança já existente, que **não pode enfraquecer**: `core/action_policy.py` (ferramentas por agente),
   `core/action_risk.py` (porta de efeito em `enforce`, uma vez por tarefa), `core/plan_validator.py` (POL-000…009),
@@ -41,7 +41,7 @@ acompanha o andamento e recebe o resultado, sem sair do app.
    atalho, e progresso transmitido linha a linha para a tela e para o registro de tarefas.
 4. **Isolamento:** o agente externo só trabalha numa pasta de projeto que a pessoa escolheu (ou numa *worktree* git nova).
    Nunca na pasta do próprio AI Farm Agent fora do modo Desenvolvedor (E3). O resultado volta como diff + resumo.
-5. **Opcional, só depois de E1.1–E1.4 aceitos:** um servidor MCP local (`ai-farm-agent/mcp_server.py`, stdio) que expõe
+5. **Opcional, só depois de E1.1–E1.4 aceitos:** um servidor MCP local (`app/mcp_server.py`, stdio) que expõe
    ferramentas *de leitura* do app ao Claude Code e ao Codex (consultar o Cérebro, o andamento das tarefas, a lista de
    projetos). Nenhuma ferramenta MCP executa ação no computador nesta versão.
 
@@ -87,7 +87,7 @@ não copie layout, marca, textos ou ícones de terceiros.
 
 - A pessoa anexa as imagens junto com este prompt (três pinturas de paisagem: veleiro em baía ensolarada, cidade costeira
   à noite, vale de montanha sob tempestade). Elas vêm **com o app**, disponíveis para todos escolherem, em
-  `ai-farm-agent/desktop/assets/wallpapers/`.
+  `app/desktop/assets/wallpapers/`.
 - **Licença antes de empacotar (o repositório é público):** para cada imagem, registre em
   `desktop/assets/wallpapers/CREDITS.md` título, autor, ano, fonte e licença. Só entra no repositório imagem em domínio
   público ou com licença que permita redistribuição (ex.: pintura de autor falecido há mais de 70 anos em reprodução fiel,

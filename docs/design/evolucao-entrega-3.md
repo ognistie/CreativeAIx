@@ -1,6 +1,6 @@
 # Evolução do AI Farm Agent — Entrega 3 (pendências do briefing)
 
-> Briefing: [prompt-evolucao-ai-farm-agent.md](prompt-evolucao-ai-farm-agent.md). Entregas anteriores: [1](evolucao-entrega-1.md), [2](evolucao-entrega-2.md).
+> Briefing: [prompt-evolucao-creative-aix.md](prompt-evolucao-creative-aix.md). Entregas anteriores: [1](evolucao-entrega-1.md), [2](evolucao-entrega-2.md).
 > Data: 2026-11-12. Escopo: tudo o que as entregas 1 e 2 listaram como pendente, menos o que depende de requisitos externos (ver §6).
 
 ## 1. Segurança: escopo do agente de Arquivos

@@ -11,8 +11,8 @@ Harness > Desenvolvedor; cada nível tem uma chave própria.
 
 ## Nível 3, passo a passo
 
-1. **Propor**: `git worktree add -b dev/<id> <fora do repo>/.ai-farm-agent-dev/<id>`; a CLI roda na pasta
-   `ai-farm-agent` da worktree (o adaptador de E1 recusa a pasta do app de verdade, e a worktree fica fora dela).
+1. **Propor**: `git worktree add -b dev/<id> <fora do repo>/.creative-aix-dev/<id>`; a CLI roda na pasta
+   `app` da worktree (o adaptador de E1 recusa a pasta do app de verdade, e a worktree fica fora dela).
 2. **Conferência em código** (`path_violation`): todo caminho tocado precisa estar em `desktop/qml/views`,
    `desktop/qml/components` ou `desktop/qml/dev` e ser `.qml`, `.js` ou `.md`. `core/action_risk.py`,
    `core/action_policy.py`, `core/plan_validator.py`, `core/process_runner.py`, `main.py`, `desktop/bridge.py`,
@@ -24,7 +24,7 @@ Harness > Desenvolvedor; cada nível tem uma chave própria.
    na worktree após a revisão exige uma nova proposta. A worktree sai e a branch fica.
 6. **Desfazer**: `git revert -m 1` do commit de merge.
 
-Estado das propostas em `ai-farm-agent/memory/dev_mode.json` (fora do git).
+Estado das propostas em `app/memory/dev_mode.json` (fora do git).
 
 ## Verificação
 
