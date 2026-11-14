@@ -69,11 +69,10 @@ jobs:
         run: |
           npm run typecheck
           npm test
-      - name: Build frontend (must match the committed ui/dist used by the desktop app)
-        shell: bash
-        run: |
-          npx vite build
-          git diff --exit-code --stat -- dist || (echo "ui/dist desatualizado: rode 'npm run build' em ui/ e commite" && exit 1)
+      - name: Committed ui/dist matches the sources (loaded by the desktop app)
+        run: npm run build:check
+      - name: Build frontend
+        run: npx vite build
       - uses: dtolnay/rust-toolchain@stable
       - name: Cargo check
         working-directory: ui/src-tauri
