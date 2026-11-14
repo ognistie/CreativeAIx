@@ -17,7 +17,7 @@ as notas ainda presentes, os contratos atuais e as regras de recuperação.
 O [manifesto por nota](vault-curation.json) registra as 249 retiradas, o SHA-256 da versão
 original no Git, o motivo e o substituto. Nenhuma retirada foi aprovada apenas por quantidade.
 Conteúdo local anterior à edição foi copiado para
-`ai-farm-agent/memory/vault-curation-2026-10-31/before/`; a leitura original das 237 notas está
+`app/memory/vault-curation-2026-10-31/before/`; a leitura original das 237 notas está
 no mesmo diretório em `deleted-baseline.json`. Esses backups são ignorados e não entram no prompt.
 Não houve commit, push, alteração do index, reset ou reescrita de histórico.
 
@@ -64,8 +64,8 @@ e cadastro após a consolidação foi corrigida e testada; nenhuma evidência fo
 transformar procedimentos revisados em execuções comprovadas.
 
 ```powershell
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/check_vault.py
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/check_release.py
+.\.venv\Scripts\python.exe app/scripts/check_vault.py
+.\.venv\Scripts\python.exe app/scripts/check_release.py
 ```
 
 Testes cobrem restauração, promoção indevida, manifesto inválido, substituto ausente, hash

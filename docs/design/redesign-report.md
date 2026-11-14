@@ -2,7 +2,7 @@
 
 Rodada de 12/11/2026. Mesmas condições antes e depois: `scripts/capture_ui.py` com `UI_GPU=1 UI_SYNTHETIC=1
 QT_SCALE_FACTOR=1.5 UI_SIZE=1280x720` (2400 × 1350 px), temas escuro e claro, dados sintéticos (nada da pasta
-pessoal). As capturas ficam em `ai-farm-agent/memory/ui-captures/` (fora do Git).
+pessoal). As capturas ficam em `app/memory/ui-captures/` (fora do Git).
 
 ## 1. Inventário
 

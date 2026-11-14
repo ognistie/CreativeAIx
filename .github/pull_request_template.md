@@ -1,7 +1,7 @@
 ## What and why
 
 ## How it was validated
-- [ ] `python -X utf8 scripts/smoke_code_agent.py` passes (from `ai-farm-agent/`)
+- [ ] `python -X utf8 scripts/smoke_code_agent.py` passes (from `app/`)
 - [ ] Model-backed checks run (if relevant), with cost noted
 
 ## Checklist

@@ -13,7 +13,7 @@ This project follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 1. Fork the repository and create a focused branch.
 2. Set up the environment using the README.
 3. Make a coherent change and preserve unrelated behavior.
-4. Run relevant checks. For Python agent changes, run `python -X utf8 scripts/smoke_code_agent.py` from `ai-farm-agent/`.
+4. Run relevant checks. For Python agent changes, run `python -X utf8 scripts/smoke_code_agent.py` from `app/`.
 5. Open a pull request describing the problem, resulting behavior, validation and known limitations.
 
 Use concise commit messages that explain the change. Existing history follows Conventional Commits, such as `fix:`, `feat:` and `docs:`.

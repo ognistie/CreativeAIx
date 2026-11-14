@@ -52,7 +52,7 @@ alterados e removidos. Sem pasta no pedido nem na conversa, a resposta é uma pe
 
 ## Servidor MCP de leitura (E1.5)
 
-`ai-farm-agent/mcp_server.py` (stdio, JSON-RPC, sem dependências) expõe ao Claude Code e ao Codex cinco
+`app/mcp_server.py` (stdio, JSON-RPC, sem dependências) expõe ao Claude Code e ao Codex cinco
 ferramentas **só de leitura**: `brain_search`, `brain_read` (apenas `.md` do Cérebro, sem `..`), `task_status`,
 `recent_tasks` e `list_projects`. Trechos com cara de chave são mascarados. Ligado por padrão
 (`coding_agents.mcp` no config, e o interruptor em Configurações > Agentes de código, que vence o config):

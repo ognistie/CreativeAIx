@@ -46,7 +46,7 @@ em [vault-curation.json](vault-curation.json). Originais preservados no históri
 
 ## Evidências executadas
 
-Os arquivos completos ficam em `ai-farm-agent/memory/`, ignorados pelo Git. A tabela é um
+Os arquivos completos ficam em `app/memory/`, ignorados pelo Git. A tabela é um
 registro local, não substitui a execução da CI no commit final.
 
 | Verificação | Resultado e limite |
@@ -125,8 +125,8 @@ Na raiz, com Python 3.11 instalado:
 
 ```powershell
 .\scripts\setup.ps1
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/check_release.py --code-only
-.\.venv\Scripts\python.exe ai-farm-agent/main.py
+.\.venv\Scripts\python.exe app/scripts/check_release.py --code-only
+.\.venv\Scripts\python.exe app/main.py
 ```
 
 O setup reutiliza `.venv` existente somente se a versão Python for 3.11. Não remove ambientes.
@@ -138,8 +138,8 @@ aprovadas por uma contagem ou por uma flag global. O gate local não chama model
 Avaliação opcional com API, explicitamente cobrada pelo provedor:
 
 ```powershell
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/eval_release_artifacts.py --allow-live --split regression --trials 3
-.\.venv\Scripts\python.exe ai-farm-agent/scripts/eval_release_artifacts.py --allow-live --split holdout --trials 3
+.\.venv\Scripts\python.exe app/scripts/eval_release_artifacts.py --allow-live --split regression --trials 3
+.\.venv\Scripts\python.exe app/scripts/eval_release_artifacts.py --allow-live --split holdout --trials 3
 ```
 
 Para reversão, revisar e isolar o diff desta entrega; ele compartilha arquivos com trabalho

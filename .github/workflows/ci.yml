@@ -17,11 +17,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: ai-farm-agent/requirements-windows-py311.lock.txt
+          cache-dependency-path: app/requirements-windows-py311.lock.txt
       - name: Install reviewed Windows environment
-        run: python -m pip install -r ai-farm-agent/requirements-windows-py311.lock.txt
+        run: python -m pip install -r app/requirements-windows-py311.lock.txt
       - name: Release code gate (no model calls or personal desktop actions)
-        run: python ai-farm-agent/scripts/check_release.py --code-only
+        run: python app/scripts/check_release.py --code-only
       - name: Audit installed dependencies
         run: |
           python -m pip install pip-audit==2.10.1
@@ -32,8 +32,8 @@ jobs:
         with:
           name: release-check
           path: |
-            ai-farm-agent/memory/release-check.json
-            ai-farm-agent/memory/release-check/
+            app/memory/release-check.json
+            app/memory/release-check/
       - name: Ensure no secrets files are tracked
         shell: bash
         run: |
@@ -41,39 +41,41 @@ jobs:
             echo "Sensitive file tracked"; exit 1
           fi
 
-  tauri-ui:
+  ui:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: desktop-tauri
+        working-directory: ui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: desktop-tauri/package-lock.json
+          cache-dependency-path: ui/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: ai-farm-agent/requirements-windows-py311.lock.txt
+          cache-dependency-path: app/requirements-windows-py311.lock.txt
       - name: Contract types match the Python core
         run: |
-          python -m pip install -r ../ai-farm-agent/requirements-windows-py311.lock.txt
-          python ../ai-farm-agent/scripts/export_tauri_contract.py --check
-          python ../ai-farm-agent/scripts/export_theme_tokens.py --check
+          python -m pip install -r ../app/requirements-windows-py311.lock.txt
+          python ../app/scripts/export_tauri_contract.py --check
+          python ../app/scripts/export_theme_tokens.py --check
       - name: Install
         run: npm ci
       - name: Typecheck and test
         run: |
           npm run typecheck
           npm test
+      - name: Committed ui/dist matches the sources (loaded by the desktop app)
+        run: npm run build:check
       - name: Build frontend
         run: npx vite build
       - uses: dtolnay/rust-toolchain@stable
       - name: Cargo check
-        working-directory: desktop-tauri/src-tauri
+        working-directory: ui/src-tauri
         run: |
           cargo check --locked
           cargo check --locked --features updater

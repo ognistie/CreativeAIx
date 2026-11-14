@@ -1,6 +1,6 @@
 # Evolução do AI Farm Agent — Entrega 1 (etapas 1 a 3)
 
-> Briefing: [prompt-evolucao-ai-farm-agent.md](prompt-evolucao-ai-farm-agent.md). Data: 2026-11-12.
+> Briefing: [prompt-evolucao-creative-aix.md](prompt-evolucao-creative-aix.md). Data: 2026-11-12.
 > Escopo desta entrega: base e arquitetura, fundação de navegação (paleta de comandos e áreas novas),
 > **Diário** e **Biblioteca**. O **AI Research Lab** fica para as etapas 4 e 5 (ver Pendências).
 
