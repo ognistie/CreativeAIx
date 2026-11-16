@@ -8,7 +8,7 @@ desktop, the browser, files, spreadsheets and code, with a local, editable knowl
 ![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB)
 [![CI](https://github.com/ognistie/CreativeAIx/actions/workflows/ci.yml/badge.svg)](https://github.com/ognistie/CreativeAIx/actions/workflows/ci.yml)
 
-![Creative AIx desktop](docs/images/creative-aix.png)
+![Creative AIx](docs/images/creative-aix.jpg)
 
 ## How it works
 
