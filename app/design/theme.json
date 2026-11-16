@@ -1,0 +1,269 @@
+{
+  "_doc": "Fonte unica dos tokens visuais. app/scripts/export_theme_tokens.py gera ui/src/styles/tokens.css; app/scripts/check_contrast.py mede o AA aqui. Cores: #rrggbb ou rgb(r g b / alfa).",
+  "palette": "abismo",
+  "colors": {
+    "dark": {
+      "bgSidebar": "rgb(9 9 10 / 0.62)",
+      "bgSurface": "#141517",
+      "bgGlass": "rgb(15 16 17 / 0.72)",
+      "bgGlassHi": "rgb(26 27 28 / 0.86)",
+      "glassEdge": "rgb(255 255 255 / 0.1)",
+      "bgSurfaceHi": "#1e2023",
+      "bgHover": "rgb(255 255 255 / 0.06)",
+      "bgPressed": "rgb(255 255 255 / 0.1)",
+      "bgChip": "rgb(255 255 255 / 0.06)",
+      "bgRowHover": "rgb(255 255 255 / 0.08)",
+      "hairline": "rgb(255 255 255 / 0.1)",
+      "hairlineHi": "rgb(255 255 255 / 0.18)",
+      "sheen": "rgb(255 255 255 / 0.045)",
+      "shadow": "rgb(0 0 0 / 0.35)",
+      "edge": "rgb(255 255 255 / 0.08)",
+      "shadowSoft": "rgb(0 0 0 / 0.0)",
+      "textPrimary": "#f3f4f4",
+      "textSecondary": "#b8bdbc",
+      "textTertiary": "#a2a8a7",
+      "textInverse": "#0b0c0d",
+      "primary": "#f3f4f4",
+      "accent": "#16897e",
+      "success": "#4cc56a",
+      "danger": "#ff6b5f",
+      "warning": "#f2a33a",
+      "phosphor": "#fde9ff",
+      "focusRing": "#9fe6df",
+      "artInkHover": "#000000"
+    },
+    "light": {
+      "bgSidebar": "rgb(249 251 249 / 0.7)",
+      "bgSurface": "#ffffff",
+      "bgGlass": "rgb(251 252 251 / 0.74)",
+      "bgGlassHi": "rgb(255 255 255 / 0.88)",
+      "glassEdge": "rgb(255 255 255 / 0.9)",
+      "bgSurfaceHi": "#e9efeb",
+      "bgHover": "rgb(0 0 0 / 0.04)",
+      "bgPressed": "rgb(0 0 0 / 0.07)",
+      "bgChip": "rgb(255 255 255 / 0.5)",
+      "bgRowHover": "rgb(255 255 255 / 0.6)",
+      "hairline": "rgb(0 56 51 / 0.12)",
+      "hairlineHi": "rgb(0 56 51 / 0.2)",
+      "sheen": "rgb(255 255 255 / 0.0)",
+      "shadow": "rgb(89 64 115 / 0.06)",
+      "edge": "rgb(0 0 0 / 0.0)",
+      "shadowSoft": "rgb(5 31 28 / 0.045)",
+      "textPrimary": "#102825",
+      "textSecondary": "#4c625e",
+      "textTertiary": "#4f6561",
+      "textInverse": "#ffffff",
+      "primary": "#102825",
+      "accent": "#16897e",
+      "success": "#28a745",
+      "danger": "#e5372b",
+      "warning": "#d97706",
+      "phosphor": "#6b3a73",
+      "focusRing": "#156b64",
+      "artInkHover": "#000000"
+    }
+  },
+  "palettes": {
+    "light": {
+      "abismo": [
+        "#f4f7f4",
+        "#cfe6df",
+        "#e3eee6",
+        "#e4ddef"
+      ],
+      "ameixa": [
+        "#f8f3f5",
+        "#e9c9d8",
+        "#f1d3dc",
+        "#d9c8e6"
+      ],
+      "nevoa": [
+        "#f6f5ee",
+        "#cfe7dd",
+        "#e4efe3",
+        "#d6e6e4"
+      ],
+      "matcha": [
+        "#f5f2e8",
+        "#d2dfb8",
+        "#e8e2cc",
+        "#c9d9b4"
+      ],
+      "seda": [
+        "#fbf4f1",
+        "#f6c7b8",
+        "#f3cad6",
+        "#dccbf2"
+      ],
+      "aurora": [
+        "#fbf7f4",
+        "#f8c3ae",
+        "#f9d29a",
+        "#d7c6f4"
+      ],
+      "brisa": [
+        "#f5f8fb",
+        "#b9ddf6",
+        "#c7eedc",
+        "#d9d0f7"
+      ],
+      "coral": [
+        "#fbf6f3",
+        "#f7b4a8",
+        "#f6d5b8",
+        "#f2c4dd"
+      ],
+      "menta": [
+        "#f4faf7",
+        "#bde8d5",
+        "#ddf0c4",
+        "#c6ddf4"
+      ],
+      "lavanda": [
+        "#f8f6fc",
+        "#d9ccf7",
+        "#f3d0e8",
+        "#c9d6f7"
+      ],
+      "areia": [
+        "#fbf8f2",
+        "#f2ddb8",
+        "#efcbb0",
+        "#dce3cf"
+      ],
+      "oceano": [
+        "#f3f7fa",
+        "#a9cfef",
+        "#b5e3e6",
+        "#c8c4f2"
+      ],
+      "aurora-boreal": [
+        "#f4f8f8",
+        "#b3ebd9",
+        "#bfd5f7",
+        "#e2c8f4"
+      ]
+    },
+    "dark": {
+      "abismo": [
+        "#08090a",
+        "#0e2523",
+        "#131617",
+        "#1a1626"
+      ],
+      "ameixa": [
+        "#160b14",
+        "#4a1c3a",
+        "#6e2a4a",
+        "#3a1a4a"
+      ],
+      "nevoa": [
+        "#0b1715",
+        "#1e4a40",
+        "#2c5a50",
+        "#20403e"
+      ],
+      "matcha": [
+        "#10140c",
+        "#34482a",
+        "#4a5236",
+        "#2c4030"
+      ],
+      "seda": [
+        "#170e14",
+        "#6a3038",
+        "#5e2a4e",
+        "#3e2a66"
+      ],
+      "aurora": [
+        "#120f17",
+        "#7a3e3a",
+        "#7a5a2a",
+        "#4a3a78"
+      ],
+      "brisa": [
+        "#0e141b",
+        "#2a4f6e",
+        "#2e5e4c",
+        "#3f3c70"
+      ],
+      "coral": [
+        "#161013",
+        "#8a3f3a",
+        "#7a5540",
+        "#6e3f62"
+      ],
+      "menta": [
+        "#0f1613",
+        "#2e6a54",
+        "#4c6b2e",
+        "#2f4f78"
+      ],
+      "lavanda": [
+        "#13111a",
+        "#4e3f80",
+        "#703f66",
+        "#3a4c7a"
+      ],
+      "areia": [
+        "#17140f",
+        "#7a6236",
+        "#73513d",
+        "#4e5a3e"
+      ],
+      "oceano": [
+        "#0e141a",
+        "#255c86",
+        "#2a6e72",
+        "#3e3a7a"
+      ],
+      "aurora-boreal": [
+        "#0e1516",
+        "#2a6e5a",
+        "#2f4f78",
+        "#5a3f78"
+      ]
+    }
+  },
+  "spacing": {
+    "sp1": 4,
+    "sp2": 8,
+    "sp3": 12,
+    "sp4": 16,
+    "sp5": 24,
+    "sp6": 32
+  },
+  "sizes": {
+    "sizeXs": 11,
+    "sizeSm": 12,
+    "sizeMd": 14,
+    "sizeLg": 16,
+    "sizeXl": 20,
+    "sizeHero": 34
+  },
+  "durations": {
+    "durFast": 140,
+    "durNormal": 220,
+    "durPanel": 320,
+    "durSlow": 400,
+    "stagger": 40
+  },
+  "contentMax": 760,
+  "radii": {
+    "r1": 6,
+    "r2": 10,
+    "r3": 16,
+    "r4": 20,
+    "rComposer": 22
+  },
+  "radiusScale": {
+    "reto": 0.35,
+    "redondo": 1.6
+  },
+  "press": 0.985,
+  "fonts": {
+    "fontSans": "Inter Variable",
+    "fontDisplay": "Inter Variable",
+    "fontMono": "Cascadia Mono"
+  }
+}

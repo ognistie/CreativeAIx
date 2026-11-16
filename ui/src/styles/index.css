@@ -1,0 +1,812 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* tokens.css e gerado a partir do Theme.qml (scripts/export_theme_tokens.py). Aqui so o mapeamento
+   para as classes do Tailwind e o basico da pagina. Cor nova: crie no Theme.qml e regenere. */
+
+@theme inline {
+  --color-canvas: var(--bg-base);
+  --color-sidebar: var(--bg-sidebar);
+  --color-surface: var(--bg-surface);
+  --color-surface-hi: var(--bg-surface-hi);
+  --color-glass: var(--bg-glass);
+  --color-glass-hi: var(--bg-glass-hi);
+  --color-glass-edge: var(--glass-edge);
+  --color-hover: var(--bg-hover);
+  --color-pressed: var(--bg-pressed);
+  --color-chip: var(--bg-chip);
+  --color-row-hover: var(--bg-row-hover);
+  --color-hairline: var(--hairline);
+  --color-hairline-hi: var(--hairline-hi);
+  --color-edge: var(--edge);
+  --color-fg: var(--text-primary);
+  --color-fg-muted: var(--text-secondary);
+  --color-fg-subtle: var(--text-tertiary);
+  --color-fg-inverse: var(--text-inverse);
+  --color-primary: var(--primary);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-ok-ink: var(--ok-ink);
+  --color-bad-ink: var(--bad-ink);
+  --color-warn-ink: var(--warn-ink);
+  --color-ok: var(--success);
+  --color-bad: var(--danger);
+  --color-warn: var(--warning);
+  --color-focus: var(--focus-ring);
+  --color-tone-1: var(--tone-1);
+  --color-tone-2: var(--tone-2);
+  --color-tone-3: var(--tone-3);
+
+  --radius-r1: var(--r1);
+  --radius-r2: var(--r2);
+  --radius-r3: var(--r3);
+  --radius-r4: var(--r4);
+  --radius-composer: var(--r-composer);
+
+  --text-xs: var(--size-xs);
+  --text-sm: var(--size-sm);
+  --text-md: var(--size-md);
+  --text-lg: var(--size-lg);
+  --text-xl: var(--size-xl);
+  --text-hero: var(--size-hero);
+
+  --font-sans: var(--font-sans-family);
+  --font-display: var(--font-display-family);
+  --font-mono: var(--font-mono-family);
+
+  --ease-standard: var(--ease-standard);
+  --ease-out: var(--ease-out);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans-family);
+  font-size: var(--size-md);
+  /* Inter com os desenhos alternativos mais limpos (l com cauda, 1/3/4 abertos, a de um andar): o mesmo ajuste
+     usado por Linear e Vercel. Medidas em px inteiros e pesos 450-600: o texto fica nitido em qualquer escala. */
+  font-feature-settings: "cv01", "cv02", "cv03", "cv04", "cv11", "ss03";
+  font-optical-sizing: auto;
+  letter-spacing: -0.006em;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+h1,
+h2,
+h3,
+.font-display {
+  letter-spacing: -0.022em;
+}
+
+body.mini {
+  background: transparent;
+}
+
+/* Em @layer base: as classes do Tailwind (ex.: outline-none num campo com borda propria) vencem. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+/* Movimento: uma gramatica so (Theme.qml). Duracao 0 com data-motion="off" ou reduced-motion. */
+.motion-fast {
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--ease-standard);
+}
+.motion-normal {
+  transition-duration: var(--dur-normal);
+  transition-timing-function: var(--ease-out);
+}
+.press:active {
+  transform: scale(var(--press));
+}
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes enter-up {
+  from {
+    opacity: 0;
+  }
+}
+@layer components {
+.animate-enter {
+  animation: enter-up 180ms var(--ease-out) both;
+}
+}
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  animation-duration: 0ms !important;
+  transition-duration: 0ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+/* Ambient.qml: luzes da paleta atras dos paineis. --ambient = intensidade (Harness); 0 = so a base. */
+:root {
+  --ambient: 0.55;
+}
+.ambient {
+  background:
+    radial-gradient(55% 45% at 12% 8%, var(--tone-1), transparent 70%),
+    radial-gradient(45% 40% at 88% 18%, var(--tone-3), transparent 70%),
+    radial-gradient(60% 50% at 55% 105%, var(--tone-2), transparent 70%);
+  opacity: var(--ambient);
+}
+/* Sem desfoque (Harness > Aparencia, ou GPU fraca): o vidro vira superficie solida. */
+[data-blur="off"] * {
+  backdrop-filter: none !important;
+}
+
+/* Com foto de fundo (Harness), cabecalho de pagina ganha o mesmo material dos paineis. */
+[data-photo="on"] .on-photo {
+  background: var(--bg-glass);
+  backdrop-filter: var(--material);
+  border: 1px solid var(--edge);
+  border-radius: var(--r4);
+  padding: 16px 20px;
+}
+
+/* ── Contraste (AA) ─────────────────────────────────────────────────────────────────────────────
+   Texto na cor de destaque: a cor escolhida no Harness pode ser clara demais no tema claro ou escura
+   demais no escuro. A "tinta" mistura o destaque com a cor do texto do tema, entao continua legivel com
+   qualquer destaque (conferido: >= 4.5:1 sobre vidro e superficie nos dois temas). */
+:root,
+[data-theme="escuro"] {
+  --accent-ink: color-mix(in oklab, var(--accent) 62%, var(--text-primary));
+  --ok-ink: color-mix(in oklab, var(--success) 70%, var(--text-primary));
+  --bad-ink: color-mix(in oklab, var(--danger) 80%, var(--text-primary));
+  --warn-ink: color-mix(in oklab, var(--warning) 80%, var(--text-primary));
+}
+[data-theme="claro"] {
+  --accent-ink: color-mix(in oklab, var(--accent) 58%, var(--text-primary));
+  --ok-ink: color-mix(in oklab, var(--success) 45%, var(--text-primary));
+  --bad-ink: color-mix(in oklab, var(--danger) 72%, var(--text-primary));
+  --warn-ink: color-mix(in oklab, var(--warning) 55%, var(--text-primary));
+}
+
+/* Com foto de fundo: o vidro ganha o reforco medido na foto (--glass-boost, de core/wallpapers.py via
+   App.tsx). O escurecimento da foto tambem nunca fica abaixo do minimo medido, entao texto solto e paineis
+   leem com AA mesmo sobre papel de parede claro. */
+:root {
+  --glass-boost: 0;
+}
+/* Material sobre a foto (referencia: vidro do macOS/Windows 11). Pouca cor por cima e muito desfoque: o desfoque
+   suaviza a foto atras do texto, entao a leitura vem dele e nao de uma camada branca que apaga o papel de parede.
+   --glass-boost (medido na foto) so engrossa o vidro em fotos com contraste dificil. */
+:root {
+  --material: blur(28px) saturate(170%);
+  --material-strong: blur(36px) saturate(180%);
+}
+[data-photo="on"],
+[data-photo="on"][data-theme="escuro"] {
+  --bg-sidebar: rgb(14 15 17 / calc(0.48 + var(--glass-boost)));
+  --bg-glass: rgb(16 17 19 / calc(0.5 + var(--glass-boost)));
+  --bg-glass-hi: rgb(24 25 28 / calc(0.64 + var(--glass-boost)));
+  --edge: rgb(255 255 255 / 0.12);
+}
+[data-photo="on"][data-theme="claro"] {
+  --bg-sidebar: rgb(250 251 250 / calc(0.5 + var(--glass-boost)));
+  --bg-glass: rgb(255 255 255 / calc(0.48 + var(--glass-boost)));
+  --bg-glass-hi: rgb(255 255 255 / calc(0.64 + var(--glass-boost)));
+  --edge: rgb(255 255 255 / 0.5);
+}
+
+/* ── Biblioteca ──────────────────────────────────────────────────────────────────────────────── */
+:root,
+[data-theme="escuro"] {
+  --art-paper: #f4f5f1;
+  --art-chip: rgb(255 255 255 / 0.82);
+  --art-chip-ink: #1b1f1d;
+  --stamp-paper: #f7f6f2;
+}
+[data-theme="claro"] {
+  --art-paper: #fbfbf8;
+  --art-chip: rgb(255 255 255 / 0.9);
+  --art-chip-ink: #1b1f1d;
+  --stamp-paper: #ffffff;
+}
+
+/* Carrossel: rolagem sem barra (setas e teclado navegam); transform aplicado pelo Carousel3D */
+.carousel-track {
+  scrollbar-width: none;
+}
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}
+.carousel-item {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* Pontilhado da capa desliza devagar no hover (so transform: barato) */
+.art-drift {
+  transition: transform 900ms var(--ease-out);
+}
+.topic-card:hover .art-drift,
+.topic-card:focus-visible .art-drift {
+  transform: translate(8px, -6px) scale(1.04);
+}
+
+/* Selo com picote: furos feitos por mascara radial nas bordas */
+.stamp {
+  padding: 10px;
+  background: var(--stamp-paper);
+  -webkit-mask:
+    radial-gradient(circle 6px at 50% 0, #0000 98%, #000) 50% 0 / 18px 51% repeat-x,
+    radial-gradient(circle 6px at 50% 100%, #0000 98%, #000) 50% 100% / 18px 51% repeat-x;
+  mask:
+    radial-gradient(circle 6px at 50% 0, #0000 98%, #000) 50% 0 / 18px 51% repeat-x,
+    radial-gradient(circle 6px at 50% 100%, #0000 98%, #000) 50% 100% / 18px 51% repeat-x;
+  filter: drop-shadow(0 18px 30px rgb(0 0 0 / 0.28));
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+.stamp:hover {
+  transform: rotate(0deg) scale(1.02);
+}
+
+/* Leitura longa: medida ~70 caracteres, ritmo vertical e hierarquia clara */
+.prose {
+  color: var(--text-primary);
+  font-size: 15.5px;
+  line-height: 1.75;
+}
+.prose > * + * {
+  margin-top: 1.05em;
+}
+.prose h2 {
+  margin-top: 2.4em;
+  scroll-margin-top: 24px;
+  font-family: var(--font-display-family);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.prose h2:first-child {
+  margin-top: 0;
+}
+.prose h3 {
+  margin-top: 1.8em;
+  font-family: var(--font-display-family);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.prose strong {
+  font-weight: 600;
+}
+.prose a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.prose ul,
+.prose ol {
+  padding-left: 1.4em;
+}
+.prose ul {
+  list-style: disc;
+}
+.prose ol {
+  list-style: decimal;
+}
+.prose li + li {
+  margin-top: 0.35em;
+}
+.prose li::marker {
+  color: var(--text-tertiary);
+}
+.prose blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 0.2em 0 0.2em 1em;
+  color: var(--text-secondary);
+}
+.prose code {
+  font-family: var(--font-mono-family);
+  font-size: 0.86em;
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
+  background: var(--bg-chip);
+}
+.prose pre {
+  overflow-x: auto;
+  padding: 16px 18px;
+  border-radius: var(--r3);
+  border: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--bg-surface) 88%, black);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.prose pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
+}
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+.prose-table {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r3);
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.prose th {
+  text-align: left;
+  font-weight: 600;
+  background: var(--bg-chip);
+}
+.prose th,
+.prose td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
+}
+.prose tr:last-child td {
+  border-bottom: 0;
+}
+
+.prose pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-hi) transparent;
+}
+
+/* ── Diario: pasta com folhas em leque ──────────────────────────────────────────────────────── */
+.folder {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 5 / 4;
+  border-radius: 18px;
+  text-align: left;
+  color: #fff;
+}
+.folder-back {
+  position: absolute;
+  inset: 8% 0 0 0;
+  border-radius: 6px 18px 18px 18px;
+  background: color-mix(in oklab, var(--fc) 78%, black);
+}
+.folder-back::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -9%;
+  width: 42%;
+  height: 14%;
+  border-radius: 12px 12px 0 0;
+  background: inherit;
+}
+.folder-sheet {
+  position: absolute;
+  left: 14%;
+  right: 14%;
+  top: 13%;
+  height: 56%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fbfaf6;
+  color: #23272a;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.35;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  transform: translateY(calc(var(--i) * 5px)) rotate(calc((var(--i) - (var(--n) - 1) / 2) * 2deg));
+  transition: transform 520ms cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.folder-sheet-empty {
+  color: #6b7170;
+}
+.folder:hover .folder-sheet,
+.folder:focus-visible .folder-sheet {
+  transform: translate(calc((var(--i) - (var(--n) - 1) / 2) * 34%), calc(-34% + var(--i) * 4px))
+    rotate(calc((var(--i) - (var(--n) - 1) / 2) * 11deg));
+}
+.folder-front {
+  position: absolute;
+  inset: 52% 0 0 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px 14px 18px 18px;
+  background: linear-gradient(to bottom, color-mix(in oklab, var(--fc) 70%, transparent), var(--fc) 46%);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.35),
+    0 14px 30px -12px color-mix(in oklab, var(--fc) 60%, black);
+  transition: transform 420ms var(--ease-out);
+}
+.folder:hover .folder-front {
+  transform: translateY(3px);
+}
+
+/* ── Diario: entrada em papel amassado que se desamassa ─────────────────────────────────────── */
+.paper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 210px;
+  padding: 18px 18px 16px;
+  border-radius: 4px;
+  text-align: left;
+  background: #f7f5ef;
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / 0.08),
+    0 10px 24px -10px rgb(0 0 0 / 0.35);
+  transform: rotate(var(--tilt)) scale(0.975);
+  transition:
+    transform 480ms cubic-bezier(0.34, 1.3, 0.64, 1),
+    box-shadow 480ms var(--ease-out);
+}
+.paper-creases {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    linear-gradient(calc(var(--crease) + 18deg), transparent 34%, rgb(0 0 0 / 0.07) 35%, rgb(255 255 255 / 0.5) 36.2%, transparent 38%),
+    linear-gradient(calc(var(--crease) + 96deg), transparent 52%, rgb(0 0 0 / 0.06) 53%, rgb(255 255 255 / 0.45) 54%, transparent 56%),
+    linear-gradient(calc(var(--crease) + 151deg), transparent 63%, rgb(0 0 0 / 0.05) 64%, rgb(255 255 255 / 0.4) 65%, transparent 67%),
+    radial-gradient(120% 80% at 20% 10%, rgb(255 255 255 / 0.6), transparent 60%),
+    radial-gradient(90% 70% at 85% 95%, rgb(0 0 0 / 0.06), transparent 70%);
+  transition: opacity 480ms var(--ease-out);
+}
+.paper:hover,
+.paper:focus-visible {
+  transform: rotate(0deg) scale(1) translateY(-3px);
+  box-shadow:
+    0 1px 1px rgb(0 0 0 / 0.06),
+    0 22px 40px -14px rgb(0 0 0 / 0.4);
+}
+.paper:hover .paper-creases,
+.paper:focus-visible .paper-creases {
+  opacity: 0.15;
+}
+.paper-stamp {
+  padding: 2px 6px;
+  border: 1.5px solid #b42318;
+  border-radius: 3px;
+  color: #b42318;
+  font-family: var(--font-mono-family);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-6deg);
+}
+
+/* Bandejas do composer (referencia: a faixa cinza encaixada atras da caixa, que desliza para fora por baixo
+   ou por cima). grid-template-rows 0fr -> 1fr anima a altura real sem medir nada em JS. */
+.composer-tray {
+  background: color-mix(in oklab, var(--bg-glass) 80%, transparent);
+  border: 1px solid var(--edge);
+  border-top: 0;
+  backdrop-filter: var(--material);
+}
+[data-photo="off"] .composer-tray {
+  background: color-mix(in oklab, var(--bg-surface-hi) 55%, transparent);
+  backdrop-filter: none;
+}
+/* Barra lateral flutuante: mesmo material dos paineis, cantos de 18px, borda de luz */
+.sidebar-panel {
+  border: 1px solid var(--edge);
+  background: var(--bg-sidebar);
+  backdrop-filter: var(--material);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 12px 36px -10px var(--shadow-soft);
+}
+[data-photo="off"] .sidebar-panel {
+  backdrop-filter: none;
+}
+.tray {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-panel) var(--ease-out),
+    opacity var(--dur-normal) var(--ease-out);
+}
+.tray[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.tray-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.tray > .tray-inner > * {
+  transition: transform var(--dur-panel) var(--ease-out);
+}
+.tray[data-open="false"] > .tray-inner > .-mt-5 {
+  transform: translateY(-18px);
+}
+.tray[data-open="false"] > .tray-inner > .-mb-5 {
+  transform: translateY(18px);
+}
+
+/* Troca de estado com desfoque (a ficha de acesso, fichas novas): entra nitida a partir de um borrao */
+@keyframes swap-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: scale(0.96);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+  }
+}
+@layer components {
+  .swap-in {
+    animation: swap-in var(--dur-panel) var(--ease-out) both;
+  }
+  .animate-pop {
+    animation: pop-in var(--dur-normal) var(--ease-out) both;
+  }
+}
+
+
+/* ── Abertura (Splash) ─────────────────────────────────────────────────────────────────────── */
+.splash-lights {
+  background:
+    radial-gradient(55% 45% at 12% 8%, var(--tone-1), transparent 70%),
+    radial-gradient(45% 40% at 88% 18%, var(--tone-3), transparent 70%),
+    radial-gradient(60% 50% at 55% 105%, var(--tone-2), transparent 70%),
+    radial-gradient(40% 35% at 50% 50%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 75%);
+  animation: splash-drift 14s var(--ease-standard) infinite alternate;
+}
+@keyframes splash-drift {
+  to {
+    transform: scale(1.08) translate(-1.5%, 1%);
+  }
+}
+@keyframes splash-brand-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes splash-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.splash-brand {
+  animation: splash-brand-in 900ms var(--ease-out) 250ms both;
+}
+.splash-tagline {
+  animation: splash-fade-in 500ms var(--ease-out) 950ms both;
+}
+.splash-hint {
+  opacity: 0;
+  transition: opacity 500ms var(--ease-out);
+}
+.splash[data-phase="ready"] .splash-hint,
+.splash[data-phase="intro"] .splash-hint {
+  opacity: 1;
+  transition-delay: 1500ms;
+}
+.splash[data-phase="ready"] .splash-hint {
+  transition-delay: 0ms;
+}
+.splash {
+  transition: opacity 550ms var(--ease-standard);
+}
+.splash[data-phase="leaving"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.splash[data-phase="leaving"] .splash-brand {
+  animation: none;
+  transform: scale(1.04);
+  transition: transform 450ms var(--ease-in);
+}
+.splash[data-phase="leaving"] .splash-hint {
+  opacity: 0;
+  transition-duration: 200ms;
+  transition-delay: 0ms;
+}
+
+/* Rolagem suave e barras discretas em toda a interface */
+html {
+  scroll-behavior: smooth;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--hairline-hi) transparent;
+}
+.overflow-y-auto {
+  scrollbar-gutter: stable;
+}
+
+
+/* Historico: recibos com canhoto e rolagem em roda (referencia: posteres que inclinam ao entrar e sair da
+   tela). So CSS com scroll-driven animation: nenhum JS por rolagem; sem suporte ou sem movimento, lista plana. */
+.receipt-stub {
+  background: color-mix(in oklab, currentColor 9%, transparent);
+  border-right: 1px dashed var(--hairline-hi);
+}
+@supports (animation-timeline: view()) {
+  .roll-item {
+    animation: roll linear both;
+    animation-timeline: view();
+    animation-range: cover;
+    transform-origin: center;
+  }
+  @keyframes roll {
+    0% {
+      transform: perspective(900px) rotateX(32deg) scale(0.93);
+      opacity: 0.35;
+    }
+    22%,
+    78% {
+      transform: none;
+      opacity: 1;
+    }
+    100% {
+      transform: perspective(900px) rotateX(-32deg) scale(0.93);
+      opacity: 0.35;
+    }
+  }
+}
+[data-motion="off"] .roll-item {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .roll-item {
+    animation: none;
+  }
+}
+
+/* Codigo (AI Research Lab): cores com contraste AA sobre a superficie dos dois temas */
+:root,
+[data-theme="escuro"] {
+  --code-kw: #c4a7ff;
+  --code-str: #9fd8a8;
+  --code-num: #f5c07a;
+  --code-comment: #9aa3a1;
+}
+[data-theme="claro"] {
+  --code-kw: #6d3fc0;
+  --code-str: #2f6b38;
+  --code-num: #9a5a00;
+  --code-comment: #5c6664;
+}
+
+/* Faixas roláveis (abas, agentes) sem a barra nativa: setas, roda e teclado continuam funcionando */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Texto direto sobre a foto (titulo da Conversa, abertura, nome da tela no topo): tinta clara com sombra escura
+   curta, como relogio e widgets da tela de bloqueio do iPhone e do macOS. Sem brilho claro atras das letras, que
+   borrava o contorno. Sem foto, o texto volta a ser o do tema. */
+[data-photo="on"] .photo-ink,
+[data-photo="on"] .photo-ink .text-fg {
+  color: #fff;
+  text-shadow:
+    0 1px 1px rgb(0 0 0 / 0.22),
+    0 2px 10px rgb(0 0 0 / 0.22);
+}
+[data-photo="on"] .photo-ink .text-fg-muted,
+[data-photo="on"] .photo-ink-muted {
+  color: rgb(255 255 255 / 0.86);
+  text-shadow:
+    0 1px 1px rgb(0 0 0 / 0.25),
+    0 2px 10px rgb(0 0 0 / 0.25);
+}
+
+/* Fonte do chat principal: OpenAI Sans se estiver instalada no Windows (e proprietaria, nao vai com o app);
+   senao a Geist, a livre mais proxima no desenho, que vai embutida. */
+.chat-font {
+  font-family: "OpenAI Sans", "Geist Variable", var(--font-sans-family);
+  font-feature-settings: normal;
+  letter-spacing: -0.01em;
+}
+
+/* Cerebro: cada coluna e um painel de vidro proprio (com a foto aparecendo nas margens), nao uma coluna solta */
+.brain-panel {
+  min-height: 0;
+  border-radius: var(--r4);
+  border: 1px solid var(--edge);
+  background: var(--bg-glass);
+  backdrop-filter: var(--material);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 12px 32px var(--shadow-soft);
+}
+
+/* Rotulo de secao solto sobre a foto: uma etiqueta de vidro so do tamanho do texto (nao uma faixa) */
+[data-photo="on"] .photo-label {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: var(--r2);
+  background: var(--bg-glass);
+  backdrop-filter: var(--material);
+}
+.photo-label {
+  margin-bottom: 0.75rem;
+}
+
+/* ── Superficies (material) ────────────────────────────────────────────────────────────────────────────── */
+/* Painel padrao: borda de luz de 1px, sombra em duas camadas (contato + ambiente), sem cor chapada. */
+.surface {
+  border: 1px solid var(--edge);
+  background: var(--bg-glass);
+  backdrop-filter: var(--material);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.05) inset,
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 10px 30px -8px var(--shadow-soft);
+}
+.surface-strong {
+  border: 1px solid var(--edge);
+  background: var(--bg-glass-hi);
+  backdrop-filter: var(--material-strong);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.07) inset,
+    0 2px 4px rgb(0 0 0 / 0.06),
+    0 18px 48px -12px rgb(0 0 0 / 0.28);
+}
+[data-photo="off"] .surface,
+[data-photo="off"] .surface-strong {
+  backdrop-filter: none;
+}
+
+/* Controles da janela sem moldura (WindowChrome.tsx); o arrasto vai pelo Qt (startSystemMove) */
+.window-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.window-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.window-btn.close:hover {
+  background: #e81123;
+  color: #fff;
+}

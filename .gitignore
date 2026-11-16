@@ -1,0 +1,118 @@
+# ════════════════════════════════════════════════════════════════
+#  Creative AIx — .gitignore
+# ════════════════════════════════════════════════════════════════
+
+# ─── Segredos (PRIORIDADE MAXIMA) ─────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+credentials.json
+secrets.json
+**/api_keys.txt
+**/auth_token*.txt
+
+# ─── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+!ui/dist/
+.Python
+pip-log.txt
+
+# Virtual env
+.venv/
+.venv-release/
+.repowise/
+venv/
+env/
+ENV/
+
+# ─── Artefatos de execucao (gerados em runtime) ───────────────────
+app/captures/*
+!app/captures/.gitkeep
+app/reports/*
+!app/reports/.gitkeep
+app/logs/*
+!app/logs/.gitkeep
+app/data.db
+app/data.sqlite
+app/desktop/data/*
+!app/desktop/data/.gitkeep
+app/memory/evolution/
+
+# Workflows aprendidos sao especificos do usuario — NAO commitar
+app/memory/workflows/*.json
+app/memory/workflows/.corrupted/
+app/memory/workflows/.legacy/
+!app/memory/workflows/.gitkeep
+
+# ─── IDE / editor ────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# ─── OS ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# ─── Testes / coverage ───────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ─── Logs locais ─────────────────────────────────────────────────
+*.log
+*.log.*
+
+# ─── Claude Code worktrees (gerado por agentes IA) ───────────────
+.claude/
+
+# ─── Lixo bizarro ────────────────────────────────────────────────
+[{]core,ui/
+reports/
+
+# Logs na raiz do repo (alem dos em app/logs/)
+logs/
+
+# Memory pasta na raiz do repo (estrutura legada — fica fora)
+memory/
+
+# ─── Segundo cerebro (Obsidian) — dados de execucao locais ───────
+vault/40 Execucoes/Planos/
+vault/40 Execucoes/Sucesso/
+vault/40 Execucoes/Falhas/
+vault/.obsidian/workspace*.json
+vault/50 Diario/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+vault/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *.md
+vault/Sem t*tulo*.canvas
+vault/Sem t*tulo*.base
+
+# Material de divulgacao local (videos, prompts, imagens de rascunho)
+docs/marketing/
+
+# Textos da Biblioteca para o modo demo (gerado: cd ui; npm run demo:library)
+ui/src/demo/library.fixture.json
+ui/src/demo/studio.fixture.json
+
+# ─── Instrucoes para IA (so locais) ──────────────────────────────
+# Guias e prompts para agentes de IA ficam so nesta maquina: ferramentas como Claude Code, Codex e Cursor carregam
+# AGENTS.md/CLAUDE.md sozinhas ao abrir a pasta, e o repositorio vai para testadores com as proprias IAs.
+AGENTS.md
+CLAUDE.md
+.cursorrules
+.github/copilot-instructions.md
+docs/prompts/
