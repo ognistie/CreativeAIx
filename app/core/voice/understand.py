@@ -408,6 +408,12 @@ def understand(heard: str, stt_confidence: float = 1.0, context: str = "",
     answer = _pending_answer(heard, fixed, session, persona, recent, stt_confidence)
     if answer:
         return answer
+    # Pergunta sobre a tela nunca e respondida "de cabeca" (o modelo de voz nao ve a tela): vira pedido e o
+    # Vision olha (core/screen_question.py). Antes a voz podia dizer "sim, estou vendo" sem ter visto nada.
+    from core.screen_question import is_screen_question
+    if is_screen_question(heard) or is_screen_question(fixed):
+        return _result("command", fixed, "tela", command=fixed, reply=persona.pick("ack", recent),
+                       confidence=stt_confidence)
     for fast in (_fast_vault(heard, fixed, stt_confidence, persona, recent),
                  _local_answer(fixed, persona, recent),
                  _fast_open(fixed, stt_confidence, lex, recent, persona, session),

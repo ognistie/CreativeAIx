@@ -5,7 +5,9 @@ import { AUTH_LABEL, EFFORT_LABEL, type Spec } from "./types";
 
 // Visao geral: a especificacao do agente, lida do codigo e da configuracao (nao e texto escrito a mao).
 
-export function AgentSpec({ spec, onGo }: { spec: Spec; onGo: (tab: string) => void }) {
+export function AgentSpec({ spec, onGo, onEvidence, onExperiments }: {
+  spec: Spec; onGo: (tab: string) => void; onEvidence?: () => void; onExperiments?: () => void;
+}) {
   return (
     <div className="grid gap-5 xl:grid-cols-2 [&>*]:min-w-0">
       <Card icon="target" title="O que faz">
@@ -37,6 +39,7 @@ export function AgentSpec({ spec, onGo }: { spec: Spec; onGo: (tab: string) => v
 
       <Card icon="sliders" title="Como roda" note="Definido em config.yaml. O Lab cria versões para testar outra configuração.">
         <dl className="grid grid-cols-2 gap-3">
+          {spec.evaluation?.version && <Fact label="Versão ativa" value={`${spec.evaluation.version.id} · ${spec.evaluation.version.created.replace("T", " ")}`} />}
           <Fact label="Modelo" value={spec.config.model} mono />
           <Fact label="Provedor" value={spec.config.provider} />
           <Fact label="Esforço" value={EFFORT_LABEL[spec.config.effort] ?? spec.config.effort} />
@@ -46,6 +49,18 @@ export function AgentSpec({ spec, onGo }: { spec: Spec; onGo: (tab: string) => v
         </dl>
       </Card>
 
+      {spec.evaluation && <Card icon="flask" title="Avaliação do agente" wide>
+        {spec.evaluation.last ? <p className="text-sm text-fg">
+          {spec.evaluation.last.passed} de {spec.evaluation.last.valid} casos válidos · {spec.evaluation.last.origin === "real" ? "Inferência real"
+            : spec.evaluation.last.origin === "fixture" ? "Fixture local" : "Replay"}
+        </p> : <p className="text-sm text-fg-muted">{spec.evaluation.available ? "Sem evidência suficiente" : "Avaliação ainda não disponível"}</p>}
+        {/* Testes ficam na area Experimentos do Lab; aqui so o resultado da ultima avaliacao */}
+        {(onExperiments || onEvidence) && <div className="mt-3 flex gap-2">
+          {onExperiments && <Button size="compact" onClick={onExperiments}>Gerenciar variantes e testes</Button>}
+          {spec.evaluation.available && onEvidence && <Button size="compact" onClick={onEvidence}>Ver histórico</Button>}
+        </div>}
+        {!onExperiments && <p className="mt-2 text-xs text-fg-subtle">Para testar versões deste agente, use Experimentos na entrada do Laboratório.</p>}
+      </Card>}
       <Card icon="wrench" title="Ferramentas" note="Só estas ações são aceitas pelo executor para este agente (core/action_policy.py).">
         {spec.tools.length === 0 ? (
           <p className="text-sm text-fg-muted">Este agente não executa ações: ele planeja e entrega o trabalho para os outros.</p>

@@ -26,6 +26,8 @@ MUDANÇAS v16:
 import re
 from typing import Optional
 
+from anthropic import APIConnectionError
+
 from core.ai_client import get_client
 from core.config import get_config
 from core.json_validator import safe_parse
@@ -186,7 +188,7 @@ _RELATIVE_TIME_MARKERS = (
 _DEICTIC_PRONOUNS = ("ele", "ela", "isso", "aquilo", "aquele", "aquela")
 
 
-def _detect_ambiguity(task: str) -> dict | None:
+def _detect_ambiguity(task: str, *, lexicon=None) -> dict | None:
     """
     Retorna {"question": ..., "why": ...} se a tarefa for ambigua, senao None.
 
@@ -208,7 +210,7 @@ def _detect_ambiguity(task: str) -> dict | None:
     if word_count == 2:
         try:
             from core.lexicon import get_lexicon
-            short_but_clear = bool(get_lexicon().apps_in(task))
+            short_but_clear = bool((lexicon if lexicon is not None else get_lexicon()).apps_in(task))
         except Exception:
             short_but_clear = False
     if word_count <= 2 and not short_but_clear and t not in {"oi", "ola", "ajuda", "help"}:
@@ -265,14 +267,14 @@ _OPEN_REQUEST = re.compile(
     r"(?: (?:pra mim|para mim|por favor|ai))?$")
 
 
-def fast_open_plan(task: str, continue_in: str = "") -> Optional[dict]:
+def fast_open_plan(task: str, continue_in: str = "", *, lexicon=None) -> Optional[dict]:
     """Plano direto para "abrir X" quando X e exatamente um app/site do dicionario.
     None quando ha qualquer duvida (o Maestro planeja normalmente)."""
     if continue_in:
         return None                    # algo aberto na conversa: o resolvedor/Maestro decidem
     try:
         from core.lexicon import get_lexicon, norm
-        lex = get_lexicon()
+        lex = lexicon if lexicon is not None else get_lexicon()
         m = _OPEN_REQUEST.match(norm(task).strip(" .!?"))
         if not m:
             return None
@@ -587,6 +589,8 @@ class Maestro:
             print(f"[Maestro] {len(plan['subtasks'])} subtask(s)")
             return plan
 
+        except APIConnectionError:
+            return {"error": True, "message": "Não consegui conectar ao serviço de IA. Verifique sua conexão e tente novamente."}
         except Exception as ex:
             print(f"[Maestro] Erro: {ex}")
             return {"error": True, "message": str(ex)}

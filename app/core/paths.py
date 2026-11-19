@@ -100,6 +100,40 @@ def extract_path(text: str) -> Optional[str]:
     return None
 
 
+# Palavras que comecam a CONTINUACAO da frase depois de um caminho ("C:\x\proj no navegador", "C:\x\proj e
+# depois abre"). So elas podem ser cortadas do fim do caminho citado; qualquer outra coisa ("(2)", "Final", "v2")
+# pode ser parte do nome da pasta, e cortar faria cair numa pasta vizinha (incidente de 2026-11-17: "Nova pasta (2)"
+# virou "Nova pasta" e o app abriu outro site).
+_CONTINUATION = frozenset({
+    "no", "na", "nos", "nas", "num", "numa", "e", "com", "pelo", "pela", "para", "pra", "usando", "via", "em",
+    "depois", "que", "a", "o", "as", "os", "do", "da", "dos", "das", "de", "dentro", "agora", "por", "ai", "aí",
+    "quando", "se", "mas", "ou", "ele", "ela", "isso", "lá", "la", "aqui", "abre", "abra", "abrir", "rode", "roda",
+    "execute", "mostre", "mostra", "crie", "faça", "faca", "pode", "mesma", "mesmo", "novamente", "denovo",
+})
+
+
+def _clean_tail(text: str) -> str:
+    """Tira pontuacao de fim de frase; o ')' so sai se estiver sobrando (o de "(2)" e parte do nome)."""
+    t = text.strip().strip("\"'“”").rstrip(".,;:!?")
+    while t.endswith(")") and t.count(")") > t.count("("):
+        t = t[:-1].rstrip(".,;:!?")
+    return t
+
+
+def existing_prefix(cited: str) -> Optional[str]:
+    """O caminho citado que existe no disco. O texto citado pode seguir a frase depois do caminho; so palavras de
+    continuacao sao cortadas do fim. None = o caminho citado nao existe (quem chama pergunta, nunca troca de
+    pasta por conta propria)."""
+    words = (cited or "").split(" ")
+    for i in range(len(words), 0, -1):
+        if i < len(words) and _clean_tail(words[i]).lower() not in _CONTINUATION:
+            continue                  # o corte aqui deixaria um pedaco do nome de fora
+        candidate = resolve_path(_clean_tail(" ".join(words[:i])))
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def resolve_path(raw: str) -> str:
     """Normaliza: tira aspas, expande %VAR% e ~, traduz pasta conhecida."""
     p = (raw or "").strip().strip("\"'")

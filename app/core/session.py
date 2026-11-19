@@ -47,6 +47,20 @@ TARGET_AGENT = {"web": "WEB", "app": "DESKTOP", "code": "CODE", "folder": "FILE"
 
 
 CONTENT_MAX = 900     # conteudo literal guardado por pedido (mensagem, texto, busca)
+REPLY_MAX = 600       # resposta do assistente guardada por pedido
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Escrita atomica com arquivo temporario proprio: duas gravacoes da mesma conversa (resposta em segundo
+    plano + fim do pedido seguinte) nao disputam o mesmo .tmp."""
+    from core.atomic_io import replace_file
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.stem}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        replace_file(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @dataclass
@@ -125,10 +139,12 @@ class Session:
 
     # ── conversa ──────────────────────────────────────────────────
     def add_turn(self, said: str, resolved: str, kind: str, agents: list = None,
-                 success: Optional[bool] = None, summary: str = "", content: str = "") -> None:
-        self.turns.append(Turn(said, resolved, kind, list(agents or []), success,
-                               (summary or "")[:400], content=(content or "")[:CONTENT_MAX]))
+                 success: Optional[bool] = None, summary: str = "", content: str = "") -> Turn:
+        turn = Turn(said, resolved, kind, list(agents or []), success,
+                    (summary or "")[:400], content=(content or "")[:CONTENT_MAX])
+        self.turns.append(turn)
         self.turns = self.turns[-MAX_TURNS:]
+        return turn
 
     # ── alvos ─────────────────────────────────────────────────────
     def targets(self) -> dict[str, dict]:
@@ -242,7 +258,15 @@ class Session:
 
     def set_last_reply(self, reply: str) -> None:
         if self.turns:
-            self.turns[-1].reply = (reply or "")[:600]
+            self.turns[-1].reply = (reply or "")[:REPLY_MAX]
+
+    def set_reply(self, turn: Turn, reply: str) -> bool:
+        """Resposta de UM pedido especifico. False se esse pedido nao esta nesta conversa (a pessoa trocou de
+        conversa ou ja mandou outro pedido enquanto a resposta era escrita): nunca cai no pedido errado."""
+        if not any(t is turn for t in self.turns):
+            return False
+        turn.reply = (reply or "")[:REPLY_MAX]
+        return True
 
     @property
     def title(self) -> str:
@@ -259,15 +283,36 @@ class Session:
                 "files": self.files, "pending": self.pending, "custom_title": self.custom_title}
 
     # ── conversas salvas (barra lateral) ──────────────────────────
-    def save(self, base: Path = SESSIONS_DIR) -> None:
+    @staticmethod
+    def remember_active(sid: str) -> None:
+        path = SESSIONS_DIR / "_active" / "conversation.json"
+        try:
+            _write_json(path, {"id": sid})
+        except OSError:
+            return  # A conversa continua utilizável mesmo sem gravar a seleção.
+
+    def restore_active(self) -> None:
+        path = SESSIONS_DIR / "_active" / "conversation.json"
+        try:
+            try:
+                selected = json.loads(path.read_text(encoding="utf-8"))
+                sid = selected.get("id") if isinstance(selected, dict) else ""
+            except FileNotFoundError:
+                # Perfis anteriores guardavam o histórico sem a seleção da barra lateral.
+                latest = self.list_saved(limit=1)
+                sid = latest[0]["id"] if latest else ""
+            data = self.read_saved(sid) if isinstance(sid, str) else None
+            if data and data.get("turns"):
+                self.load(data)
+        except (OSError, ValueError, AttributeError, TypeError):
+            self.reset()
+
+    def save(self, base: Optional[Path] = None) -> None:
         """Grava a conversa (so se tiver algum pedido). Escrita atomica."""
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
         if not self.turns:
             return
-        base.mkdir(parents=True, exist_ok=True)
-        path = base / f"{self.id}.json"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-        os.replace(tmp, path)
+        _write_json(base / f"{self.id}.json", self.to_dict())
 
     def load(self, data: dict) -> None:
         """Retoma uma conversa salva. Janelas antigas so valem se ainda existirem
@@ -284,7 +329,8 @@ class Session:
         self.custom_title = data.get("custom_title")
 
     @staticmethod
-    def list_saved(limit: int = 60, base: Path = SESSIONS_DIR) -> list[dict]:
+    def list_saved(limit: int = 60, base: Optional[Path] = None) -> list[dict]:
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
         out = []
         if not base.is_dir():
             return out
@@ -293,27 +339,50 @@ class Session:
                 d = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            out.append({"id": d.get("id", f.stem), "title": d.get("title", "Conversa"),
-                        "updated_at": d.get("updated_at", f.stat().st_mtime),
+            if not isinstance(d, dict) or not isinstance(d.get("turns"), list):
+                continue
+            if not f.stem.isalnum() or d.get("id", f.stem) != f.stem:
+                continue
+            updated = d.get("updated_at")
+            if not isinstance(updated, (int, float)) or isinstance(updated, bool):
+                updated = f.stat().st_mtime
+            title = d.get("title")
+            out.append({"id": f.stem, "title": title[:80] if isinstance(title, str) else "Conversa",
+                        "updated_at": updated,
                         "turns": len(d.get("turns", []))})
         out.sort(key=lambda x: x["updated_at"], reverse=True)
         return out[:limit]
 
     @staticmethod
-    def rename_saved(sid: str, title: str, base: Path = SESSIONS_DIR) -> bool:
+    def rename_saved(sid: str, title: str, base: Optional[Path] = None) -> bool:
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
         data = Session.read_saved(sid, base)
         title = " ".join((title or "").split())[:80]
         if not data or not title:
             return False
         data["custom_title"] = data["title"] = title
-        tmp = base / f"{sid}.tmp"
-        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
-        os.replace(tmp, base / f"{sid}.json")
+        _write_json(base / f"{sid}.json", data)
         return True
 
     @staticmethod
-    def delete_saved(sid: str, base: Path = SESSIONS_DIR) -> bool:
+    def set_saved_reply(sid: str, turn: Turn, reply: str, base: Optional[Path] = None) -> bool:
+        """Resposta de um pedido de uma conversa que ja nao esta aberta: grava direto no arquivo dela,
+        achando o pedido pelo instante e pelo texto (nunca pela posicao)."""
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
+        data = Session.read_saved(sid, base)
+        if not data:
+            return False
+        for saved in reversed(data.get("turns") or []):
+            if saved.get("ts") == turn.ts and saved.get("said") == turn.said:
+                saved["reply"] = (reply or "")[:REPLY_MAX]
+                _write_json(base / f"{sid}.json", data)
+                return True
+        return False
+
+    @staticmethod
+    def delete_saved(sid: str, base: Optional[Path] = None) -> bool:
         """Tira da lista e move para memory/sessions/_excluidas (recuperavel, nunca apaga)."""
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
         if not sid or not all(c.isalnum() for c in sid):
             return False
         f = base / f"{sid}.json"
@@ -325,11 +394,18 @@ class Session:
         return True
 
     @staticmethod
-    def read_saved(sid: str, base: Path = SESSIONS_DIR) -> Optional[dict]:
+    def read_saved(sid: str, base: Optional[Path] = None) -> Optional[dict]:
+        base = base or SESSIONS_DIR      # lido na hora: testes trocam a pasta
         if not sid or not all(c.isalnum() for c in sid):
             return None
         f = base / f"{sid}.json"
         try:
-            return json.loads(f.read_text(encoding="utf-8"))
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("id") != sid or not isinstance(data.get("turns"), list):
+                return None
+            if any(not isinstance(turn, dict) or any(not isinstance(turn.get(key), str) for key in ("said", "resolved", "kind"))
+                   for turn in data["turns"]):
+                return None
+            return data
         except (OSError, ValueError):
             return None

@@ -20,7 +20,9 @@ import copy
 import json
 import os
 import re
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +30,20 @@ AGENTS = ("MAESTRO", "WEB", "DESKTOP", "CODE", "DATA", "FILE", "EXTCODE")
 TONES = ("natural", "direto", "detalhado", "amigavel", "formal")
 LENGTHS = ("curta", "media", "longa")
 RADII = ("suave", "reto", "redondo")
-PALETTES = ("abismo", "ameixa", "nevoa", "matcha", "seda", "aurora", "brisa", "coral", "menta", "lavanda", "areia", "oceano", "aurora-boreal")
+# Papeis gerativos: "gen:<estilo>" (formato antigo, cena synthwave) ou "gen:<estilo>:<cena>" (ui/src/lib/scenes.ts)
+GEN_STYLES = ("dither", "halftone")
+GEN_SCENES = ("retro", "aquario", "gatinhos", "frutas", "rio", "texas", "noite", "jardim", "bosque", "lago", "praia")
+# Opcoes avancadas do papel de parede gerativo (ui/src/lib/wallpaper/art.ts): "auto" = a direcao de arte da cena
+# e o perfil escolhido pelo hardware. Lista fechada: o resto e descartado na validacao.
+GEN_ART = {
+    "dither": ("auto", "bayer", "blue", "atkinson"),
+    "quality": ("auto", "eco", "equilibrado", "alto"),
+    "motion": ("auto", "parado", "sutil", "animado"),
+}
+GENERATIVE = tuple(f"gen:{style}" for style in GEN_STYLES) + tuple(
+    f"gen:{style}:{scene}" for style in GEN_STYLES for scene in GEN_SCENES)
+PALETTES = ("abismo", "ameixa", "nevoa", "matcha", "seda", "aurora", "brisa", "coral", "menta", "lavanda", "areia", "oceano",
+            "aurora-boreal", "grafite", "crepusculo", "floresta", "neon", "sepia", "fosforo", "gelo")
 MODES = ("escuro", "claro")
 FLOWS = ("parado", "sutil", "normal")
 STYLE = 2          # 2 = Quiet Intelligence (Abismo/Pearl, malha em GPU); 1 = estilo anterior
@@ -111,7 +126,8 @@ DEFAULT = {
     "response": {"tone": "natural", "length": "media", "extra": ""},
     "appearance": {"accent": "#16897E", "ambient": 0.55, "motion": True, "radius": "suave", "palette": "abismo",
                    "mode": "escuro", "blur": True, "wallpaper": "", "dim": 0.35,
-                   "mesh": True, "flow": "sutil", "fluted": False, "style": STYLE},
+                   "mesh": True, "flow": "sutil", "fluted": False, "style": STYLE,
+                   "art": {k: "auto" for k in GEN_ART}},
     "modules": {m: True for m in MODULES},
     # Modo Desenvolvedor, niveis 1 e 2: textos da tela inicial, atalhos de tarefa e cartoes (JSON validado)
     "dev": {"enabled": False, "code_changes": False, "greeting": "", "hint": "", "shortcuts": [], "cards": []},
@@ -213,9 +229,13 @@ def validate(data) -> dict:
         out["appearance"]["mode"] = app["mode"]
     if isinstance(app.get("blur"), bool):
         out["appearance"]["blur"] = app["blur"]
-    # Papel de parede: "" (so as luzes), "catalog:<id>" ou "personal:<id>"; escurecimento 0..1
+    # Papel de parede: "" (so as luzes), "catalog:<id>", "personal:<id>" ou um gerativo desenhado pelo app com as
+    # cores da paleta ("gen:<estilo>[:<cena>]", lista fechada em GENERATIVE); escurecimento 0..1
     wp = app.get("wallpaper")
-    if isinstance(wp, str) and re.fullmatch(r"(?:catalog|personal):[a-z0-9][a-z0-9-]{1,60}", wp):
+    if isinstance(wp, str) and (wp == "gen:ascii" or wp.startswith("gen:ascii:")):
+        wp = "gen:dither" + wp[len("gen:ascii"):]
+    if isinstance(wp, str) and (re.fullmatch(r"(?:catalog|personal):[a-z0-9][a-z0-9-]{1,60}", wp)
+                                or wp in GENERATIVE):
         out["appearance"]["wallpaper"] = wp
     if isinstance(app.get("dim"), (int, float)) and not isinstance(app.get("dim"), bool):
         out["appearance"]["dim"] = round(min(1.0, max(0.0, float(app["dim"]))), 2)
@@ -225,6 +245,8 @@ def validate(data) -> dict:
         out["appearance"]["flow"] = app["flow"]
     if isinstance(app.get("fluted"), bool):
         out["appearance"]["fluted"] = app["fluted"]
+    art = app.get("art") if isinstance(app.get("art"), dict) else {}
+    out["appearance"]["art"] = {k: art.get(k) if art.get(k) in allowed else "auto" for k, allowed in GEN_ART.items()}
     mods = data.get("modules") if isinstance(data.get("modules"), dict) else {}
     for m in MODULES:
         if isinstance(mods.get(m), bool):
@@ -250,6 +272,8 @@ def instructions_override(agent: str, text: str):
 
 
 class Harness:
+    _lock = threading.RLock()
+
     def __init__(self, personal: Optional[Path]) -> None:
         self.folder = Path(personal) / ".cerebro" if personal else None
         self._cache = (None, None)
@@ -276,6 +300,29 @@ class Harness:
         return copy.deepcopy(data)
 
     def save(self, data, label: str = "") -> dict:
+        with self._lock:
+            return self._save(data, label)
+
+    def patch(self, updates: dict, label: str = "") -> dict:
+        """Atualiza somente os campos editados, preservando alterações de outras telas."""
+        if not isinstance(updates, dict):
+            raise ValueError("alterações de configuração inválidas")
+        with self._lock:
+            current = self.load()
+            for section, value in updates.items():
+                if section not in DEFAULT:
+                    raise ValueError("seção de configuração inválida")
+                if isinstance(value, dict) and isinstance(current.get(section), dict):
+                    for key, item in value.items():
+                        if isinstance(item, dict) and isinstance(current[section].get(key), dict):
+                            current[section][key].update(item)
+                        else:
+                            current[section][key] = item
+                else:
+                    current[section] = value
+            return self._save(current, label)
+
+    def _save(self, data, label: str) -> dict:
         if not self.folder:
             raise PermissionError("camada pessoal indisponivel")
         clean = validate(data)
@@ -290,9 +337,13 @@ class Harness:
             for old in sorted(versions.glob("*.json"))[:-KEEP_VERSIONS]:
                 old.unlink(missing_ok=True)
         clean["label"] = (label or "").strip()[:80]
-        tmp = self.file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
-        os.replace(tmp, self.file)
+        tmp = self.file.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(json.dumps(clean, ensure_ascii=False, indent=1), encoding="utf-8")
+            from core.atomic_io import replace_file
+            replace_file(tmp, self.file)
+        finally:
+            tmp.unlink(missing_ok=True)
         self._cache = (None, None)
         return self.load()
 

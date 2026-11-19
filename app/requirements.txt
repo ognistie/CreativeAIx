@@ -34,10 +34,6 @@ websocket-client==1.9.2  # GPT-Live: sessoes curtas de narracao
 piper-tts>=1.8      # voz neural local pt-BR (baixa ~60 MB na 1a fala)
 pywin32>=306        # reserva: voz do Windows (SAPI)
 
-# OCR local (opcional, mas recomendado — Vision API usa OCR antes)
-# easyocr>=1.7.0
-# numpy
-
 # Web automation (opcional — habilita WebAgent)
 # playwright>=1.40.0
 

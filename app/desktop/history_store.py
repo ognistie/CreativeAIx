@@ -96,9 +96,11 @@ def list_all(limit: Optional[int] = 100) -> List[Dict[str, Any]]:
     return out[:limit] if limit else out
 
 
-def stats() -> Dict[str, Any]:
-    """Estatisticas agregadas para o cabecalho do Historico."""
-    items = list_all(limit=None)
+def stats(items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Estatisticas agregadas para o cabecalho do Historico. `items`: a lista ja lida (evita ler o arquivo de
+    novo); None le tudo."""
+    if items is None:
+        items = list_all(limit=None)
     if not items:
         return {"total": 0, "success_rate": 0.0, "total_cost_usd": 0.0,
                 "avg_duration_ms": 0}

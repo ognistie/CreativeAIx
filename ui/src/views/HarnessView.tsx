@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { Button, Chip, Field, GlassPanel, Icon, Segmented, Spinner } from "../components/ui";
-import { applyAppearance } from "../lib/appearance";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Button, Chip, Field, GlassPanel, Icon, Spinner } from "../components/ui";
+import type { Appearance } from "../lib/appearance";
 import { cn } from "../lib/cn";
-import { core, inQt, pickFiles, wallpaperUrl } from "../lib/host";
+import { core } from "../lib/host";
 import { DevProposals } from "../components/DevProposals";
-import { IntroCard } from "../components/IntroCard";
 import { useCoreEvent } from "../lib/useCore";
+import { AboutView } from "./AboutView";
+import { GeneralSettings } from "./SettingsView";
+import { AppearancePanel } from "./AppearancePanel";
 import { Page, Switch } from "./Page";
 
 // HarnessView: como os agentes trabalham e como a plataforma se parece. Preferencias validadas no
@@ -35,29 +37,43 @@ type Reply = { ok: boolean; error?: string } & Record<string, unknown>;
 const call = (p: Promise<unknown>) => p.then((r) => r as Reply).catch((e: Error) => ({ ok: false, error: e.message }) as Reply);
 const TONES = [["natural", "Natural"], ["direto", "Direto"], ["detalhado", "Detalhado"], ["amigavel", "Amigável"], ["formal", "Formal"]] as const;
 const LENGTHS = [["curta", "Curta"], ["media", "Média"], ["longa", "Longa"]] as const;
-const PALETTES = ["abismo", "aurora", "ameixa", "nevoa", "matcha", "seda", "brisa", "coral", "menta", "lavanda", "areia", "oceano", "aurora-boreal"];
-const ACCENTS = ["#16897E", "#2F6FDB", "#7A4FD6", "#C2417A", "#D9622B", "#3F8F3A"];
-const MODULES = [["brain", "Cérebro"], ["you", "Você"], ["history", "Histórico"]] as const;
 const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-type HTab = "mudar" | "respostas" | "aparencia" | "barra" | "dev" | "versoes";
-const HTABS: Array<{ id: HTab; label: string; icon: "pen" | "messages" | "palette" | "sidebar" | "code" | "history" }> = [
+type HTab = "geral" | "sobre" | "mudar" | "respostas" | "aparencia" | "dev" | "versoes";
+const HTABS: Array<{ id: HTab; label: string; icon: "settings" | "info" | "pen" | "messages" | "palette" | "sidebar" | "code" | "history" }> = [
+  { id: "geral", label: "Geral", icon: "settings" },
   { id: "mudar", label: "Mudar com IA", icon: "pen" },
   { id: "respostas", label: "Respostas", icon: "messages" },
   { id: "aparencia", label: "Aparência", icon: "palette" },
-  { id: "barra", label: "Barra lateral", icon: "sidebar" },
   { id: "dev", label: "Desenvolvedor", icon: "code" },
   { id: "versoes", label: "Versões", icon: "history" },
+  { id: "sobre", label: "Sobre", icon: "info" },
 ];
 
-export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness) => void; onOpenLab?: () => void }) {
-  const [tab, setTab] = useState<HTab>("mudar");
+const SECTION_NOTES: Record<HTab, [string, string]> = {
+  geral: ["Ajuste notificações de voz, execução e integrações.", "Preferências do aplicativo"],
+  sobre: ["Conheça o Creative AIx e seus agentes.", "Sobre o Creative AIx"],
+  mudar: ["Descreva um ajuste e revise a proposta.", "Proposta para revisar"],
+  respostas: ["Escolha o tom e o tamanho das respostas.", "Estilo da conversa"],
+  aparencia: ["Ajuste a luz, o tema e o papel de parede.", "Prévia da aparência"],
+  dev: ["Configure a experiência e as propostas de código.", "Modo Desenvolvedor"],
+  versoes: ["Consulte e restaure configurações anteriores.", "Histórico de versões"],
+};
+
+export function HarnessView({ onChanged, onPreview, onOpenLab }: {
+  onChanged?: (h: Harness) => void;
+  onPreview: (look: Appearance | null) => void;
+  onOpenLab?: () => void;
+}) {
+  const [tab, setTab] = useState<HTab>("geral");
   const [saved, setSaved] = useState<Harness | null>(null);
   const [draft, setDraft] = useState<Harness | null>(null);
   const [versions, setVersions] = useState<Array<{ id: string; label: string; when: string }>>([]);
   const [writable, setWritable] = useState(true);
   const [error, setError] = useState("");
+  const writing = useRef(false);
+  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
   const dirty = !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved);
 
@@ -66,10 +82,13 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
     setTimeout(() => setToast(""), 2600);
   };
 
+  // Recarregar (abrir, restaurar versao) remonta o painel de Aparencia com o que esta salvo
+  const [loads, setLoads] = useState(0);
   const load = useCallback(() => {
     void call(core().call("harnessGet")).then((r) => {
       if (!r.ok) return setError(r.error || "");
       const h = r.harness as Harness;
+      setLoads((n) => n + 1);
       setSaved(h);
       setDraft(clone(h));
       setVersions((r.versions as never) ?? []);
@@ -89,45 +108,53 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
     });
 
   const save = async (h: Harness, label: string, quiet = false) => {
-    const r = await call(core().call("harnessSave", JSON.stringify(h), label));
-    if (!r.ok) return setError(r.error || "Não salvou.");
-    const next = r.harness as Harness;
-    setSaved(next);
-    setDraft(clone(next));
-    onChanged?.(next);
-    if (!quiet) say("Salvo");
+    if (writing.current || !writable) return;
+    writing.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      const updates: Record<string, unknown> = {};
+      for (const [section, value] of Object.entries(h)) {
+        const before = saved?.[section as keyof Harness];
+        if (JSON.stringify(value) === JSON.stringify(before)) continue;
+        updates[section] = value && typeof value === "object" && !Array.isArray(value)
+          ? Object.fromEntries(Object.entries(value).filter(([key, item]) =>
+              JSON.stringify(item) !== JSON.stringify((before as Record<string, unknown> | undefined)?.[key])))
+          : value;
+      }
+      const r = await call(core().call("harnessPatch", JSON.stringify(updates), label));
+      if (!r.ok) return setError(r.error || "Não salvou.");
+      const result = r.harness as Harness;
+      setSaved(result);
+      setDraft((previous) => quiet && previous ? { ...previous, appearance: result.appearance } : clone(result));
+      onChanged?.(result);
+      if (!quiet) say("Salvo");
+      void call(core().call("harnessGet")).then((g) => g.ok && setVersions((g.versions as never) ?? []));
+    } finally {
+      writing.current = false;
+      setSaving(false);
+    }
+  };
+
+  const onAppearanceSaved = useCallback((h: Harness) => {
+    setSaved(h);
+    setDraft((previous) => (previous ? { ...previous, appearance: h.appearance } : clone(h)));
+    onChanged?.(h);
     void call(core().call("harnessGet")).then((g) => g.ok && setVersions((g.versions as never) ?? []));
-  };
-
-  // Aparencia: aplica e salva na hora (como no app anterior), sem esperar o Salvar
-  const setAppearance = (key: string, value: unknown) => {
-    if (!saved) return;
-    const next = clone(saved);
-    (next.appearance as Record<string, unknown>)[key] = value;
-    applyAppearance(next.appearance);
-    void save({ ...next, agents: draft?.agents ?? next.agents, response: draft?.response ?? next.response }, "Aparência", true);
-  };
-
-  if (!draft || !saved) {
-    return (
-      <Page title="Harness">
-        {error ? <p className="rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p> : <Spinner />}
-      </Page>
-    );
-  }
+  }, [onChanged]);
 
   return (
     <Page
       wide
-      title="Harness"
-      subtitle="Ajuste como os agentes trabalham juntos e como a plataforma se parece. São preferências: as regras de segurança continuam valendo."
+      title="Configurações"
+      subtitle="Preferências do aplicativo, dos agentes e da aparência."
       actions={
-        dirty ? (
+        dirty && draft && saved ? (
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => setDraft(clone(saved))}>
               Descartar
             </Button>
-            <Button variant="primary" icon="save" disabled={!writable} onClick={() => void save(draft, "Harness")}>
+            <Button variant="primary" icon="save" disabled={!writable || saving} onClick={() => void save(draft, "Configurações")}>
               Salvar
             </Button>
           </div>
@@ -135,28 +162,39 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
       }
     >
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
-      <IntroCard which="harness" />
       {!writable && <p className="mb-4 rounded-r2 bg-warn/10 p-3 text-sm text-fg">A pasta do seu cérebro não está disponível: dá para ver, mas não salvar.</p>}
 
-      <div role="tablist" aria-label="Seções do Harness" className="no-scrollbar mb-5 flex gap-1 overflow-x-auto rounded-full border border-edge bg-glass p-1 backdrop-blur-xl">
-        {HTABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-            className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm transition-colors",
-              tab === t.id ? "bg-primary font-medium text-fg-inverse" : "text-fg-muted hover:bg-hover hover:text-fg",
-            )}
-          >
-            <Icon name={t.icon} size={14} /> {t.label}
-          </button>
-        ))}
-      </div>
+      <div className="harness-region">
+      <div className="harness-studio">
+        <div role="tablist" aria-label="Seções de Configurações" aria-orientation="vertical" className="harness-index"
+          onKeyDown={(event) => {
+            const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+            if (!step) return;
+            event.preventDefault();
+            const next = (HTABS.findIndex((item) => item.id === tab) + step + HTABS.length) % HTABS.length;
+            setTab(HTABS[next]!.id);
+            event.currentTarget.querySelectorAll("button")[next]?.focus();
+          }}>
+          {HTABS.map((item) => (
+            <button key={item.id} type="button" role="tab" id={`h-tab-${item.id}`}
+              aria-selected={item.id === tab} aria-controls="h-console" tabIndex={item.id === tab ? 0 : -1}
+              onClick={() => setTab(item.id)}>
+              <span><Icon name={item.icon} size={17} /> {item.label}</span>
+              {item.id === tab && <small>{SECTION_NOTES[item.id][0]}</small>}
+            </button>
+          ))}
+        </div>
 
-      <div role="tabpanel" key={tab} className="animate-enter">
+        <div role="tabpanel" id="h-console" aria-labelledby={`h-tab-${tab}`} className="harness-console" data-section={tab}>
+          {tab !== "geral" && tab !== "sobre" && tab !== "aparencia" && <div className="harness-visual">
+            <div className="harness-float" key={tab}>
+              <Icon name={HTABS.find((item) => item.id === tab)!.icon} size={22} />
+              <span>{SECTION_NOTES[tab][1]}</span>
+            </div>
+          </div>}
+          <div className="harness-controls" hidden={tab !== "geral"}><GeneralSettings /></div>
+          {tab !== "geral" && <div className="harness-controls" key={tab}>
+      {tab === "sobre" ? <AboutView /> : !draft || !saved ? (error ? <Button onClick={load}>Tentar de novo</Button> : <Spinner />) : (<>
       {tab === "mudar" && (
         <>
       <Creator disabled={dirty || !writable} onApplied={() => (load(), say("Mudança aplicada"))} />
@@ -205,101 +243,7 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
       </Block>
       )}
       {tab === "aparencia" && (
-      <Block title="Aparência" note="Muda e fica salva na hora, sem precisar de Salvar. A anterior vai para Versões.">
-        <Labeled label="Tema">
-          <Segmented
-            label="Tema"
-            value={saved.appearance.mode as "escuro" | "claro"}
-            onValueChange={(v) => setAppearance("mode", v)}
-            options={[
-              { value: "escuro", label: "Escuro" },
-              { value: "claro", label: "Claro" },
-            ]}
-          />
-        </Labeled>
-        <Labeled label="Paleta">
-          <div className="flex flex-wrap gap-2">
-            {PALETTES.map((p) => {
-              const on = saved.appearance.palette === p;
-              return (
-                <button
-                  key={p}
-                  type="button"
-                  aria-pressed={on}
-                  onClick={() => setAppearance("palette", p)}
-                  className={cn("flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-sm transition-colors", on ? "border-fg bg-row-hover text-fg" : "border-hairline text-fg-muted hover:text-fg")}
-                >
-                  <span
-                    aria-hidden
-                    data-theme={saved.appearance.mode}
-                    data-palette={p}
-                    className="size-6 rounded-full border border-hairline"
-                    style={{ background: "linear-gradient(135deg, var(--tone-1), var(--tone-2) 55%, var(--tone-3))" }}
-                  />
-                  {p.replace("-", " ")}
-                </button>
-              );
-            })}
-          </div>
-        </Labeled>
-        <Labeled label="Destaque">
-          {ACCENTS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              aria-label={`Cor de destaque ${c}`}
-              aria-pressed={saved.appearance.accent.toUpperCase() === c}
-              onClick={() => setAppearance("accent", c)}
-              className={cn("size-7 rounded-full border-2", saved.appearance.accent.toUpperCase() === c ? "border-fg" : "border-transparent")}
-              style={{ background: c }}
-            />
-          ))}
-        </Labeled>
-        <Labeled label="Cantos">
-          <Segmented
-            label="Cantos"
-            value={saved.appearance.radius as "suave" | "reto" | "redondo"}
-            onValueChange={(v) => setAppearance("radius", v)}
-            options={[
-              { value: "suave", label: "Suave" },
-              { value: "reto", label: "Reto" },
-              { value: "redondo", label: "Redondo" },
-            ]}
-          />
-        </Labeled>
-        <Labeled label="Movimento">
-          <Switch label="Movimento" checked={!!saved.appearance.motion} onChange={(v) => setAppearance("motion", v)} />
-        </Labeled>
-        <Labeled label="Luzes">
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={Number(saved.appearance.ambient ?? 0.55)}
-            onChange={(e) => applyAppearance({ ambient: Number(e.target.value) })}
-            onPointerUp={(e) => setAppearance("ambient", Number((e.target as HTMLInputElement).value))}
-            onKeyUp={(e) => setAppearance("ambient", Number((e.target as HTMLInputElement).value))}
-            aria-label="Intensidade das luzes de fundo"
-            className="w-48 accent-[var(--accent)]"
-          />
-        </Labeled>
-        <Labeled label="Desfoque">
-          <Switch label="Vidro com desfoque" checked={saved.appearance.blur !== false} onChange={(v) => setAppearance("blur", v)} />
-        </Labeled>
-        {inQt && <Wallpapers current={String(saved.appearance.wallpaper ?? "")} onPick={(id) => setAppearance("wallpaper", id)} dim={Number(saved.appearance.dim ?? 0.35)} onDim={(v) => setAppearance("dim", v)} />}
-      </Block>
-      )}
-      {tab === "barra" && (
-      <Block title="Barra lateral" note="Escolha as telas que aparecem. O Harness fica sempre na barra lateral. Vale depois de Salvar.">
-        <div className="flex flex-wrap gap-2">
-          {MODULES.map(([k, l]) => (
-            <Chip key={k} selected={draft.modules[k] !== false} onClick={() => patch(["modules", k], draft.modules[k] === false)}>
-              {l}
-            </Chip>
-          ))}
-        </div>
-      </Block>
+        <AppearancePanel key={loads} harness={saved} writable={writable} onPreview={onPreview} onSaved={onAppearanceSaved} />
       )}
       {tab === "dev" && <Developer draft={draft} patch={patch} />}
       {tab === "versoes" && (
@@ -311,17 +255,16 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
             {versions.slice(0, 15).map((v) => (
               <li key={v.id} className="flex items-center gap-3 border-b border-hairline px-3 py-2 last:border-0">
                 <span className="w-32 text-xs tabular-nums text-fg-subtle">{v.when.replace(/^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2}).*/, "$3/$2 $4:$5")}</span>
-                <span className="flex-1 text-sm text-fg">{v.label || "Harness"}</span>
+                <span className="flex-1 text-sm text-fg">{v.label || "Configurações"}</span>
                 <Button
                   size="compact"
                   variant="ghost"
                   icon="undo"
-                  disabled={!writable}
+                  disabled={!writable || saving}
                   onClick={async () => {
                     const r = await call(core().call("harnessRestore", v.id));
                     if (!r.ok) return setError(r.error || "");
                     load();
-                    applyAppearance((r.harness as Harness).appearance);
                     onChanged?.(r.harness as Harness);
                     say("Versão restaurada");
                   }}
@@ -334,8 +277,11 @@ export function HarnessView({ onChanged, onOpenLab }: { onChanged?: (h: Harness)
         )}
       </Block>
       )}
+      </>)}
+      </div>}
       </div>
-
+      </div>
+      </div>
       {toast && (
         <div role="status" className="animate-enter fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-primary px-4 py-2 text-[13px] text-fg-inverse shadow-lg">
           {toast}
@@ -491,80 +437,5 @@ function Developer({ draft, patch }: { draft: Harness; patch: (path: string[], v
         </>
       )}
     </Block>
-  );
-}
-
-interface WallpaperItem {
-  id: string;
-  title: string;
-  author?: string;
-  year?: string;
-}
-
-/** Papel de parede (core/wallpapers.py): catalogo com credito + fotos importadas na pasta pessoal. */
-function Wallpapers({ current, onPick, dim, onDim }: { current: string; onPick: (id: string) => void; dim: number; onDim: (v: number) => void }) {
-  const [items, setItems] = useState<WallpaperItem[]>([]);
-  const [error, setError] = useState("");
-  const load = useCallback(() => void call(core().call("wallpapersList")).then((r) => r.ok && setItems((r.items as WallpaperItem[]) ?? [])), []);
-  useEffect(load, [load]);
-
-  const importPhoto = async () => {
-    const [path] = await pickFiles();
-    if (!path) return;
-    const r = await call(core().call("wallpaperImport", path));
-    if (!r.ok) return setError(r.error || "Não deu para importar.");
-    load();
-    const item = r.item as WallpaperItem | undefined;
-    if (item?.id) onPick(item.id);
-  };
-
-  return (
-    <div className="mt-2">
-      <Labeled label="Papel de parede">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onPick("")}
-            aria-pressed={!current}
-            className={cn("grid h-16 w-24 place-items-center rounded-r2 border-2 bg-chip text-xs text-fg-muted", !current ? "border-accent" : "border-transparent")}
-          >
-            Só as luzes
-          </button>
-          {items.map((w) => (
-            <button
-              key={w.id}
-              type="button"
-              title={[w.title, w.author, w.year].filter(Boolean).join(" · ")}
-              aria-label={w.title}
-              aria-pressed={current === w.id}
-              onClick={() => onPick(w.id)}
-              className={cn("h-16 w-24 overflow-hidden rounded-r2 border-2", current === w.id ? "border-accent" : "border-transparent")}
-            >
-              <img src={wallpaperUrl(w.id) ?? ""} alt="" className="size-full object-cover" loading="lazy" />
-            </button>
-          ))}
-          <button type="button" onClick={() => void importPhoto()} className="grid h-16 w-24 place-items-center rounded-r2 border-2 border-dashed border-hairline-hi text-xs text-fg-muted hover:text-fg">
-            <Icon name="image" size={16} />
-            Importar
-          </button>
-        </div>
-      </Labeled>
-      {current && (
-        <Labeled label="Escurecer">
-          <input
-            type="range"
-            min={0.15}
-            max={0.85}
-            step={0.05}
-            defaultValue={dim}
-            onPointerUp={(e) => onDim(Number((e.target as HTMLInputElement).value))}
-            onKeyUp={(e) => onDim(Number((e.target as HTMLInputElement).value))}
-            aria-label="Escurecer a foto"
-            className="w-48 accent-[var(--accent)]"
-          />
-        </Labeled>
-      )}
-      {error && <p className="text-sm text-bad-ink">{error}</p>}
-    </div>
   );
 }

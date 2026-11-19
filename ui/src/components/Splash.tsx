@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 
 type Phase = "intro" | "ready" | "leaving";
 
-export function Splash({ coreReady, photo, onDone }: { coreReady: boolean; photo?: string | null; onDone: () => void }) {
+export function Splash({ coreReady, onDone }: { coreReady: boolean; onDone: () => void }) {
   const [phase, setPhase] = useState<Phase>("intro");
   const [introDone, setIntroDone] = useState(false);
   // Tecla ou clique antes do nucleo ficar pronto: lembra e entra assim que ele estiver (antes era ignorado)
@@ -50,17 +50,9 @@ export function Splash({ coreReady, photo, onDone }: { coreReady: boolean; photo
       aria-label="Creative AIx. Pressione qualquer tecla para entrar."
       onClick={leave}
       data-phase={phase}
-      className="splash fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-canvas"
+      className="splash fixed inset-0 z-[100] grid place-items-center overflow-hidden"
       style={{ cursor: phase === "ready" ? "pointer" : "default" }}
     >
-      {photo ? (
-        <div aria-hidden className="absolute inset-0">
-          <img src={photo} alt="" className="size-full object-cover" />
-          <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_50%,rgb(0_0_0/0.22),transparent_75%)]" />
-        </div>
-      ) : (
-        <div aria-hidden className="splash-lights absolute inset-0" />
-      )}
       <div className="splash-brand relative -mt-6 flex flex-col items-center">
         <svg width={40} height={40} viewBox="0 0 24 24" aria-hidden className="photo-ink mb-[18px] text-fg">
           {[0, 1, 2, 3].map((i) => (

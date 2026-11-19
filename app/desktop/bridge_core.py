@@ -328,6 +328,9 @@ class BridgeCore:
     def harnessSave(self, payload: str, label: str) -> str:
         return self._brain_call(lambda: {"harness": self._brain().harness.save(json.loads(payload or "{}"), label)})
 
+    def harnessPatch(self, payload: str, label: str) -> str:
+        return self._brain_call(lambda: {"harness": self._brain().harness.patch(json.loads(payload), label)})
+
     def harnessRestore(self, version_id: str) -> str:
         return self._brain_call(lambda: {"harness": self._brain().harness.restore(version_id)})
 
@@ -485,18 +488,28 @@ class BridgeCore:
             return _to_json({"ok": False, "error": f"Registro indisponível: {type(e).__name__}"})
 
     # ── AI Research Lab (core/lab.py) ──
-    LAB_BUDGET_MAX = 5.0          # teto por experimento real, em US$ (a pessoa escolhe ate aqui)
+    LAB_BUDGET_MAX = 5.0          # maior limite de custo estimado que a pessoa pode indicar
+    _lab_jobs_lock = threading.Lock()
 
     def _lab(self):
         from core.lab import get_lab
         return get_lab(self._brain().store.personal)
 
     def labVersions(self, agent: str) -> str:
-        from core.lab import effective_config
+        from core.lab import effective_config, v_safe_id
         def run():
-            rows = self._lab().versions(agent, self._brain().harness)
-            return {"versions": rows, "effective": {v["id"]: effective_config(agent, v) for v in rows}}
+            lab = self._lab()
+            rows = lab.versions(agent, self._brain().harness)
+            active = next(row for row in rows if row["published"])
+            rollback = bool(lab._read(f"promotions/{v_safe_id(active['id'])}.json", None))
+            tested = {version for entry in lab.runs() for version, stats in (entry.get("summary") or {}).items()
+                      if stats.get("success_rate") is not None}
+            return {"versions": [{**row, "tested": row["id"] in tested} for row in rows], "rollback_available": rollback,
+                    "effective": {v["id"]: effective_config(agent, v) for v in rows}}
         return self._brain_call(run)
+
+    def labArchive(self, version_id: str, archived: bool) -> str:
+        return self._brain_call(lambda: {"version": self._lab().archive(version_id, archived, self._brain().harness)})
 
     def labCreateVariant(self, payload: str) -> str:
         def run():
@@ -509,17 +522,60 @@ class BridgeCore:
     def labDiff(self, a: str, b: str) -> str:
         return self._brain_call(lambda: {"lines": self._lab().diff(a, b)})
 
+    def labDraftRoute(self, payload: str) -> str:
+        from core.lab_drafts import draft_route
+        return self._brain_call(lambda: draft_route(self._brain().store, json.loads(payload)))
+
     def labPublish(self, version_id: str) -> str:
-        return self._brain_call(lambda: {"version": self._lab().publish(version_id, self._brain().harness)})
+        return self.labPromote(version_id)
 
     def labEvalSets(self) -> str:
-        return self._brain_call(lambda: {"sets": self._lab().eval_sets()})
+        def run():
+            from core.lab import _fingerprint
+            lab = self._lab()
+            return {"sets": [{**row, "hash": _fingerprint(row)} for row in lab.eval_sets()]}
+        return self._brain_call(run)
+
+    def labDataset(self, payload: str) -> str:
+        def run():
+            from core.lab import _fingerprint
+            data = json.loads(payload)
+            lab = self._lab()
+            name = data["name"]
+            if data.get("action") == "validate":
+                from core.lab_cases import validate_cases
+                validate_cases(data["cases"], data["agent"])
+                return {}
+            if data.get("action") == "save":
+                row = lab.save_eval_set(name, data["cases"], data["agent"], data.get("title", ""), data.get("expected", ""))
+            elif data.get("action") == "read":
+                row = lab.eval_set(name, data.get("revision", ""))
+            else:
+                raise ValueError("operação de conjunto inválida")
+            return {"set": {**row, "hash": _fingerprint(row)}, "revisions": lab.dataset_revisions(name)}
+        return self._brain_call(run)
+
+    def labReport(self, run_id: str, format: str, hypothesis: str) -> str:
+        from core.lab_report import report
+        return self._brain_call(lambda: {"content": report(self._lab().run_detail(run_id), format, hypothesis)})
+
+    def labRollback(self, agent: str, active: str, confirmed: bool) -> str:
+        if not confirmed:
+            return _to_json({"ok": False, "error": "Confirme a restauração da versão anterior."})
+        return self._brain_call(lambda: {"version": self._lab().rollback(agent, self._brain().harness, active)})
 
     def labRuns(self) -> str:
         return self._brain_call(lambda: {"runs": self._lab().runs(), "busy": bool(getattr(self, "_lab_busy", False))})
 
     def labRunDetail(self, run_id: str) -> str:
-        return self._brain_call(lambda: {"run": self._lab().run_detail(run_id)})
+        def run():
+            from core.task_ledger import TaskLedger
+            lab = self._lab()
+            detail = lab.run_detail(run_id)
+            task_id = detail.get("task_id")
+            events = TaskLedger(lab.folder / "events").events(task_id) if task_id == f"lab-{run_id}" else []
+            return {"run": {**detail, "events": events}}
+        return self._brain_call(run)
 
     def labSkills(self, agent: str) -> str:
         from core.lab import skills_and_tools
@@ -533,52 +589,82 @@ class BridgeCore:
         from core.lab import observe
         return self._brain_call(lambda: {"tasks": observe(agent, state)})
 
+    def _start_lab_job(self, name, job) -> str:
+        with self._lab_jobs_lock:
+            if getattr(self, "_lab_busy", False):
+                return _to_json({"ok": False, "error": "Já há um experimento rodando."})
+            cancel = threading.Event()
+            self._lab_cancel = cancel
+            self._lab_busy = True
+
+            def work():
+                try:
+                    reply = {"ok": True, **job(cancel)}
+                except Exception as e:
+                    reply = {"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+                with self._lab_jobs_lock:
+                    self._lab_busy = False
+                    self._emit("labFinished", _to_json(reply))
+
+            try:
+                threading.Thread(target=work, daemon=True, name=name).start()
+            except RuntimeError:
+                self._lab_busy = False
+                return _to_json({"ok": False, "error": "Não foi possível iniciar o experimento."})
+        return _to_json({"ok": True, "started": True})
+
     def labRun(self, payload: str) -> str:
         """{"set", "versions": [ids], "mode": "simulado"|"real", "confirmed": bool, "budget": US$}.
         Real usa o provedor (custa): so com confirmacao explicita e orcamento ate LAB_BUDGET_MAX."""
-        import threading
-        from core.lab import real_planner, replay_planner
+        from core.lab import fixture_planner, real_planner, replay_planner
+        from core.lab_budget import Budget, budget_scope
         try:
             d = json.loads(payload or "{}")
             mode = d.get("mode")
-            if mode not in ("simulado", "real"):
-                raise ValueError("modo deve ser simulado ou real")
-            versions = [str(v) for v in d.get("versions") or []][:2]
-            if not versions:
-                raise ValueError("escolha ao menos uma versão")
-            budget = None
-            if mode == "real":
-                budget = float(d.get("budget") or 0)
-                if d.get("confirmed") is not True:
-                    raise ValueError("o modo real precisa da sua confirmação")
-                if not 0 < budget <= self.LAB_BUDGET_MAX:
-                    raise ValueError(f"orçamento deve ficar entre US$ 0,01 e US$ {self.LAB_BUDGET_MAX:.2f}")
-            if getattr(self, "_lab_busy", False):
-                raise ValueError("já há um experimento rodando")
-        except (ValueError, TypeError) as e:
-            return _to_json({"ok": False, "error": str(e)[:1].upper() + str(e)[1:]})
-        lab = self._lab()
-        planner = real_planner if mode == "real" else replay_planner(lab)
-        self._lab_cancel = threading.Event()
-        self._lab_busy = True
+            if mode not in ("simulado", "real", "fixture"):
+                raise ValueError("modo de avaliação inválido")
+            versions = d.get("versions", [])
+            if not isinstance(versions, list) or not 1 <= len(versions) <= 2 or any(not isinstance(v, str) for v in versions):
+                raise ValueError("escolha até duas versões")
+            budget = self._lab_paid_budget(d) if mode == "real" else None
+            seconds, calls, tokens = d.get("timeout", 180), d.get("calls", 40), d.get("tokens", 160000)
+            for value, low, high in ((seconds, 15, 600), (calls, 1, 200), (tokens, 512, 1000000)):
+                if type(value) is not int or not low <= value <= high:
+                    raise ValueError("limites de tempo, chamadas ou tokens inválidos")
+            lab = self._lab()
+            dataset = lab.eval_set(str(d.get("set", "")), str(d.get("revision", "")))
+            revision = lab._archive_dataset(dataset)
+        except (ValueError, TypeError, AttributeError, FileNotFoundError) as exc:
+            return _to_json({"ok": False, "error": str(exc)})
 
-        def work():
-            try:
-                run = lab.run(str(d.get("set", "")), versions, planner, origin=mode, cancel=self._lab_cancel,
-                              on_event=lambda e: self._emit("labProgress", _to_json(e)), budget_usd=budget)
-                self._emit("labFinished", _to_json({"ok": True, "run": run}))
-            except Exception as e:
-                self._emit("labFinished", _to_json({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}))
-            finally:
-                self._lab_busy = False
-        threading.Thread(target=work, daemon=True, name="lab-run").start()
-        return _to_json({"ok": True, "started": True})
+        protocol = {"objective": str(d.get("objective") or "")[:400], "hypothesis": str(d.get("hypothesis") or "")[:400],
+                    "limits": {"usd": budget, "seconds": seconds, "calls": calls, "tokens": tokens},
+                    "decision": "comparar pares válidos e sinalizar toda regressão de estado final"}
+
+        def run(cancel):
+            planner = real_planner if mode == "real" else fixture_planner if mode == "fixture" else replay_planner(lab, d.get("context", "fixture"))
+            limits = Budget(budget, seconds, calls, tokens, cancel) if budget is not None else None
+            with budget_scope(limits):
+                result = lab.run(dataset["name"], versions, planner, origin=mode, cancel=cancel, revision=revision,
+                                 split=d.get("split", "all"), repeats=d.get("repeats", 1), context_mode=d.get("context", "fixture"),
+                                 protocol=protocol, on_event=lambda e: self._emit("labProgress", _to_json(e)), budget_usd=budget)
+            return {"run": result}
+
+        return self._start_lab_job("lab-run", run)
+
+    def _lab_paid_budget(self, payload) -> float:
+        budget = float(payload.get("budget") or 0)
+        if payload.get("confirmed") is not True:
+            raise ValueError("a chamada ao provedor precisa da sua confirmação")
+        if not 0.01 <= budget <= self.LAB_BUDGET_MAX:
+            raise ValueError(f"orçamento deve ficar entre US$ 0,01 e US$ {self.LAB_BUDGET_MAX:.2f}")
+        return budget
 
     def labFeedback(self, payload: str) -> str:
         def run():
             d = json.loads(payload or "{}")
             return {"result": self._lab().add_feedback(str(d.get("run", "")), str(d.get("version", "")),
-                                                       str(d.get("case", "")), str(d.get("note", "")))}
+                                                       str(d.get("case", "")), str(d.get("note", "")), int(d.get("trial", 1)))}
         return self._brain_call(run)
 
     def labPromotionCheck(self, version_id: str) -> str:
@@ -592,43 +678,31 @@ class BridgeCore:
         return _to_json({"ok": True, **training_status()})
 
     def labResearch(self, payload: str) -> str:
-        """{"agent", "objective", "confirmed": bool, "budget"}: hipotese pelo modelo + experimento real.
-        Usa o provedor (custa): so com confirmacao e orcamento ate LAB_BUDGET_MAX. Nunca publica."""
-        import threading
-        from core.lab import real_planner, real_proposer
+        """Propõe uma hipótese isolada; a comparação é uma segunda ação do usuário."""
+        from core.lab import research_proposal
+        from core.lab_budget import Budget, budget_scope
         try:
-            d = json.loads(payload or "{}")
-            budget = float(d.get("budget") or 0)
-            if d.get("confirmed") is not True:
-                raise ValueError("a pesquisa usa o modelo e precisa da sua confirmação")
-            if not 0 < budget <= self.LAB_BUDGET_MAX:
-                raise ValueError(f"orçamento deve ficar entre US$ 0,01 e US$ {self.LAB_BUDGET_MAX:.2f}")
-            agent = str(d.get("agent") or "FILE").upper()
-            if agent != "FILE":
-                raise ValueError("por enquanto a pesquisa roda só com o agente de Arquivos (o único com casos conferíveis)")
-            objective = str(d.get("objective") or "").strip()
-            if not objective:
-                raise ValueError("descreva o objetivo")
-            if getattr(self, "_lab_busy", False):
-                raise ValueError("já há um experimento rodando")
-        except (ValueError, TypeError) as e:
-            return _to_json({"ok": False, "error": str(e)[:1].upper() + str(e)[1:]})
-        lab = self._lab()
-        self._lab_cancel = threading.Event()
-        self._lab_busy = True
+            data = json.loads(payload)
+            objective = str(data.get("objective") or "").strip()[:400]
+            agent = str(data.get("agent") or "FILE").upper()
+            lab = self._lab()
+            dataset = lab.eval_set(data.get("set", ""), data.get("revision", ""))
+            if not objective or dataset["agent"] != agent:
+                raise ValueError("informe um objetivo e um conjunto do agente")
+            paid = data.get("mode") == "real"
+            budget = self._lab_paid_budget(data) if paid else None
+            versions = lab.versions(agent, self._brain().harness)
+            active = next(v for v in versions if v["published"])
+        except (ValueError, TypeError, AttributeError, FileNotFoundError) as exc:
+            return _to_json({"ok": False, "error": str(exc)})
 
-        def work():
-            try:
-                out = lab.research(agent, objective, real_proposer(agent), real_planner, origin="real",
-                                   budget_usd=budget, cancel=self._lab_cancel,
-                                   on_event=lambda e: self._emit("labProgress", _to_json(e)))
-                self._emit("labFinished", _to_json({"ok": True, "run": out["run"], "research": {k: v for k, v in out.items() if k != "run"}}))
-            except Exception as e:
-                self._emit("labFinished", _to_json({"ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}))
-            finally:
-                self._lab_busy = False
-        threading.Thread(target=work, daemon=True, name="lab-research").start()
-        return _to_json({"ok": True, "started": True})
+        def run(cancel):
+            limits = Budget(budget, 60, 1, 12000, cancel) if paid else None
+            with budget_scope(limits):
+                value = research_proposal(lab, active, dataset, objective, paid)
+            return {"proposal": value}
+
+        return self._start_lab_job("lab-research", run)
 
     def labCancel(self) -> None:
         ev = getattr(self, "_lab_cancel", None)
@@ -779,9 +853,12 @@ class BridgeCore:
                 data = {}
             data[key] = bool(seen)
             f.parent.mkdir(parents=True, exist_ok=True)
-            f.write_text(json.dumps(data), encoding="utf-8")
-        except Exception:
-            pass
+            from core.atomic_io import replace_file
+            tmp = f.with_name(f"{f.name}.tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            replace_file(tmp, f)                     # nunca deixa o arquivo pela metade
+        except Exception as exc:
+            print(f"  [ui] introducao nao gravada: {type(exc).__name__}: {exc}")
 
     # ── Perfil de cada agente para o Harness ─────────────────────
     def agentProfile(self, agent: str) -> str:
@@ -928,10 +1005,13 @@ class BridgeCore:
     def forceStop(self) -> None:
         self._controller.force_stop()
 
-    def loadConversations(self) -> str:
+    def loadConversations(self, include_turns: bool = False) -> str:
         """Conversas salvas (mais recente primeiro) para a barra lateral."""
-        return _to_json({"items": self._controller.list_conversations(),
-                         "current": self._controller.session.id})
+        session = self._controller.session
+        data = {"items": self._controller.list_conversations(), "current": session.id}
+        if include_turns:
+            data["turns"] = session.to_dict()["turns"]
+        return _to_json(data)
 
     def openConversation(self, sid: str) -> str:
         """Retoma uma conversa: devolve os pedidos/respostas para a tela."""
@@ -940,7 +1020,8 @@ class BridgeCore:
 
     def loadHistory(self) -> str:
         """Retorna JSON com lista de execucoes + stats agregados."""
+        items = history_store.list_all(limit=None)          # uma leitura so do arquivo para lista e totais
         return _to_json({
-            "items": history_store.list_all(limit=200),
-            "stats": history_store.stats(),
+            "items": items[:200],
+            "stats": history_store.stats(items),
         })

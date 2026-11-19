@@ -19,6 +19,8 @@ DEFAULTS = {
     "models": {
         "fast": "claude-sonnet-5",
         "strong": "claude-sonnet-5",
+        # auxiliar barato: so interpretacao pontual (perguntas sobre a tela, apos a leitura local)
+        "assist": "claude-haiku-5-5",
     },
 
     # Limites
@@ -86,6 +88,7 @@ DEFAULTS = {
         "file": "fast",
         "memory": "fast",
         "resolver": "fast",
+        "vision_look": "assist",
     },
 
     # Agentes → esforco de raciocinio (output_config.effort)
@@ -102,6 +105,7 @@ DEFAULTS = {
         "file": "medium",
         "json_repair": "low",
         "resolver": "low",
+        "vision_look": "low",
     },
 
     # Segurança
@@ -157,7 +161,7 @@ class Config:
             logger.info("config.yaml não encontrado, usando defaults")
 
         # Overrides via .env (documentados em .env.example)
-        for env_var, tier in (("MODEL_FAST", "fast"), ("MODEL_STRONG", "strong")):
+        for env_var, tier in (("MODEL_FAST", "fast"), ("MODEL_STRONG", "strong"), ("MODEL_ASSIST", "assist")):
             value = os.getenv(env_var, "").strip()
             if value:
                 self._data["models"][tier] = value

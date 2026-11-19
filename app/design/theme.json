@@ -142,6 +142,48 @@
         "#b3ebd9",
         "#bfd5f7",
         "#e2c8f4"
+      ],
+      "grafite": [
+        "#f5f5f6",
+        "#d9dbe0",
+        "#e6e7ea",
+        "#cfd3da"
+      ],
+      "crepusculo": [
+        "#fbf5f3",
+        "#f6c6b6",
+        "#f1c8dc",
+        "#d6c9f2"
+      ],
+      "floresta": [
+        "#f3f7f2",
+        "#cfe3cc",
+        "#e2ebcf",
+        "#c7dfd8"
+      ],
+      "neon": [
+        "#f7f5fb",
+        "#e3c8f2",
+        "#c4ecf2",
+        "#f2c8de"
+      ],
+      "sepia": [
+        "#f7f1e6",
+        "#e8d6b5",
+        "#efe2c8",
+        "#dccbb0"
+      ],
+      "fosforo": [
+        "#f2f8f3",
+        "#c8ead2",
+        "#dcefc9",
+        "#c4e3dd"
+      ],
+      "gelo": [
+        "#f4f8fc",
+        "#cfe2f6",
+        "#d9eef3",
+        "#d8dcf6"
       ]
     },
     "dark": {
@@ -222,6 +264,48 @@
         "#2a6e5a",
         "#2f4f78",
         "#5a3f78"
+      ],
+      "grafite": [
+        "#0f1012",
+        "#34373e",
+        "#2a2d33",
+        "#45495a"
+      ],
+      "crepusculo": [
+        "#140d18",
+        "#64284b",
+        "#6f3a20",
+        "#382866"
+      ],
+      "floresta": [
+        "#0a120d",
+        "#1d4630",
+        "#2c5522",
+        "#1b3a3d"
+      ],
+      "neon": [
+        "#0b0a14",
+        "#561b68",
+        "#0e4a5f",
+        "#641d46"
+      ],
+      "sepia": [
+        "#14100b",
+        "#47341f",
+        "#564225",
+        "#3a3024"
+      ],
+      "fosforo": [
+        "#050b07",
+        "#0f3b21",
+        "#1b4719",
+        "#0c312e"
+      ],
+      "gelo": [
+        "#0a0f16",
+        "#1e3858",
+        "#224556",
+        "#2b335c"
       ]
     }
   },
@@ -262,8 +346,13 @@
   },
   "press": 0.985,
   "fonts": {
-    "fontSans": "Inter Variable",
-    "fontDisplay": "Inter Variable",
+    "_fontsDoc": "OpenAI Sans e proprietaria e nao vai com o app: vale quando instalada no Windows. Sem ela, a pilha cai na Geist (a livre mais proxima no desenho) e na Inter, as duas embutidas.",
+    "fontSans": "OpenAI Sans",
+    "fontDisplay": "OpenAI Sans",
+    "fontFallbacks": [
+      "Geist Variable",
+      "Inter Variable"
+    ],
     "fontMono": "Cascadia Mono"
   }
 }

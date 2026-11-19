@@ -174,6 +174,40 @@ class LabReplayBudgetToolsObservability(unittest.TestCase):
         none = self.lab.run("arquivos-basico", [other["id"]], replay_planner(self.lab), origin="simulado")
         self.assertEqual(none["summary"][other["id"]]["unavailable"], 4)           # sem gravacao: nao inventa
 
+    def test_replay_keeps_dataset_identity_and_source_run(self):
+        from core.lab import replay_planner
+        set_name = "arquivos-basico"
+        recorded = self.lab.run(set_name, [self.v["id"]], good_planner, origin="real")
+        replayed = self.lab.run(set_name, [self.v["id"]], replay_planner(self.lab), origin="simulado")
+        self.assertTrue(all(row["source_run"] == recorded["id"] for row in replayed["results"]))
+        cases = self.lab.eval_set(set_name)["cases"]
+        cases[0]["expect"]["exists"] = ["outro-nome/"]
+        self.lab.save_eval_set(set_name, cases)
+        incompatible = self.lab.run(set_name, [self.v["id"]], replay_planner(self.lab), origin="simulado")
+        self.assertEqual(incompatible["summary"][self.v["id"]]["unavailable"], len(cases))
+        self.assertEqual(self.lab.run_detail(recorded["id"])["dataset_snapshot"]["cases"][0]["expect"]["exists"],
+                         ["relatorios/"])
+
+    def test_partial_run_can_be_opened_after_interruption(self):
+        def interrupted(event):
+            raise RuntimeError("interrupção de teste")
+
+        with self.assertRaisesRegex(RuntimeError, "interrupção"):
+            self.lab.run("arquivos-basico", [self.v["id"]], good_planner, origin="simulado", on_event=interrupted)
+        run = self.lab.run_detail(self.lab.runs()[0]["id"])
+        self.assertEqual(run["status"], "interrupted")
+        self.assertEqual(len(run["results"]), 1)
+        self.assertEqual(run["results"][0]["status"], "passou")
+
+    def test_dataset_rejects_outside_paths_and_duplicate_cases(self):
+        def case(**fields):
+            return {"id": "caso", "task": "crie pasta dentro de {ws}", **fields}
+
+        for cases in ([case(), case()], [case(setup={"..\\fora.txt": "dados"})],
+                      [case(expect={"contains": {"C:fora.txt": "dados"}})]):
+            with self.subTest(cases=cases), self.assertRaises(ValueError):
+                self.lab.save_eval_set("invalido", cases)
+
     def test_real_mode_without_provider_key_is_unavailable_not_failed(self):
         """Achado no primeiro teste real: sem chave, os casos contavam como falha da versao (0% de sucesso)."""
         from unittest.mock import patch

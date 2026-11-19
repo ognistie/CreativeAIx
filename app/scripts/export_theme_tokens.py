@@ -68,8 +68,9 @@ def render_css() -> str:
     out += [f"  --r-scale: 1;"]
     out += [f"  --{kebab(k)}: calc({v}px * var(--r-scale));" for k, v in radii.items() if not k.startswith("_")]
     out += [f"  --{kebab(k)}: {v}px;" for k, v in sizes.items()]
-    out += [f"  --font-sans-family: \"{fonts['fontSans']}\", \"Segoe UI\", system-ui, sans-serif;",
-            f"  --font-display-family: \"{fonts['fontDisplay']}\", \"Segoe UI\", system-ui, sans-serif;",
+    fallback = "".join(f'"{name}", ' for name in fonts.get("fontFallbacks", []))
+    out += [f"  --font-sans-family: \"{fonts['fontSans']}\", {fallback}\"Segoe UI\", system-ui, sans-serif;",
+            f"  --font-display-family: \"{fonts['fontDisplay']}\", {fallback}\"Segoe UI\", system-ui, sans-serif;",
             f"  --font-mono-family: \"{fonts['fontMono']}\", Consolas, monospace;"]
     out += [f"  --{kebab(k)}: {v}ms;" for k, v in durs.items() if k.startswith("dur") or k == "stagger"]
     out += [f"  --content-max: {durs['contentMax']}px;",

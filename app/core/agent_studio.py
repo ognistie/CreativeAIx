@@ -175,7 +175,7 @@ def memory(agent: str, brain) -> dict:
 def spec(agent: str, brain) -> dict:
     a = _need_agent(agent)
     from core.harness import AGENT_INFO
-    from core.lab import effective_config, skills_and_tools
+    from core.lab import ADAPTERS, effective_config, get_lab, skills_and_tools
     from core import action_risk
     from core.ai_client import thinking_off_for
     info = dict(AGENT_INFO.get(a, {}))
@@ -187,7 +187,21 @@ def spec(agent: str, brain) -> dict:
     except Exception:
         thinking = "adaptativo"
     st = skills_and_tools(a, brain)
-    return {"agent": a, **info, "config": {**cfg, "thinking": thinking},
+    evaluation = {"available": a in ADAPTERS}
+    if brain.store.personal:
+        try:
+            lab = get_lab(brain.store.personal)
+            active = next(row for row in lab.versions(a, brain.harness) if row["published"])
+            evaluation["version"] = {key: active[key] for key in ("id", "created", "hash")}
+            for run in lab.runs():
+                result = (run.get("summary") or {}).get(active["id"])
+                if result and result.get("success_rate") is not None:
+                    evaluation["last"] = {"id": run["id"], "origin": run["origin"], "started": run["started"],
+                                          "passed": result["passed"], "valid": result.get("valid", result["cases"])}
+                    break
+        except (OSError, ValueError, KeyError, StopIteration):
+            pass
+    return {"agent": a, **info, "config": {**cfg, "thinking": thinking}, "evaluation": evaluation,
             "authorization": action_risk.mode(), "tools": st["tools"], "skills": st["skills"],
             "policies": policies(brain), "files": files(a)}
 

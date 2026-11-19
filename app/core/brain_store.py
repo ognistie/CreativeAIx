@@ -26,7 +26,7 @@ import sqlite3
 import threading
 import time
 import unicodedata
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Iterator, Optional
 
 logger = logging.getLogger("brain_store")
@@ -53,7 +53,8 @@ def clean_rel(rel: str, *, note: bool = True) -> str:
     """Caminho relativo seguro ('Pasta/Nota.md'). ValueError se escapar da camada."""
     rel = unicodedata.normalize("NFC", (rel or "").replace("\\", "/").strip().strip("/"))
     parts = [p.strip() for p in rel.split("/") if p.strip()]
-    if not parts or any(p in (".", "..") or p.startswith(".") or _BAD_NAME.search(p) for p in parts):
+    if not parts or any(p in (".", "..") or p.startswith(".") or p.endswith(".")
+                        or PureWindowsPath(p).is_reserved() or _BAD_NAME.search(p) for p in parts):
         raise ValueError(f"caminho invalido: {rel!r}")
     rel = "/".join(parts)
     if note and not rel.lower().endswith(".md"):

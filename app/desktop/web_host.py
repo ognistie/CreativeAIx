@@ -31,9 +31,9 @@ from typing import Any, Callable, Optional
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QTimer, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWebEngineCore import (QWebEnginePage, QWebEngineProfile, QWebEngineScript, QWebEngineUrlRequestJob,
-                                     QWebEngineUrlScheme, QWebEngineUrlSchemeHandler)
+                                     QWebEngineUrlScheme, QWebEngineUrlSchemeHandler, QWebEngineUrlRequestInterceptor)
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
 
 from desktop.bridge import Bridge
 from desktop.server import HOST_METHODS, RPC_METHODS, Dispatcher, EventServer
@@ -95,9 +95,9 @@ class Page(QWebEnginePage):
     """So o app:// navega dentro da janela; https vai para o navegador; o resto e bloqueado."""
 
     def acceptNavigationRequest(self, url: QUrl, nav_type, is_main_frame: bool) -> bool:  # noqa: N802 (Qt)
-        if url.scheme() == SCHEME.decode():
+        if url.scheme() == SCHEME.decode() and url.host() == "ui":
             return True
-        if url.scheme() == "https":
+        if url.scheme() == "https" and is_main_frame and nav_type == QWebEnginePage.NavigationType.NavigationTypeLinkClicked:
             QDesktopServices.openUrl(url)
         return False
 
@@ -108,8 +108,28 @@ class Page(QWebEnginePage):
 
     def createWindow(self, _type):  # noqa: N802 (Qt): target=_blank abre no navegador padrao
         page = Page(self.profile(), self)
-        page.urlChanged.connect(lambda u: (u.scheme() == "https" and QDesktopServices.openUrl(u), page.deleteLater()))
+        QTimer.singleShot(3000, page.deleteLater)
         return page
+
+
+def permitted_ui_request(url: QUrl, port: int) -> bool:
+    """Recursos locais da interface e somente o WebSocket desta execução."""
+    if url.scheme() == "app":
+        return url.host() in ("ui", "wallpaper")
+    if url.scheme() == "ws":
+        return url.host() == "127.0.0.1" and url.port() == port and not url.userInfo()
+    if url.scheme() == "data":
+        return url.toString().lower().startswith(("data:image/", "data:font/"))
+    return url.toString() == "about:blank"
+
+
+class LocalRequests(QWebEngineUrlRequestInterceptor):
+    def __init__(self, port: int, parent=None) -> None:
+        super().__init__(parent)
+        self.port = port
+
+    def interceptRequest(self, info) -> None:  # noqa: N802
+        info.block(not permitted_ui_request(info.requestUrl(), self.port))
 
 
 class WidgetWindow(QObject):
@@ -226,6 +246,28 @@ class WebBridge(Bridge):
             return QFileDialog.getExistingDirectory(None, "Pasta do projeto") or ""
         return json.dumps(self._on_gui(ask, wait=True) or "", ensure_ascii=False)
 
+    def saveLabFile(self, name: str, content: str) -> str:
+        from PySide6.QtCore import QSaveFile
+        if Path(name).name != name or not name.startswith("lab-") or Path(name).suffix not in (".md", ".json"):
+            return json.dumps({"ok": False, "error": "Nome do arquivo de exportação inválido."})
+        encoded = content.encode("utf-8")
+        if len(encoded) > 2 * 1024 * 1024:
+            return json.dumps({"ok": False, "error": "A exportação excede o limite de tamanho."})
+
+        def ask():
+            path, _ = QFileDialog.getSaveFileName(self._main_view, "Salvar exportação do Lab", name)
+            return path
+
+        path = self._on_gui(ask, wait=True)
+        if not path:
+            return json.dumps({"ok": True, "cancelled": True})
+        target = QSaveFile(path)
+        if not target.open(QIODevice.OpenModeFlag.WriteOnly):
+            return json.dumps({"ok": False, "error": "Não foi possível abrir o arquivo escolhido."})
+        if target.write(encoded) != len(encoded) or not target.commit():
+            return json.dumps({"ok": False, "error": "Não foi possível salvar a exportação."})
+        return json.dumps({"ok": True, "cancelled": False})
+
     # ── Janela principal sem moldura: a barra de titulo da interface comanda ─────
     _EDGES = {"left": Qt.Edge.LeftEdge, "right": Qt.Edge.RightEdge, "top": Qt.Edge.TopEdge, "bottom": Qt.Edge.BottomEdge}
 
@@ -318,6 +360,16 @@ def _make_view(profile: QWebEngineProfile, page_name: str, info: dict, backgroun
     return view
 
 
+def core_failure_text(exc: BaseException) -> str:
+    """Mensagem para quem nao programa: o que houve, o motivo tecnico curto e onde ha detalhes."""
+    reason = f"{type(exc).__name__}: {exc}".strip()
+    if len(reason) > 300:
+        reason = reason[:297] + "..."
+    return ("O Creative AIx não conseguiu iniciar o núcleo e vai fechar.\n\n"
+            f"Motivo: {reason}\n\n"
+            f"Os detalhes ficaram em {APP_DIR / 'logs' / 'app.log'} (ou no console, se aberto por ele).")
+
+
 def ui_available() -> bool:
     return (UI_DIST / "index.html").is_file() and (UI_DIST / "mini.html").is_file()
 
@@ -402,6 +454,8 @@ def run() -> int:
     holder: dict = {}
 
     profile = QWebEngineProfile("creative-aix", app)
+    requests = LocalRequests(server.port, profile)
+    profile.setUrlRequestInterceptor(requests)
     profile.setPersistentStoragePath(str(APP_DIR / "desktop" / "data" / "web"))
     handler = SchemeHandler(UI_DIST, _wallpaper_file(), app)
     profile.installUrlSchemeHandler(SCHEME, handler)
@@ -432,6 +486,27 @@ def run() -> int:
 
     def attach_core() -> None:
         """Nucleo importado: o Bridge sobe na thread da interface (QObject) e o servidor passa a responder."""
+        try:
+            mount_core()
+        except Exception as exc:
+            core_failed(exc)
+
+    def core_failed(exc: BaseException) -> None:
+        """O nucleo nao montou (configuracao invalida, pasta inacessivel, dependencia ausente). Antes a excecao
+        sumia no slot Qt e a janela ficava em "Conectando" sem explicar nada: agora a pessoa ve o motivo e o app
+        fecha, em vez de ficar aberto sem funcionar."""
+        import traceback
+        traceback.print_exc()
+        print(f"[desktop] nucleo nao iniciou: {type(exc).__name__}: {exc}")
+        if "bridge" in holder:                       # montou pela metade: atalhos e voz nao ficam soltos
+            try:
+                _shutdown(holder["bridge"])
+            except Exception:
+                pass
+        QMessageBox.critical(main, "Creative AIx", core_failure_text(exc))
+        app.quit()
+
+    def mount_core() -> None:
         bridge = WebBridge(server)
         holder["bridge"] = bridge
         bridge.set_title_window(main.windowHandle())
@@ -446,7 +521,7 @@ def run() -> int:
     loader.loaded.connect(attach_core, Qt.ConnectionType.QueuedConnection)
     loader.start()
     app.aboutToQuit.connect(server.stop)
-    app._keep = (holder, server, profile, handler, main, mini, instance, loader)  # type: ignore[attr-defined]
+    app._keep = (holder, server, profile, handler, requests, main, mini, instance, loader)  # type: ignore[attr-defined]
     return app.exec()
 
 if __name__ == "__main__":

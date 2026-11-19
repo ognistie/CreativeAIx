@@ -1,6 +1,5 @@
 import { GlassPanel, Icon } from "../components/ui";
 import { openExternal } from "../lib/host";
-import { Page } from "./Page";
 
 // AboutView
 const STEPS = [
@@ -27,10 +26,9 @@ const LINKS = [
 
 export function AboutView() {
   return (
-    <Page
-      title="Creative AIx"
-      subtitle="Você descreve o que precisa em linguagem natural e um time de agentes planeja, executa no seu computador e confere o resultado."
-    >
+    <>
+      <h2 className="text-xl font-semibold text-fg">Creative AIx</h2>
+      <p className="mb-5 mt-1 text-sm text-fg-muted">Assistente para Windows que planeja e executa tarefas no seu computador.</p>
       <h2 className="photo-label mb-3 text-xs font-medium uppercase tracking-[0.1em] text-fg-muted">Como funciona</h2>
       <div className="mb-8 grid gap-3 sm:grid-cols-3">
         {STEPS.map((s) => (
@@ -64,6 +62,6 @@ export function AboutView() {
           </li>
         ))}
       </ul>
-    </Page>
+    </>
   );
 }

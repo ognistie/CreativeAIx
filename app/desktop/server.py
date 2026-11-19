@@ -54,10 +54,10 @@ RPC_METHODS = frozenset({
     "brainRename", "brainRestore", "brainSave", "brainSearch", "closeMini", "codingAgentsCheck",
     "creatorApply", "creatorDiscard", "creatorPropose", "deleteConversation", "devAct", "devCheck",
     "devDiff", "devList", "devPropose", "executeTask", "forceStop", "getSettings", "harnessGet",
-    "harnessRestore", "harnessSave", "historyDetail", "introSeen", "journalDates", "journalDelete",
+    "harnessRestore", "harnessSave", "harnessPatch", "historyDetail", "introSeen", "journalDates", "journalDelete",
     "journalFolders", "journalGet", "journalList", "journalListIn", "journalSave", "journalSetPrivate",
-    "journalSummarize", "journalUseInBrain", "labCancel", "labCreateVariant", "labDiff", "labEvalSets",
-    "labFeedback", "labObserve", "labPromote", "labPromotionCheck", "labPublish", "labResearch",
+    "journalSummarize", "journalUseInBrain", "labArchive", "labCancel", "labCreateVariant", "labDataset", "labDiff", "labDraftRoute", "labEvalSets",
+    "labFeedback", "labObserve", "labPromote", "labPromotionCheck", "labPublish", "labReport", "labResearch", "labRollback",
     "labRun", "labRunDetail", "labRuns", "labSkills", "labToolTest", "labTraining", "labVersions",
     "libraryCatalog", "librarySearch", "libraryTopic", "loadConversations", "loadHistory", "mainActivated", "newSession",
     "openBrainFolder", "openConversation", "providerStatus", "renameConversation", "restoreMain",
@@ -67,9 +67,9 @@ RPC_METHODS = frozenset({
 })
 
 # Metodos que so o host Qt (desktop/web_host.py) implementa, alem do contrato do Bridge: nome -> (args, retorno)
-HOST_METHODS = frozenset({"pickFiles", "pickFolder", "openExternal", "windowMinimize", "windowToggleMaximize",
+HOST_METHODS = frozenset({"saveLabFile", "pickFiles", "pickFolder", "openExternal", "windowMinimize", "windowToggleMaximize",
                           "windowClose", "windowStartMove", "windowStartResize", "windowState"})
-HOST_SIGNATURES = {"pickFiles": ([], "str"), "pickFolder": ([], "str"), "openExternal": ([("url", "str")], "bool"),
+HOST_SIGNATURES = {"saveLabFile": ([("name", "str"), ("content", "str")], "str"), "pickFiles": ([], "str"), "pickFolder": ([], "str"), "openExternal": ([("url", "str")], "bool"),
                    # Janela sem moldura: a barra de titulo e da propria interface
                    "windowMinimize": ([], "None"), "windowToggleMaximize": ([], "str"), "windowClose": ([], "None"),
                    "windowStartMove": ([], "None"), "windowStartResize": ([("edge", "str")], "None"),
@@ -260,7 +260,12 @@ class EventServer:
             return False
         # O hello so sai com o nucleo pronto: a interface mostra "Conectando ao nucleo" ate la e as primeiras
         # chamadas dela nunca recebem "ainda carregando" (o app abre a janela antes de carregar o nucleo).
-        await asyncio.get_running_loop().run_in_executor(None, self._attached.wait, CORE_WAIT_S)
+        ready = await asyncio.get_running_loop().run_in_executor(None, self._attached.wait, CORE_WAIT_S)
+        if not ready:
+            # Sem nucleo nao ha hello: antes saia o hello assim mesmo e toda chamada voltava "ainda carregando"
+            # para sempre. Fechando, o cliente reconecta (com espera crescente) e continua em "Conectando".
+            await ws.close(4503, "nucleo nao carregou")
+            return False
         # Registrado antes do hello: o cliente pode reagir ao hello e nenhum evento depois dele se perde.
         self._clients.add(ws)
         await ws.send(json.dumps({"jsonrpc": "2.0", "method": "hello",

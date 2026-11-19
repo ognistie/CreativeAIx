@@ -52,24 +52,41 @@ export async function openExternal(url: string): Promise<void> {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+/** O dialogo fica aberto enquanto a pessoa navega nas pastas: com o prazo padrao (30 s) a escolha se perdia. */
+const DIALOG_TIMEOUT_MS = 10 * 60_000;
+
 /** Escolher arquivos (dialogo do Windows). Devolve os caminhos ou [] se cancelar. */
 export async function pickFiles(): Promise<string[]> {
   if (!inQt) return [];
-  const r = await core().call("pickFiles");
+  const r = await core().callWithin(DIALOG_TIMEOUT_MS, "pickFiles");
   return Array.isArray(r) ? (r as string[]) : [];
 }
 
 /** Escolher a pasta de um projeto (dialogo do Windows). "" se cancelar. */
 export async function pickFolder(): Promise<string> {
   if (inQt) {
-    const r = await core().call("pickFolder");
+    const r = await core().callWithin(DIALOG_TIMEOUT_MS, "pickFolder");
     return typeof r === "string" ? r : "";
   }
   if (demoMode) return "C:\\Users\\voce\\Desktop\\meu-projeto";
   return "";
 }
 
+export async function saveLabDocument(name: string, content: string): Promise<boolean> {
+  if (inQt) {
+    const reply = await core().callWithin(DIALOG_TIMEOUT_MS, "saveLabFile", name, content) as { ok?: boolean; error?: string; cancelled?: boolean };
+    if (!reply?.ok) throw new Error(reply?.error || "Não foi possível salvar o arquivo.");
+    return !reply.cancelled;
+  }
+  const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+  const anchor = Object.assign(document.createElement("a"), { href: url, download: name });
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
+
 /** Endereco de um papel de parede (servido pelo app://wallpaper do host). */
 export function wallpaperUrl(id: string): string | null {
-  return inQt && id ? `app://wallpaper/${encodeURIComponent(id)}` : null;
+  // "gen:..." e desenhado pelo app (lib/generative.ts), nao e arquivo
+  return inQt && id && !id.startsWith("gen:") ? `app://wallpaper/${encodeURIComponent(id)}` : null;
 }

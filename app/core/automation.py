@@ -27,6 +27,17 @@ BLOCKED_CMDS = ["rm -rf","rmdir /s","format c","del /f /s","shutdown","reg delet
 FAILURE_PREFIXES = ("❌", "⛔", "⚠️", "Timeout", "Erro")
 # Abaixo disso o palpite de coordenada da visao e chute: melhor falhar e cair no retry.
 MIN_VISION_CONFIDENCE = 0.5
+NEWLINE_REFUSED = ("⛔ A área de transferência falhou e o texto tem quebra de linha: digitar tecla a tecla "
+                   "mandaria Enter (num app de mensagem, isso envia). Nada foi digitado.")
+
+
+def keyboard_fallback(text: str) -> str:
+    """Digita tecla a tecla quando colar falhou. Quebra de linha viraria Enter fora da porta de efeitos
+    (hotkey_risk): recusa em vez de digitar. '' = digitado; senao, a recusa."""
+    if "\n" in text or "\r" in text:
+        return NEWLINE_REFUSED
+    pyautogui.write(text)
+    return ""
 
 USERNAME = getpass.getuser()
 BASE = f"C:/Users/{USERNAME}"
@@ -552,7 +563,7 @@ class AutomationEngine:
             "run_command":self._run_command,"type_text":self._type_text,"hotkey":self._hotkey,
             "click":self._click,"screenshot":self._screenshot,"wait":self._wait,
             "vision_click":self._vision_click,"vision_type":self._vision_type,
-            "vision_analyze":self._vision_analyze,"vision_verify":self._vision_verify,"vision_smart":self._vision_smart,
+            "vision_analyze":self._vision_analyze,"vision_verify":self._vision_verify,
             "web_goto":self._web_goto,"web_click":self._web_click,"web_type":self._web_type,
             "web_key":self._web_key,"web_screenshot":self._web_screenshot,"web_read":self._web_read,"web_new_tab":self._web_new_tab,
             # Novas acoes v2
@@ -605,7 +616,7 @@ class AutomationEngine:
             self._expect = None          # o app esperado vale so ate a proxima acao
         try:
             # O efeito ja confirmado aqui (pela descricao) nao e perguntado de novo pelo elemento real
-            result = handler({**params, "_effect_checked": risk} if action == "vision_click" and risk else params)
+            result = handler({**params, "_effect_checked": risk} if action in ("vision_click", "click") and risk else params)
             if isinstance(result, dict):
                 rec = {**result, "success": result.get("success") is True,
                        "verified": result.get("verified") is True and result.get("success") is True}
@@ -947,7 +958,7 @@ class AutomationEngine:
         hwnd = getattr(self, '_target_hwnd', None)
         return bool(hwnd and _bring_to_front(hwnd) and _is_front(hwnd))
 
-    def _effect_at_point(self, x, y, already: str = "") -> str:
+    def _effect_at_point(self, x, y, already: str = "", action: str = "vision_click") -> str:
         """Porta de efeito para um clique por coordenada: '' segue; texto = pergunta/recusa."""
         from core.action_risk import label_risk
         names = names_at_point(x, y)
@@ -955,7 +966,7 @@ class AutomationEngine:
         kind, label = next(((k, n) for k, n in hits if k), (None, ""))
         if not kind or kind == already:
             return ""
-        return self._authorize_ui(kind, "vision_click", label)
+        return self._authorize_ui(kind, action, label)
 
     def _vision_click(self, p):
         desc = p.get("description","")
@@ -985,7 +996,8 @@ class AutomationEngine:
                     time.sleep(1); continue
                 return f"⚠️ Coordenada na taskbar ({x},{y}) — elemento errado"
 
-            if c < MIN_VISION_CONFIDENCE:
+            local_text = r.get("method") == "ocr_local"
+            if not local_text and c < MIN_VISION_CONFIDENCE:
                 if attempt == 0: time.sleep(1); continue
                 return f"⚠️ Confiança muito baixa: {c:.0%}"
 
@@ -998,7 +1010,7 @@ class AutomationEngine:
             time.sleep(0.15)
             pyautogui.click()
             time.sleep(0.4)
-            return f"👁️ ({x},{y}) [{c:.0%}]"
+            return f"👁️ ({x},{y}) [OCR local]" if local_text else f"👁️ ({x},{y}) [{c:.0%}]"
 
         return f"❌ Falhou após 2 tentativas: {desc}"
 
@@ -1204,7 +1216,7 @@ class AutomationEngine:
                 if attempt == 0: time.sleep(1); continue
                 return f"⚠️ Campo na taskbar ({x},{y})"
 
-            if c < MIN_VISION_CONFIDENCE:
+            if r.get("method") != "ocr_local" and c < MIN_VISION_CONFIDENCE:
                 if attempt == 0: time.sleep(1); continue
                 return f"⚠️ Confiança: {c:.0%}"
 
@@ -1220,12 +1232,10 @@ class AutomationEngine:
             try:
                 from core.clipboard import paste_text
                 paste_text(text)
-            except:
-                # Fallback: digita caractere por caractere
-                for ch in text:
-                    try: pyautogui.press(ch) if len(ch)==1 and ch.isascii() else None
-                    except: pass
-                    time.sleep(0.03)
+            except Exception:
+                refused = keyboard_fallback(text)
+                if refused:
+                    return refused
 
             time.sleep(0.3)
             return f"👁️ ({x},{y}): '{text[:40]}' [{c:.0%}]"
@@ -1241,17 +1251,6 @@ class AutomationEngine:
         if not self.vision: return "⚠️"
         r = self.vision.verify_state(p.get("expected","")); self.vision.restore_browser()
         return f"{'✅' if r.get('verified') else '❌'} {r.get('actual_state','')}" if not r.get("error") else "❌"
-
-    def _vision_smart(self, p):
-        if not self.vision: return "⚠️"
-        r = self.vision.smart_action(p.get("goal",""))
-        if r.get("error") or r.get("action")=="none": self.vision.restore_browser(); return f"❌"
-        a,x,y = r.get("action"),r.get("x",0),r.get("y",0)
-        try:
-            if a=="click": human_move(x,y); pyautogui.click()
-            elif a=="type": human_move(x,y); pyautogui.click(); time.sleep(0.2); pyautogui.write(r.get("text_to_type",""))
-            return f"👁️ {a} ({x},{y})"
-        except: return "❌"
 
     # === FILES ===
     def _list_files(self, p):
@@ -1372,8 +1371,13 @@ class AutomationEngine:
             return '⛔ Digitar exige uma janela alvo confirmada.'
         if _shell_surface(hwnd):
             return '⛔ Execucao de comandos por digitacao desativada.'
-        try: from core.clipboard import paste_text; paste_text(text)
-        except: pyautogui.write(text)
+        try:
+            from core.clipboard import paste_text
+            paste_text(text)
+        except Exception:
+            refused = keyboard_fallback(text)
+            if refused:
+                return refused
         return f"Digitado: {text[:60]}"
 
     def _hotkey(self, p):
@@ -1387,12 +1391,28 @@ class AutomationEngine:
         except: return "❌"
         sw,sh = pyautogui.size()
         if x<=0 or y<=0 or x>=sw or y>=sh: return f"❌ ({x},{y})"
+        # A descricao do passo e escrita pelo modelo: o efeito vem do elemento REAL sob o ponto (UIA),
+        # como no vision_click. "Ponto inicial" sobre o botao Enviar pedia nada e enviava.
+        ask = self._effect_at_point(x, y, p.get("_effect_checked"), action="click")
+        if ask:
+            return EFFECT_STOP + ask
         try: human_move(x,y); pyautogui.click(); return f"({x},{y})"
         except: return "❌ FailSafe"
 
     def _screenshot(self, p):
-        fp = os.path.join("captures",f"ss_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-        pyautogui.screenshot().save(fp); return f"📸 {fp}"
+        """Captura a tela inteira na Area de Trabalho real do Windows (mesmo redirecionada ao OneDrive).
+        O destino e fixo: nenhum caminho vem do plano. reveal=True mostra o arquivo no Explorer."""
+        from core.paths import known_folder
+        folder = known_folder("Desktop")
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f"captura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
+        pyautogui.screenshot().save(path)
+        ok = os.path.isfile(path)
+        if ok and p.get("reveal") is True:
+            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+        return {"success": ok, "verified": ok, "result": f"Captura salva na Área de Trabalho: {os.path.basename(path)}"
+                if ok else "❌ A captura não foi gravada.", "artifacts": {"files": [path] if ok else []},
+                "evidence": {"verifier": "filesystem", "file": path}}
 
     def _await_ready(self, baseline, max_s: float, min_s: float = READY_MIN_S, early=None):
         """Espera a janela que a acao anterior trouxe para frente ficar pronta (no maximo

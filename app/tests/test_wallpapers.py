@@ -23,14 +23,14 @@ def _image(size=(800, 500), colors=((250, 250, 240), (30, 60, 120), (200, 80, 40
 class CatalogTests(unittest.TestCase):
     def test_every_bundled_image_has_full_credit_and_license(self):
         self.assertEqual(wallpapers.uncredited(), [])
+        # O catalogo empacotado pode ficar vazio (o dono escolhe os papeis na camada pessoal); o que estiver
+        # empacotado precisa de ficha completa e licenca de redistribuicao
         items = wallpapers.catalog()
-        self.assertTrue(items)
         for item in items:
             for field in ("title", "author", "year", "license", "source"):
                 self.assertTrue(item[field], (item["id"], field))
             self.assertTrue(Path(item["path"]).is_file())
             self.assertLess(Path(item["path"]).stat().st_size, 5_000_000, "catalogo enxuto")
-        self.assertTrue(any("mínio público" in i["license"] or "omínio público" in i["license"] for i in items))
 
     def test_image_without_credit_is_left_out(self):
         tmp = Path(tempfile.mkdtemp())

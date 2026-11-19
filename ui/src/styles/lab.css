@@ -1,0 +1,138 @@
+/* AI Research Lab: entrada com tres areas, lista de agentes, arvore da memoria e abas de trabalho
+   (views/lab/LabHub.tsx, MemoryTree.tsx, AgentWork.tsx) */
+
+.lab-back { display: flex; justify-content: center; margin: 4px 0 14px; }
+
+/* Entrada: tres cartoes grandes com a ilustracao em meio-tom */
+.lab-hub {
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(14px, 2.4vw, 28px);
+  max-width: 1180px;
+  margin: clamp(10px, 3vh, 32px) auto 40px;
+  padding: 0 18px;
+  align-items: start;
+}
+.lab-hub-card, .lab-agent-card {
+  --lift: 0px;
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--edge);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  text-align: left;
+  box-shadow: 0 1px 0 rgb(255 255 255 / .06) inset, 0 18px 34px -20px rgb(0 0 0 / .55);
+  transform: translateY(var(--lift));
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 160ms var(--ease-out);
+  align-content: start;
+  height: auto;
+}
+.lab-hub-card:hover, .lab-agent-card:hover { --lift: -4px; border-color: color-mix(in srgb, var(--accent) 55%, var(--edge)); }
+.lab-hub-card:focus-visible, .lab-agent-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* Arte grande (referencia: o objeto ocupa o cartao). O desenho em meio-tom tem margem propria: ampliado ~1,35x e
+   sem distorcer (object-fit), o objeto enche a area. */
+.lab-hub-art, .lab-agent-art { position: relative; display: block; aspect-ratio: 1 / 1; overflow: hidden; }
+.lab-hub-art { aspect-ratio: 5 / 4; }
+.lab-hub-art .research-art, .lab-agent-art .research-art { inset: 0; border-radius: 0; }
+.lab-hub-art .research-figure, .lab-agent-art .research-figure {
+  inset: -17% -17%; width: 134%; height: 134%; object-fit: contain;
+  transition: transform 420ms var(--ease-out);
+}
+.lab-hub-card:hover .research-figure, .lab-agent-card:hover .research-figure { transform: scale(1.04); }
+.lab-hub-text { display: grid; gap: 6px; padding: 18px 20px 20px; }
+.lab-hub-text strong { font-size: 21px; font-weight: 650; letter-spacing: -.015em; }
+.lab-hub-lead { font-size: 14px; color: var(--text-secondary); }
+.lab-hub-text dl { display: grid; gap: 2px; margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.lab-hub-text dt { margin-top: 6px; font-size: 10.5px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--text-tertiary); }
+.lab-hub-text dd { font-size: 13px; line-height: 1.45; color: var(--text-secondary); }
+.lab-hub-go { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--accent-ink, var(--accent)); }
+
+.lab-agents {
+  display: grid;
+  box-sizing: border-box;
+  width: 100%;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 22px;
+  max-width: 1280px;
+  margin: 0 auto 40px;
+  padding: 0 18px;
+}
+.lab-agent-card strong { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 14px 16px 16px; font-size: 16px; font-weight: 620; }
+.lab-agent-card strong small { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-tertiary); }
+/* rascunho e "+": mesmo tamanho dos agentes, sem arte */
+.lab-agent-art-draft, .lab-agent-add .lab-agent-art { display: grid; place-items: center; color: var(--text-secondary);
+  background: repeating-linear-gradient(135deg, transparent 0 10px, color-mix(in srgb, var(--text-primary) 4%, transparent) 10px 11px); }
+.lab-agent-add { border-style: dashed; background: color-mix(in srgb, var(--bg-surface) 55%, transparent); }
+.lab-agent-add:hover .lab-agent-art { color: var(--accent); }
+
+.lab-agent-select select {
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
+  background: var(--bg-surface-hi);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.lab-workbench-title .lab-agent-select { margin-left: auto; }
+
+@media (max-width: 860px) { .lab-hub { grid-template-columns: 1fr; max-width: 520px; } }
+
+/* Rota: o caminho fixo do pedido, com o agente em destaque */
+.lab-route { display: flex; flex-wrap: wrap; align-items: stretch; gap: 18px; margin-top: 14px; }
+.lab-route li { position: relative; display: grid; gap: 2px; min-width: 120px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--bg-surface-hi); }
+.lab-route li[data-self] { border-color: var(--agent); background: color-mix(in srgb, var(--agent) 16%, var(--bg-surface)); }
+.lab-route strong { font-size: 13px; color: var(--text-primary); }
+.lab-route small { font-size: 11.5px; color: var(--text-secondary); }
+.lab-route-arrow { position: absolute; right: -16px; top: 50%; translate: 0 -50%; color: var(--text-tertiary); z-index: 1; }
+
+/* Memoria: arvore panoramica + editor */
+.lab-memory { display: grid; gap: 18px; max-width: 1240px; margin: 0 auto 40px; padding: 0 18px; }
+.lab-memory-editor { padding: 18px 20px 20px; border: 1px solid var(--edge); border-radius: 16px; background: var(--bg-surface); }
+.lab-memory-editor > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+
+.memory-tree { --bark-dark: #2f2622; --bark-light: #8a7a6b; display: grid; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--edge); border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent); }
+[data-theme="escuro"] .memory-tree, [data-photo="on"] .memory-tree { --bark-dark: #a08d7b; --bark-light: #6f6152; }
+.mt-scene { position: relative; width: 100%; aspect-ratio: 1000 / 600; isolation: isolate; }
+.mt-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.mt-branch, .mt-trunk, .mt-flow, .mt-tie, .mt-leaf, .mt-fruit { transition: opacity 200ms var(--ease-out); }
+/* passar o mouse isola um agente; o selecionado so ganha destaque (os outros ficam a meia luz, nao somem) */
+.mt-branch.is-dim, .mt-flow.is-dim, .mt-leaf.is-dim, .mt-fruit.is-dim { opacity: .16; }
+.mt-branch.is-muted, .mt-flow.is-muted, .mt-leaf.is-muted, .mt-fruit.is-muted { opacity: .55; }
+.mt-trunk.is-soft { opacity: .7; }
+/* fluxo: tracejado que corre (pedido subindo e sendo delegado) */
+.mt-flow { fill: none; stroke: var(--agent, var(--accent)); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 2 12; opacity: .75;
+  animation: mt-run 2.6s linear infinite; }
+.mt-flow-trunk { stroke: var(--accent); stroke-width: 2.5; opacity: .9; }
+@keyframes mt-run { to { stroke-dashoffset: -56; } }
+.mt-tie { stroke: #e28aa1; stroke-width: 1; stroke-dasharray: 2 5; opacity: .22; }
+.mt-tie.is-lit { opacity: .9; }
+.mt-tie.is-dim { opacity: .06; }
+.mt-points, .mt-labels { position: absolute; inset: 0; pointer-events: none; }
+.mt-points li, .mt-labels li { position: absolute; translate: -50% -50%; }
+.mt-leaf { width: 9px; height: 9px; border-radius: 2px; background: var(--agent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent) 30%, transparent); pointer-events: auto; cursor: help; }
+.mt-fruit { width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd1dc, #e28aa1 55%, #b04f6c); box-shadow: 0 0 0 3px #e28aa133; pointer-events: auto; cursor: help; }
+.mt-agent button { pointer-events: auto; display: grid; justify-items: center; gap: 1px; padding: 6px 12px 7px; border: 1px solid color-mix(in srgb, var(--agent) 55%, var(--edge));
+  border-radius: 12px; background: color-mix(in srgb, var(--agent) 22%, var(--bg-surface)); color: var(--text-primary); box-shadow: 0 6px 16px -8px #0009;
+  transition: transform 160ms var(--ease-out), background 160ms; }
+.mt-agent button:hover, .mt-agent button:focus-visible { transform: translateY(-2px); background: color-mix(in srgb, var(--agent) 34%, var(--bg-surface)); outline: none; }
+.mt-agent button[aria-pressed="true"] { border-color: var(--agent); box-shadow: 0 0 0 2px var(--agent), 0 8px 20px -8px #000a; }
+.mt-agent i { width: 8px; height: 8px; border-radius: 2px; background: var(--agent); }
+.mt-agent strong { font-size: 13px; font-weight: 650; white-space: nowrap; }
+.mt-agent small { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
+.mt-root { position: absolute; bottom: 0; translate: -50% 0; font-size: 11.5px; letter-spacing: .04em; color: var(--text-secondary); white-space: nowrap; }
+.mt-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; color: var(--text-secondary); }
+.mt-legend i { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.mt-key-flow { width: 18px; border-top: 2px dashed var(--accent); }
+.mt-key-leaf { width: 9px; height: 9px; border-radius: 2px; background: var(--accent); }
+.mt-key-fruit { width: 11px; height: 11px; border-radius: 50%; background: #e28aa1; }
+[data-motion="off"] .mt-flow { animation: none; }
+@media (prefers-reduced-motion: reduce) { .mt-flow { animation: none; } }
+
+[data-motion="off"] :is(.lab-hub-card, .lab-agent-card) { transition: none; --lift: 0px !important; }
+@media (prefers-reduced-motion: reduce) { :is(.lab-hub-card, .lab-agent-card) { transition: none; --lift: 0px !important; } }

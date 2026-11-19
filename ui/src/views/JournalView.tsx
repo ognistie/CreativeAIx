@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FOLDER_COLORS, FolderCard } from "../components/journal/FolderCard";
-import { MonthCalendar } from "../components/journal/MonthCalendar";
+import { localDay, MonthCalendar } from "../components/journal/MonthCalendar";
 import { PaperCard } from "../components/journal/PaperCard";
 import { ProgressRing } from "../components/ProgressRing";
 import { AppDialog, Button, Chip, EmptyState, Field, GlassPanel, Icon, IconButton, Skeleton, Spinner } from "../components/ui";
 import { cn } from "../lib/cn";
 import { core } from "../lib/host";
-import { IntroCard } from "../components/IntroCard";
 import { useCoreEvent } from "../lib/useCore";
 import { Page, Switch } from "./Page";
+
+import { YouView } from "./YouView";
 
 // JournalView: o Diario, um caderno na camada pessoal do Cerebro. Pastas, entradas com salvamento
 // automatico, privadas (fora da Conversa), extracao de prioridades/tarefas/tags e resumo por IA opcional.
@@ -70,7 +71,8 @@ const fmtDay = (iso: string) => {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("pt-BR", { weekday: "short", day: "numeric", month: "short" });
 };
 
-export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
+export function JournalView({ initialEntry, initialProfile = false, onOpenBrain }: { initialEntry?: string; initialProfile?: boolean; onOpenBrain?: () => void } = {}) {
+  const [profile, setProfile] = useState(initialProfile);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [useInBrain, setUseInBrain] = useState(false);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -131,11 +133,14 @@ export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
 
   const openEntry = (id: string) => void call(core().call("journalGet", id)).then((r) => (r.ok ? setEntry(r.entry as Entry) : setError(r.error || "")));
 
-  const newEntry = () => setEntry({ id: "", title: "", body: "", date: new Date().toISOString().slice(0, 10), folder, private: false });
+  // Entrada nova nasce no dia escolhido no calendario; sem dia escolhido, hoje (dia local, nao UTC)
+  const newEntry = () => setEntry({ id: "", title: "", body: "", date: day || localDay(new Date()), folder, private: false });
+
+  if (profile) return <YouView onBack={() => setProfile(false)} onOpenBrain={onOpenBrain} />;
 
   if (available === false) {
     return (
-      <Page title="Diário">
+      <Page title="Diário" actions={<Button size="compact" icon="user" onClick={() => setProfile(true)}>Como trabalhar comigo</Button>}>
         <EmptyState icon="notebook" title="Diário indisponível">
           O Diário fica na pasta pessoal do Segundo Cérebro, que não está configurada.
         </EmptyState>
@@ -167,12 +172,13 @@ export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
       title={current ? current.name : "Diário"}
       subtitle={current ? undefined : "Um caderno que o agente pode consultar, se você quiser. Fica na sua pasta pessoal."}
       actions={
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {folder && (
             <Button variant="ghost" size="compact" icon="arrow-left" onClick={() => (setFolder(""), setRows(null))}>
               Diário
             </Button>
           )}
+          {!folder && <Button size="compact" icon="user" onClick={() => setProfile(true)}>Como trabalhar comigo</Button>}
           <label className="flex items-center gap-2 text-sm text-fg-muted">
             Usar na Conversa
             <Switch
@@ -190,7 +196,6 @@ export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
       }
     >
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
-      {!folder && <IntroCard which="diary" />}
       {!folder ? (
         available === null ? (
           <Skeleton className="h-64 rounded-r4" />
@@ -282,31 +287,34 @@ export function JournalView({ initialEntry }: { initialEntry?: string } = {}) {
 function EntryEditor({ entry, onBack, onSaved }: { entry: Entry; onBack: () => void; onSaved: (e: Entry) => void }) {
   const [title, setTitle] = useState(entry.title);
   const [body, setBody] = useState(entry.body);
+  // A data e da entrada, nao da criacao: da para mudar (escrever hoje sobre ontem, ou reaproveitar uma entrada)
+  const [date, setDate] = useState(entry.date);
   const [state, setState] = useState<"" | "saving" | "saved" | "error">("");
   const [ask, setAsk] = useState<"" | "summary" | "delete">("");
   const [summarizing, setSummarizing] = useState(false);
   const [summaryError, setSummaryError] = useState("");
   const idRef = useRef(entry.id);
-  const savedRef = useRef({ title: entry.title, body: entry.body });
+  const savedRef = useRef({ title: entry.title, body: entry.body, date: entry.date });
 
   const save = useCallback(async () => {
     if (!title.trim() && !body.trim()) return;
     setState("saving");
-    const r = await call(core().call("journalSave", JSON.stringify({ id: idRef.current, title, body, folder: entry.folder, date: entry.date })));
+    const r = await call(core().call("journalSave", JSON.stringify({ id: idRef.current, title, body, folder: entry.folder, date })));
     if (!r.ok) return setState("error");
     const e = r.entry as Entry;
     idRef.current = e.id;
-    savedRef.current = { title, body };
+    savedRef.current = { title, body, date };
     setState("saved");
     onSaved(e);
-  }, [title, body, entry.folder, entry.date, onSaved]);
+  }, [title, body, date, entry.folder, onSaved]);
 
-  // Salva sozinho 1,2 s depois de parar de digitar
+  // Salva sozinho 1,2 s depois de parar de digitar (ou de trocar a data)
   useEffect(() => {
-    if (title === savedRef.current.title && body === savedRef.current.body) return;
+    const s = savedRef.current;
+    if (title === s.title && body === s.body && date === s.date) return;
     const t = setTimeout(() => void save(), 1200);
     return () => clearTimeout(t);
-  }, [title, body, save]);
+  }, [title, body, date, save]);
 
   useCoreEvent(
     "journalSummary",
@@ -331,8 +339,14 @@ function EntryEditor({ entry, onBack, onSaved }: { entry: Entry; onBack: () => v
             <Button variant="ghost" size="compact" icon="arrow-left" onClick={onBack}>
               Voltar
             </Button>
+            <label className="flex items-center gap-1.5 rounded-r2 px-2 py-1 text-xs text-fg-muted hover:bg-bg-hover" title="Dia desta entrada no calendário">
+              <Icon name="calendar" size={13} />
+              <span className="sr-only">Dia da entrada</span>
+              <input type="date" value={date} max={localDay(new Date())} onChange={(e) => e.target.value && setDate(e.target.value)}
+                className="bg-transparent text-xs text-fg-muted outline-none [color-scheme:inherit]" />
+            </label>
             <span className="flex-1 text-xs text-fg-subtle" aria-live="polite">
-              {fmtDay(entry.date)} · {{ "": "", saving: "Salvando…", saved: "Salvo", error: "Não salvou" }[state]}
+              {date !== entry.date && entry.id ? `Muda para ${fmtDay(date)} · ` : ""}{{ "": "", saving: "Salvando…", saved: "Salvo", error: "Não salvou" }[state]}
             </span>
             {state === "error" && (
               <Button size="compact" onClick={() => void save()}>

@@ -10,6 +10,17 @@ sys.path.insert(0, str(APP))
 
 
 class WebHost(unittest.TestCase):
+    def test_interface_can_only_request_local_resources_and_its_own_socket(self):
+        from PySide6.QtCore import QUrl
+        from desktop.web_host import permitted_ui_request
+        for url in ("app://ui/index.html", "app://ui/assets/scene.worker.js", "app://wallpaper/personal%3Aqa",
+                    "ws://127.0.0.1:12345/", "data:image/png;base64,AA==", "about:blank"):
+            self.assertTrue(permitted_ui_request(QUrl(url), 12345), url)
+        for url in ("https://example.com/collect", "http://127.0.0.1:12345/collect", "ws://127.0.0.1:54321/",
+                    "ws://user:token@127.0.0.1:12345/", "app://other/index.html", "file:///C:/private.txt",
+                    "data:text/html,<script>"):
+            self.assertFalse(permitted_ui_request(QUrl(url), 12345), url)
+
     def test_only_files_inside_dist_are_served(self):
         from desktop.web_host import resolve_ui_file
         with tempfile.TemporaryDirectory() as tmp:

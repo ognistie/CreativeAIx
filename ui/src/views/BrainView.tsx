@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AppDialog, AppMenu, Button, Chip, EmptyState, Field, Icon, IconButton, Segmented, Skeleton, type IconName } from "../components/ui";
-import { cn } from "../lib/cn";
+import { AppDialog, AppMenu, Button, Chip, EmptyState, Field, Icon, IconButton, Segmented, Skeleton } from "../components/ui";
 import { core, openExternal } from "../lib/host";
-import { IntroCard } from "../components/IntroCard";
+import { BranchExplorer } from "../components/BranchExplorer";
 
 // BrainView: o segundo cerebro. Arvore de notas (fabrica, editadas, suas), leitura em markdown,
 // edicao com [[ligacoes]], mapa, ligacoes e mencoes, e as sugestoes que os agentes propoem.
@@ -90,20 +89,25 @@ export function previewMarkdown(md: string, rel: string): string {
 // notas leva de 0,1 a 0,8 s no nucleo; antes a tela ficava em esqueleto a cada visita).
 let cachedOverview: Overview | null = null;
 let cachedSuggestions: Suggestion[] = [];
+// Pasta aberta na arvore: sair do Cerebro e voltar retoma o mesmo lugar
+let cachedBranch = "";
 
-export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
+export function BrainView() {
   const [ov, setOv] = useState<Overview | null>(cachedOverview);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
   const [filter, setFilter] = useState<Filter>("tudo");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [branch, setBranchState] = useState(cachedBranch);
+  const setBranch = useCallback((next: string) => { cachedBranch = next; setBranchState(next); }, []);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<{ rel: string; title: string; snippet: string }> | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>(cachedSuggestions);
   const [note, setNote] = useState<Opened | null>(null);
+  const [returnTo, setReturnTo] = useState<string>();
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [mode, setMode] = useState<Mode>("ler");
   const [draft, setDraft] = useState("");
+  const [mapFocus, setMapFocus] = useState("");
   const [graph, setGraph] = useState<{ nodes: Array<{ id: string; title: string }>; edges: Array<{ from: string; to: string }> } | null>(null);
   const [dialog, setDialog] = useState<"" | "note" | "folder" | "rename" | "delete">("");
   const [nameField, setNameField] = useState("");
@@ -139,10 +143,13 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
       setResults(null);
       return;
     }
-    const t = setTimeout(() => {
-      void call(core().call("brainSearch", query)).then((r) => setResults(r.ok ? ((r.items ?? r.data) as never) ?? [] : []));
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void call(core().call("brainSearch", query)).then((r) => {
+        if (current) setResults(r.ok ? ((r.items ?? r.data) as typeof results) ?? [] : []);
+      });
     }, 220);
-    return () => clearTimeout(t);
+    return () => { current = false; window.clearTimeout(timer); };
   }, [query]);
 
   const open = useCallback(
@@ -151,14 +158,20 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
       const r = await call(core().call("brainRead", rel));
       if (!r.ok) return setError(r.error || "");
       const o = { ...(r as unknown as Opened), text: String(r.text ?? ""), links: toLinks(r.links), backlinks: toLinks(r.backlinks) };
+      setReturnTo(rel);
       setNote(o);
+      // Voltar da nota mostra a pasta dela na arvore (mesmo aberta pela busca ou pelo mapa)
+      if (filter === "tudo") setBranch(parentOf(rel));
+      setQuery("");
+      setResults(null);
+      setMapFocus("");
       setDraft(o.text);
       setSuggestion(null);
       setMode((m) => (m === "mapa" ? "ler" : m));
       setError("");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dirty, note],
+    [dirty, note, filter],
   );
 
   const openByTitle = (title: string) => {
@@ -191,8 +204,6 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-
-  const rows = useMemo(() => buildRows(ov, filter, expanded, suggestions), [ov, filter, expanded, suggestions]);
 
   const decide = async (approve: boolean, title: string, body: string) => {
     if (!suggestion) return;
@@ -245,7 +256,6 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
   if (!ov) {
     return (
       <div className="flex h-full gap-3 px-4 pb-4 pt-1">
-        <Skeleton className="h-full w-[268px] rounded-r4" />
         <Skeleton className="h-full flex-1 rounded-r4" />
       </div>
     );
@@ -256,90 +266,58 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
     setSuggestion(null);
     setMode("ler");
   };
-  const openFolder = (folder: string) => {
-    setFilter("tudo");
-    setQuery("");
-    setExpanded((e) => {
-      const next = { ...e };
-      for (let p = folder; p; p = parentOf(p)) next[p] = true;
-      return next;
-    });
-  };
 
   return (
     <div className="flex h-full gap-3 px-4 pb-4 pt-1">
-      {/* Arvore */}
-      <aside className="brain-panel flex w-[268px] shrink-0 flex-col p-3">
-        <label className="relative mb-2 block">
-          <Icon name="nav-search" size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
-          <Field ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar notas · Ctrl+K" aria-label="Buscar no cérebro" className="h-9 pl-9 text-sm" />
-        </label>
-        {!results && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            <Chip selected={filter === "tudo"} onClick={() => setFilter("tudo")}>
-              Tudo
-            </Chip>
-            <Chip selected={filter === "meus"} onClick={() => setFilter("meus")}>
-              Minhas
-            </Chip>
-            {ov.removed.length > 0 && (
-              <Chip selected={filter === "ocultas"} onClick={() => setFilter("ocultas")}>
-                Ocultas
-              </Chip>
-            )}
-            {suggestions.length > 0 && (
-              <Chip selected={filter === "sugestoes"} onClick={() => setFilter("sugestoes")}>
-                Sugestões · {suggestions.length}
-              </Chip>
-            )}
-          </div>
-        )}
-        <ul className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1 text-[13px]">
-          {results ? (
-            results.length === 0 ? (
-              <li className="px-2 py-3 text-fg-muted">Nada encontrado</li>
-            ) : (
-              results.map((r) => (
-                <li key={r.rel}>
-                  <button type="button" onClick={() => void open(r.rel)} className="w-full rounded-r2 px-2 py-1.5 text-left hover:bg-hover">
-                    <span className="block truncate font-medium text-fg">{r.title}</span>
-                    {r.snippet && <span className="line-clamp-2 text-xs text-fg-muted">{r.snippet}</span>}
-                  </button>
-                </li>
-              ))
-            )
-          ) : (
-            rows.map((row) => <TreeRow key={row.key} row={row} current={note?.rel} sid={suggestion?.id} onToggle={(p) => setExpanded((e) => ({ ...e, [p]: !e[p] }))} onOpen={(rel) => void open(rel)} onSuggestion={(id) => setSuggestion(suggestions.find((s) => s.id === id) ?? null)} onRestore={async (rel) => { const r = await call(core().call("brainRestore", rel)); if (r.ok) { say("Nota restaurada"); reload(); } }} />)
-          )}
-        </ul>
-        <div className="mt-2 flex gap-1.5 border-t border-hairline pt-3">
-          <Button size="compact" variant="primary" icon="plus" disabled={!ov.writable} onClick={() => { setNameField(""); setFolderField(""); setDialog("note"); }}>
-            Nova nota
-          </Button>
-          <Button size="compact" icon="folder-plus" disabled={!ov.writable} onClick={() => { setNameField(""); setDialog("folder"); }}>
-            Pasta
-          </Button>
-          <IconButton icon="folder-open" label="Abrir a pasta do cérebro no Explorer" flat className="ml-auto size-[30px]" onClick={() => void core().call("openBrainFolder")} />
-        </div>
-      </aside>
-
       {/* Visao geral / leitura / edicao / mapa */}
-      <section className="brain-panel flex min-h-0 min-w-0 flex-1 flex-col">
+      <section className="brain-panel brain-content flex min-h-0 min-w-0 flex-1 flex-col">
         {error && <p className="m-4 mb-0 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
+        <div className="brain-toolbar">
+          <div className="relative min-w-44 flex-1">
+            <Field ref={searchRef} value={query} onChange={(event) => { setResults(null); setQuery(event.target.value); }}
+              placeholder="Buscar notas" aria-label="Buscar no cérebro" className="h-8 text-sm"
+              onKeyDown={(event) => { if (event.key === "Escape") setQuery(""); }} />
+            {query.trim() && <ul aria-label="Resultados da busca" className="brain-search-results">
+              {!results || !results.length ? <li>{results ? "Nenhuma nota encontrada" : "Buscando…"}</li> : results.map((item) => (
+                <li key={item.rel}><button type="button" onClick={() => void open(item.rel)}>
+                  <strong>{item.title}</strong>
+                  {item.snippet && <span className="line-clamp-2 text-xs text-fg-muted">{item.snippet}</span>}
+                </button></li>
+              ))}
+            </ul>}
+          </div>
+          <Button size="compact" icon="network" onClick={() => setMode("mapa")}>Mapa</Button>
+          <Button size="compact" icon="plus" disabled={!ov.writable} onClick={() => { setNameField(""); setFolderField(branch); setDialog("note"); }}>Nova nota</Button>
+          <AppMenu trigger={<IconButton icon="more" label="Opções do Cérebro" />} items={[
+            ...(ov.writable ? [{ label: "Nova pasta", icon: "folder-plus" as const, onSelect: () => { setNameField(branch ? branch + "/" : ""); setDialog("folder"); } }] : []),
+            { label: "Abrir no Explorer", icon: "folder-open", onSelect: () => void core().call("openBrainFolder") },
+          ]} />
+        </div>
         {suggestion ? (
           <SuggestionPanel key={suggestion.id} s={suggestion} onDecide={decide} onBack={goOverview} />
         ) : !note && mode !== "mapa" ? (
-          <Overview
-            ov={ov}
-            suggestions={suggestions.length}
-            onOpen={(rel) => void open(rel)}
-            onFolder={openFolder}
-            onSuggestions={() => setFilter("sugestoes")}
-            onOpenYou={onOpenYou}
-            onMap={() => setMode("mapa")}
-            onNew={() => { setNameField(""); setFolderField(""); setDialog("note"); }}
-            onSearch={() => searchRef.current?.focus()}
-          />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="brain-filters">
+              <Chip selected={filter === "tudo"} onClick={() => { setFilter("tudo"); setBranch(""); }}>Todas</Chip>
+              <Chip selected={filter === "meus"} onClick={() => { setFilter("meus"); setBranch(""); }}>Minhas notas</Chip>
+              {ov.removed.length > 0 && <Chip selected={filter === "ocultas"} onClick={() => setFilter("ocultas")}>Ocultas</Chip>}
+              {suggestions.length > 0 && <Chip selected={filter === "sugestoes"} onClick={() => setFilter("sugestoes")}>Sugestões · {suggestions.length}</Chip>}
+            </div>
+            {filter === "sugestoes" ? <ul className="brain-utility-list">
+              {suggestions.map((item) => <li key={item.id}><Button icon="sparkle" onClick={() => setSuggestion(item)}>{item.title}</Button></li>)}
+            </ul> : filter === "ocultas" ? <ul className="brain-utility-list">
+              {ov.removed.map((rel) => <li key={rel}><Button icon="undo" disabled={!ov.writable} onClick={async () => {
+                const result = await call(core().call("brainRestore", rel));
+                if (!result.ok) return setError(result.error || "Não foi possível restaurar.");
+                say("Nota restaurada");
+                reload();
+              }}>Restaurar {titleOf(rel)}</Button></li>)}
+            </ul> : (
+              <BranchExplorer branch={branch} onBranch={setBranch} folders={filter === "tudo" ? ov.folders : []}
+                notes={filter === "tudo" ? ov.notes : ov.notes.filter((item) => item.layer !== "base")}
+                folderLabel={cleanFolder} returnTo={returnTo} onOpen={(rel) => void open(rel)} />
+            )}
+          </div>
         ) : (
           <>
             <header className="flex flex-wrap items-center gap-3 border-b border-hairline px-6 py-3.5">
@@ -356,7 +334,7 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
                 ) : (
                   <>
                     <p className="text-xs text-fg-muted">Mapa</p>
-                    <h1 className="truncate font-display text-[22px] font-medium tracking-[-0.02em] text-fg">{note ? `Ligações de ${titleOf(note.rel)}` : "Notas mais ligadas"}</h1>
+                    <h1 className="truncate font-display text-[22px] font-medium tracking-[-0.02em] text-fg">{mapFocus || note ? `Ligações de ${titleOf(mapFocus || note!.rel)}` : "Notas mais ligadas"}</h1>
                   </>
                 )}
               </div>
@@ -392,7 +370,7 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
               {mode === "mapa" ? (
-                <BrainMap graph={graph} current={note?.rel} onOpen={(rel) => { void open(rel); setMode("ler"); }} onFocus={(rel) => void open(rel)} />
+                <BrainMap graph={graph} current={mapFocus || note?.rel} onOpen={(rel) => void open(rel)} onFocus={setMapFocus} />
               ) : mode === "editar" ? (
                 <textarea
                   value={draft}
@@ -409,14 +387,6 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
           </>
         )}
       </section>
-
-      {/* Ligacoes da nota aberta */}
-      {note && !suggestion && mode !== "mapa" && (
-        <aside className="brain-panel hidden w-[236px] shrink-0 overflow-y-auto p-4 xl:block">
-          <LinkList title="Liga para" empty="Nenhuma ligação. Use [[ ]] no texto." items={note.links} onOpen={(l) => (l.rel ? void open(l.rel) : openByTitle(l.label))} />
-          <LinkList title="Mencionada em" empty="Nenhuma nota cita esta ainda." items={note.backlinks} onOpen={(l) => (l.rel ? void open(l.rel) : openByTitle(l.label))} />
-        </aside>
-      )}
 
       {toast && (
         <div role="status" className="animate-enter fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-primary px-4 py-2 text-[13px] text-fg-inverse shadow-lg">
@@ -504,88 +474,6 @@ export function BrainView({ onOpenYou }: { onOpenYou?: () => void }) {
   );
 }
 
-type Row =
-  | { key: string; kind: "folder"; path: string; title: string; depth: number; open: boolean; count: number }
-  | { key: string; kind: "note"; rel: string; title: string; layer: string; depth: number }
-  | { key: string; kind: "hidden"; rel: string; title: string; depth: number }
-  | { key: string; kind: "suggestion"; sid: string; title: string; depth: number };
-
-function buildRows(ov: Overview | null, filter: Filter, expanded: Record<string, boolean>, suggestions: Suggestion[]): Row[] {
-  if (!ov) return [];
-  if (filter === "sugestoes") return suggestions.map((x) => ({ key: x.id, kind: "suggestion", sid: x.id, depth: 0, title: `${x.kind === "licao" ? "Lição" : "Procedimento"} · ${x.title}` }));
-  if (filter === "ocultas") return ov.removed.map((r) => ({ key: r, kind: "hidden", rel: r, title: titleOf(r), depth: 0 }));
-  const list = ov.notes.filter((n) => filter === "tudo" || n.layer !== "base");
-  const byFolder = new Map<string, Note[]>();
-  for (const n of list) byFolder.set(n.folder, [...(byFolder.get(n.folder) ?? []), n]);
-  const all = new Set<string>(filter === "tudo" ? ov.folders : []);
-  for (const f of byFolder.keys()) for (let p = f; p; p = parentOf(p)) all.add(p);
-  const count = new Map<string, number>();
-  for (const n of list) for (let p = n.folder; p; p = parentOf(p)) count.set(p, (count.get(p) ?? 0) + 1);
-  const out: Row[] = [];
-  const walk = (parent: string, depth: number) => {
-    const kids = [...all].filter((f) => f && parentOf(f) === parent).sort((a, b) => a.localeCompare(b));
-    for (const f of kids) {
-      const open = filter === "meus" || expanded[f] === true;
-      out.push({ key: `f:${f}`, kind: "folder", path: f, title: f.split("/").pop()!, depth, open, count: count.get(f) ?? 0 });
-      if (open) walk(f, depth + 1);
-    }
-    for (const n of byFolder.get(parent) ?? []) out.push({ key: n.rel, kind: "note", rel: n.rel, title: n.title, layer: n.layer, depth });
-  };
-  walk("", 0);
-  return out;
-}
-
-function TreeRow(props: {
-  row: Row;
-  current?: string;
-  sid?: string;
-  onToggle: (p: string) => void;
-  onOpen: (rel: string) => void;
-  onSuggestion: (id: string) => void;
-  onRestore: (rel: string) => void;
-}) {
-  const { row } = props;
-  const pad = { paddingLeft: 8 + row.depth * 14 };
-  if (row.kind === "folder") {
-    return (
-      <li>
-        <button type="button" aria-expanded={row.open} onClick={() => props.onToggle(row.path)} style={pad} className="flex h-8 w-full items-center gap-1.5 rounded-r2 pr-2 text-left text-fg-muted hover:bg-hover hover:text-fg">
-          <Icon name={row.open ? "chevron-down" : "chevron-right"} size={12} />
-          <Icon name="folder" size={14} />
-          <span className="flex-1 truncate">{cleanFolder(row.title)}</span>
-          <span className="rounded-full bg-chip px-1.5 text-[11px] tabular-nums text-fg-muted">{row.count}</span>
-        </button>
-      </li>
-    );
-  }
-  if (row.kind === "hidden") {
-    return (
-      <li className="flex h-8 items-center gap-2 px-2 text-fg-subtle">
-        <Icon name="eye-off" size={14} />
-        <span className="flex-1 truncate">{row.title}</span>
-        <button type="button" onClick={() => props.onRestore(row.rel)} className="text-xs text-accent-ink hover:underline">
-          Restaurar
-        </button>
-      </li>
-    );
-  }
-  const active = row.kind === "note" ? props.current === row.rel : props.sid === row.sid;
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={() => (row.kind === "note" ? props.onOpen(row.rel) : props.onSuggestion(row.sid))}
-        style={pad}
-        className={cn("flex h-8 w-full items-center gap-2 rounded-r2 pr-2 text-left", active ? "bg-row-hover text-fg" : "text-fg-muted hover:bg-hover hover:text-fg")}
-      >
-        <Icon name={row.kind === "suggestion" ? "sparkle" : "file-text"} size={14} />
-        <span className="flex-1 truncate">{row.title}</span>
-        {row.kind === "note" && row.layer !== "base" && <span className="size-1.5 rounded-full bg-accent" title={LAYER[row.layer]} />}
-      </button>
-    </li>
-  );
-}
-
 function Markdown({ md, onNote }: { md: string; onNote: (title: string) => void }) {
   return (
     <div className="prose-brain max-w-[70ch] select-text text-md leading-relaxed text-fg">
@@ -619,161 +507,6 @@ function Markdown({ md, onNote }: { md: string; onNote: (title: string) => void 
       >
         {md}
       </ReactMarkdown>
-    </div>
-  );
-}
-
-function LinkList({ title, empty, items, onOpen }: { title: string; empty: string; items: LinkRef[]; onOpen: (x: LinkRef) => void }) {
-  return (
-    <div className="mb-6">
-      <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-fg-muted">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-sm text-fg-subtle">{empty}</p>
-      ) : (
-        <ul className="space-y-0.5">
-          {items.map((x, i) => (
-            <li key={`${x.rel ?? x.label}:${i}`}>
-              <button type="button" onClick={() => onOpen(x)} className={cn("flex w-full items-center gap-2 rounded-r2 px-2 py-1 text-left text-[13px] hover:bg-hover hover:text-fg", x.rel ? "text-fg-muted" : "text-fg-subtle")} title={x.rel ? undefined : "Nota ainda não existe"}>
-                <Icon name="link" size={12} />
-                <span className="truncate">{x.label}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-const FOLDER_ICON: Record<string, IconName> = {
-  maestro: "route", inbox: "box", agentes: "nav-user", politicas: "shield", skills: "sparkle", tarefas: "check-circle",
-  execucoes: "play", diario: "nav-journal", aprendizados: "sparkle", dicionario: "book", sistema: "settings", voce: "user",
-};
-const folderIcon = (name: string): IconName => {
-  const key = fold(cleanFolder(name)).split(/\s+/)[0] ?? "";
-  return FOLDER_ICON[key] ?? "folder";
-};
-
-/** Visao geral: o que tem no cerebro, por pasta, com as notas a um clique. Substitui a tela vazia + mapa. */
-function Overview(props: {
-  ov: Overview;
-  suggestions: number;
-  onOpen: (rel: string) => void;
-  onFolder: (folder: string) => void;
-  onSuggestions: () => void;
-  onOpenYou?: () => void;
-  onMap: () => void;
-  onNew: () => void;
-  onSearch: () => void;
-}) {
-  const { ov } = props;
-  const groups = useMemo(() => {
-    const by = new Map<string, Note[]>();
-    for (const n of ov.notes) {
-      const top = n.folder.split("/")[0] || "";
-      by.set(top, [...(by.get(top) ?? []), n]);
-    }
-    return [...by.entries()]
-      .filter(([top]) => top)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([top, notes]) => ({
-        top,
-        notes: [...notes].sort((a, b) => Number(b.layer !== "base") - Number(a.layer !== "base") || a.title.localeCompare(b.title)),
-      }));
-  }, [ov.notes]);
-  const root = ov.notes.filter((n) => !n.folder);
-  return (
-    <div className="h-full overflow-y-auto px-6 py-6">
-      <IntroCard which="brain" />
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="font-display text-[26px] font-medium tracking-[-0.02em] text-fg">Seu segundo cérebro</h1>
-          <p className="mt-1 max-w-xl text-md text-fg-muted">
-            O que os agentes consultam antes de agir. Abra uma pasta, leia, edite ou crie notas: o original de fábrica nunca é apagado.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button icon="nav-search" onClick={props.onSearch}>
-            Buscar
-          </Button>
-          <Button icon="network" onClick={props.onMap}>
-            Mapa
-          </Button>
-          <Button variant="primary" icon="plus" disabled={!ov.writable} onClick={props.onNew}>
-            Nova nota
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-5 flex flex-wrap gap-2 text-sm">
-        <span className="rounded-full bg-chip px-3 py-1 text-fg">{ov.notes.length} notas</span>
-        <span className="rounded-full bg-chip px-3 py-1 text-fg">{ov.edited} suas ou editadas</span>
-        {props.suggestions > 0 && (
-          <button type="button" onClick={props.onSuggestions} className="press rounded-full bg-accent/15 px-3 py-1 font-medium text-accent-ink hover:bg-accent/25">
-            {props.suggestions} {props.suggestions === 1 ? "sugestão para revisar" : "sugestões para revisar"} →
-          </button>
-        )}
-        {props.onOpenYou && (
-          <button type="button" onClick={props.onOpenYou} className="press rounded-full bg-chip px-3 py-1 text-fg hover:bg-row-hover">
-            Contar sobre você →
-          </button>
-        )}
-      </div>
-
-      <div className="mt-6 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(240px,1fr))]">
-        {groups.map(({ top, notes }, i) => (
-          <article key={top} style={{ animationDelay: `calc(var(--stagger) * ${i})` }} className="animate-enter flex flex-col rounded-r3 border border-edge bg-glass-hi p-4">
-            <button type="button" onClick={() => props.onFolder(top)} className="group flex items-center gap-2.5 text-left">
-              <span className="grid size-8 place-items-center rounded-r2 bg-accent/12 text-accent-ink">
-                <Icon name={folderIcon(top)} size={16} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-medium text-fg group-hover:underline">{cleanFolder(top)}</span>
-                <span className="block text-xs text-fg-muted">
-                  {notes.length} {notes.length === 1 ? "nota" : "notas"}
-                </span>
-              </span>
-            </button>
-            <ul className="mt-3 space-y-0.5">
-              {notes.slice(0, 4).map((n) => (
-                <li key={n.rel}>
-                  <button type="button" onClick={() => props.onOpen(n.rel)} className="flex w-full items-center gap-2 rounded-r1 px-1.5 py-1 text-left text-[13px] text-fg-muted hover:bg-hover hover:text-fg">
-                    <Icon name="file-text" size={13} className="shrink-0" />
-                    <span className="truncate">{n.title}</span>
-                    {n.layer !== "base" && <span className="ml-auto size-1.5 shrink-0 rounded-full bg-accent" title={LAYER[n.layer]} />}
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {notes.length > 4 && (
-              <button type="button" onClick={() => props.onFolder(top)} className="mt-1 self-start px-1.5 text-xs font-medium text-accent-ink hover:underline">
-                Ver as {notes.length}
-              </button>
-            )}
-          </article>
-        ))}
-        {root.length > 0 && (
-          <article className="flex flex-col rounded-r3 border border-edge bg-glass-hi p-4">
-            <p className="flex items-center gap-2.5 text-[15px] font-medium text-fg">
-              <span className="grid size-8 place-items-center rounded-r2 bg-chip text-fg-muted">
-                <Icon name="file-text" size={16} />
-              </span>
-              Soltas na raiz
-            </p>
-            <ul className="mt-3 space-y-0.5">
-              {root.slice(0, 6).map((n) => (
-                <li key={n.rel}>
-                  <button type="button" onClick={() => props.onOpen(n.rel)} className="w-full truncate rounded-r1 px-1.5 py-1 text-left text-[13px] text-fg-muted hover:bg-hover hover:text-fg">
-                    {n.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </article>
-        )}
-      </div>
-      {ov.personal && <p className="mt-6 break-all text-xs text-fg-muted">Sua pasta: {ov.personal}</p>}
-      {!ov.writable && <p className="mt-2 text-xs text-warn-ink">A pasta do seu cérebro não está disponível: só leitura.</p>}
     </div>
   );
 }
@@ -829,7 +562,7 @@ function BrainMap({ graph, current, onOpen, onFocus }: { graph: Graph | null; cu
     return (
       <div>
         <p className="mb-4 text-sm text-fg-muted">Escolha uma nota para ver com quem ela se liga. As mais ligadas primeiro.</p>
-        <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(220px,1fr))]">
+        <div className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(min(220px,100%),1fr))]">
           {hubs.map((n) => (
             <button key={n.id} type="button" onClick={() => onFocus(n.id)} className="press flex items-center gap-3 rounded-r3 border border-edge bg-glass-hi px-3.5 py-3 text-left hover:border-accent/40">
               <span className="grid size-8 shrink-0 place-items-center rounded-full bg-accent/12 text-xs font-semibold tabular-nums text-accent-ink">{degree.get(n.id) ?? 0}</span>
@@ -863,10 +596,17 @@ function BrainMap({ graph, current, onOpen, onFocus }: { graph: Graph | null; cu
     const w = Math.min(260, 24 + text.length * 7.2);
     const x0 = side === "c" ? x - w / 2 : side === "r" ? x - 20 : x - w + 20;
     return (
-      <g key={`${side}:${id}`} className="cursor-pointer" onClick={() => (side === "c" ? onOpen(id) : onFocus(id))}>
+      <g key={`${side}:${id}`} className="brain-map-node" role="button" tabIndex={0} aria-label={`${side === "c" ? "Ler" : "Centralizar"} ${title.get(id) ?? id}`}
+        onClick={() => (side === "c" ? onOpen(id) : onFocus(id))}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          if (side === "c") onOpen(id);
+          else onFocus(id);
+        }}>
         <title>{title.get(id) ?? id}</title>
-        <rect x={x0} y={y - 15} width={w} height={30} rx={15} fill={side === "c" ? "var(--accent)" : "var(--bg-glass-hi)"} stroke={side === "c" ? "none" : "var(--hairline-hi)"} />
-        <text x={x0 + w / 2} y={y + 4.5} textAnchor="middle" fontSize={side === "c" ? 13 : 12} fontWeight={side === "c" ? 600 : 500} fill={side === "c" ? "#fff" : "var(--text-primary)"}>
+        <rect x={x0} y={y - 15} width={w} height={30} rx={15} fill={side === "c" ? "var(--primary)" : "var(--bg-surface-hi)"} stroke={side === "c" ? "none" : "var(--hairline-hi)"} />
+        <text x={x0 + w / 2} y={y + 4.5} textAnchor="middle" fontSize={side === "c" ? 13 : 12} fontWeight={side === "c" ? 600 : 500} fill={side === "c" ? "var(--text-inverse)" : "var(--text-primary)"}>
           {text}
         </text>
       </g>
@@ -882,17 +622,28 @@ function BrainMap({ graph, current, onOpen, onFocus }: { graph: Graph | null; cu
       {out.length + inn.length === 0 ? (
         <EmptyState icon="network" title="Esta nota ainda não se liga a nenhuma">Use [[Nome da nota]] no texto para criar ligações.</EmptyState>
       ) : (
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: "68vh" }} role="img" aria-label={`Ligações de ${label(current)}`}>
+        <>
+        <div className="brain-map-compact">
+          <Button icon="file-text" onClick={() => onOpen(current)}>Ler nota central</Button>
+          {[{ name: "Citam esta nota", ids: inn }, { name: "Esta nota cita", ids: out }].filter((branch) => branch.ids.length).map((branch) => (
+            <section key={branch.name}>
+              <h2>{branch.name}</h2>
+              {branch.ids.slice(0, MAX).map((id) => <button key={id} type="button" onClick={() => onFocus(id)}>{title.get(id) ?? titleOf(id)}</button>)}
+            </section>
+          ))}
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="brain-map-art w-full" role="group" aria-label={`Ligações de ${label(current)}`}>
           {right.map((p) => (
-            <path key={`o:${p.id}`} d={`M${cx + 60},${cy} C${cx + 160},${cy} ${p.x - 140},${p.y} ${p.x - 20},${p.y}`} fill="none" stroke="var(--accent)" strokeOpacity={0.55} strokeWidth={1.5} />
+            <path key={`o:${p.id}`} d={`M${cx + 60},${cy} C${cx + 160},${cy} ${p.x - 140},${p.y} ${p.x - 20},${p.y}`} fill="none" stroke="var(--accent)" strokeOpacity={0.8} strokeWidth={3} strokeDasharray="1 5" strokeLinecap="round" />
           ))}
           {left.map((p) => (
-            <path key={`i:${p.id}`} d={`M${p.x + 20},${p.y} C${p.x + 140},${p.y} ${cx - 160},${cy} ${cx - 60},${cy}`} fill="none" stroke="var(--text-secondary)" strokeOpacity={0.45} strokeWidth={1.5} />
+            <path key={`i:${p.id}`} d={`M${p.x + 20},${p.y} C${p.x + 140},${p.y} ${cx - 160},${cy} ${cx - 60},${cy}`} fill="none" stroke="var(--text-secondary)" strokeOpacity={0.6} strokeWidth={2.5} strokeDasharray="1 5" strokeLinecap="round" />
           ))}
           {right.map((p) => pill(p.id, p.x, p.y, "r"))}
           {left.map((p) => pill(p.id, p.x, p.y, "l"))}
           {pill(current, cx, cy, "c")}
         </svg>
+        </>
       )}
       {(out.length > MAX || inn.length > MAX) && <p className="mt-2 text-xs text-fg-muted">Mostrando as {MAX} primeiras de cada lado.</p>}
     </div>

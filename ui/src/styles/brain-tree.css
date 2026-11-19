@@ -1,0 +1,122 @@
+/* Arvore do Cerebro (components/BranchExplorer.tsx + lib/branchLayout.ts).
+   Madeira e folhas sao SVG estatico; so o desenho da pasta aberta cresce ao entrar (recorte, sem repintar a
+   pagina) e os nomes aparecem em seguida. Tudo para com o movimento desligado. */
+
+.branch-explorer {
+  display: grid;
+}
+
+[data-photo="on"] .brain-content:has(.branch-explorer) {
+  background: color-mix(in srgb, var(--bg-base) 23%, transparent);
+  backdrop-filter: none;
+}
+[data-photo="on"] .branch-trail button { background: var(--bg-surface); }
+[data-photo="on"] .branch-pagination {
+  border-radius: 10px;
+  padding-inline: 3px;
+  background: var(--bg-surface);
+}
+
+.branch-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 48px; padding: 10px 18px 0; }
+.branch-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; flex: 1; }
+.branch-trail button {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 220px; min-height: 28px; padding: 3px 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-radius: 8px; color: var(--text-secondary); font-size: 13px;
+}
+.branch-trail button:hover { background: var(--bg-hover); color: var(--text-primary); }
+.branch-trail button[aria-current="location"] { color: var(--text-primary); font-weight: 600; }
+.branch-up {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 11px;
+  border: 1px solid var(--edge); border-radius: 999px; background: var(--bg-surface);
+  color: var(--text-primary); font-size: 13px;
+}
+.branch-up:hover { background: var(--bg-surface-hi); }
+.branch-pagination { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.branch-scene {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1000 / 560;
+  max-height: 68vh;
+  min-height: 300px;
+  overflow: hidden;
+  isolation: isolate;
+}
+/* A vista: so esta camada anima (transform), a pagina e o papel de parede nao repintam */
+.branch-world {
+  position: absolute;
+  inset: 0;
+  transition: transform 720ms cubic-bezier(.33, 1, .68, 1);
+  will-change: transform;
+}
+.branch-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+
+/* Pixels da arvore: casca, casca clara, verde, verde claro, amarelo, rosa */
+.px { shape-rendering: crispEdges; }
+.px-0 { fill: var(--bark-dark); }
+.px-1 { fill: var(--bark-light); }
+.px-2 { fill: #5f9a23; }
+.px-3 { fill: #9fd335; }
+.px-4 { fill: #e4ef5c; }
+.px-5 { fill: #e28aa1; }
+.branch-explorer { --bark-dark: #2f2622; --bark-light: #8a7a6b; }
+[data-theme="escuro"] .branch-explorer, [data-photo="on"] .branch-explorer { --bark-dark: #a08d7b; --bark-light: #6f6152; }
+
+/* Galho novo cresce a partir da pasta que o abriu (o raio do recorte circular abre) */
+.branch-grow { animation: branch-grow 900ms cubic-bezier(.33, 1, .68, 1) both; }
+@keyframes branch-grow { from { r: 0; } to { r: 1600px; } }
+/* Galhos do caminho de onde a pessoa veio: mais apagados, o da pasta aberta em destaque */
+.branch-level:not([data-current]) { opacity: .36; }
+
+.branch-nodes { position: absolute; inset: 0; pointer-events: none; }
+.branch-nodes > li { position: absolute; transform: translate(-11px, -50%); }
+.branch-nodes[data-grows] > li {
+  animation: branch-label 320ms var(--ease-out) both;
+  animation-delay: calc(260ms + var(--grow) * 60ms);
+}
+@keyframes branch-label { from { opacity: 0; } to { opacity: 1; } }
+
+/* Nomes simples: icone de contorno e texto, sem fundo (como nomes num desenho) */
+.branch-node {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(230px, 26cqw);
+  min-height: 30px;
+  padding: 3px 7px 3px 3px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 140ms var(--ease-out), color 140ms var(--ease-out);
+}
+.branch-node > span { overflow: hidden; text-overflow: ellipsis; }
+.branch-node > svg { flex-shrink: 0; color: var(--text-secondary); }
+.branch-node[data-current] { color: var(--text-primary); }
+.branch-node[data-open] { color: var(--text-primary); font-weight: 650; }
+.branch-node[data-open] > svg { color: var(--text-primary); }
+/* Niveis de cima (o caminho de onde a pessoa veio): mais apagados, menos a pasta aberta */
+.branch-nodes:not([data-current]) .branch-node:not([data-open]) { opacity: .5; }
+.branch-node:hover { background: var(--bg-hover); color: var(--text-primary); opacity: 1 !important; }
+.branch-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; opacity: 1 !important; }
+[data-photo="on"] .branch-node { text-shadow: 0 1px 2px rgb(0 0 0 / .45), 0 0 8px rgb(0 0 0 / .25); }
+
+.branch-empty { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); color: var(--text-secondary); font-size: 13px; }
+.branch-status { padding: 0 0 12px; text-align: center; color: var(--text-tertiary, var(--text-secondary)); font-size: 11px; }
+
+.branch-explorer { container-type: inline-size; }
+@container (max-width: 640px) {
+  .branch-node { max-width: 150px; font-size: 12px; }
+  .branch-scene { aspect-ratio: 1000 / 700; }
+}
+
+[data-motion="off"] .branch-world { transition: none; }
+[data-motion="off"] :is(.branch-grow, .branch-nodes > li) { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .branch-world { transition: none; }
+  :is(.branch-grow, .branch-nodes > li) { animation: none !important; }
+}

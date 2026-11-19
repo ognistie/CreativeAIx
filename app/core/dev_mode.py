@@ -22,6 +22,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -54,7 +55,9 @@ PROMPT = (
 
 def path_violation(rel: str) -> str:
     """'' se o caminho (relativo a raiz do repo, com /) pode ser mudado pelo modo Desenvolvedor."""
-    rel = rel.replace("\\", "/").lstrip("./")
+    rel = rel.replace("\\", "/")
+    if rel.startswith("/") or any(part in ("", ".", "..") for part in rel.split("/")) or ":" in rel:
+        return "fora das pastas permitidas: caminho inválido"
     name = rel.rsplit("/", 1)[-1]
     if rel in FORBIDDEN or _SECRET_NAME.search(name):
         return f"arquivo proibido: {rel}"
@@ -214,7 +217,7 @@ class DevMode:
             raise ValueError("escolha Claude Code ou Codex")
         if len(request) < 8:
             raise ValueError("descreva a mudanca com mais detalhe")
-        pid = time.strftime("%Y%m%d-%H%M%S")
+        pid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
         branch, worktree = f"dev/{pid}", self.root / pid
         self.root.mkdir(parents=True, exist_ok=True)
         say(f"criando worktree {worktree}")

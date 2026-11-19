@@ -2609,7 +2609,7 @@ def test_latency_round5():
     src = inspect.getsource(Controller._run)
     check("historico guarda o tempo por fase", all(f'lap("{p}")' in src for p in ("resolve", "maestro", "agent_plan", "steps")))
     check("resposta ao usuario sai antes de gravar no Obsidian",
-          src.index("self._after_turn(said, task, turn, entry)") < src.index("self._brain.finish("))
+          src.index("self._after_turn(said, task, turn, entry") < src.index("self._brain.finish("))
 
     # ── andamento de respostas longas (stream simulado) ───────────────
     from types import SimpleNamespace as NS
@@ -3153,7 +3153,7 @@ def test_round9_brain_speed_app():
     import core.user_settings as US
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "s.json"
-        out = US.save({"instructions": "x" * 3000, "plan_review": 1, "hack": True}, path=p)
+        out = US.save({"instructions": "x" * 3000, "plan_review": True, "hack": True}, path=p)
         check("configuracoes: so chaves conhecidas, texto limitado, booleanos",
               len(out["instructions"]) == US.INSTRUCTIONS_MAX and out["plan_review"] is True and "hack" not in out)
     check("instrucoes entram no Maestro e na resposta, sem ampliar permissoes",
@@ -3217,7 +3217,9 @@ def test_round9_brain_speed_app():
     check("voz: a fala transcrita (voiceCommand) vira pedido na tela",
           'useCoreEvent("voiceCommand"' in main and "startTask(text" in main)
     check("barra lateral: Configuracoes (Ctrl+,), busca e renomear/excluir conversas",
-          "SettingsView" in main and "Buscar conversas" in main and "renameConversation" in main
+          # Configuracoes = rota "settings" (hoje dentro do Harness); o nome do componente pode mudar
+          'case "settings":' in main and 'setPage("settings")' in main
+          and "Buscar conversas" in main and "renameConversation" in main
           and "deleteConversation" in main and 'k === ","' in main)
     from core.voice.tts import Speaker
     check("voz: sinal sonoro 'ouvi' ao terminar de falar (configuravel)", hasattr(Speaker, "chime")

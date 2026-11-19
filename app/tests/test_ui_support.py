@@ -22,7 +22,7 @@ class Palettes(unittest.TestCase):
             self.assertIn(name, theme["palettes"]["dark"])
             self.assertIn(name, theme["palettes"]["light"])
             self.assertEqual(validate({"appearance": {"palette": name}})["appearance"]["palette"], name)
-        self.assertEqual(validate({"appearance": {"palette": "neon"}})["appearance"]["palette"], "abismo")
+        self.assertEqual(validate({"appearance": {"palette": "inexistente"}})["appearance"]["palette"], "abismo")
 
 
 class AgentProfiles(unittest.TestCase):

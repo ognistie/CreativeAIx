@@ -1,0 +1,207 @@
+/* Biblioteca como estante: capas em livro 3D (a lombada engrossa com o nivel) e o leitor paginado
+   (views/BookReader.tsx) em dois modelos: e-reader e livro aberto. */
+
+/* ── Livro 3D na estante ─────────────────────────────────────────────────────────────── */
+.book-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 72px 64px; padding: 22px 18px 40px; }
+.book-shelf > li { perspective: 1400px; }
+.book3d {
+  --thick: 26px;                       /* iniciante fino, intermediario medio, avancado grosso */
+  --tilt: -24deg;
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4.25;
+  transform-style: preserve-3d;
+  transform: rotateY(var(--tilt)) rotateX(4deg);
+  transition: transform 420ms var(--ease-out);
+}
+.book3d[data-level="iniciante"] { --thick: 18px; }
+.book3d[data-level="intermediario"] { --thick: 30px; }
+.book3d[data-level="avancado"] { --thick: 46px; }
+.book3d:is(:hover, :focus-visible) { --tilt: -8deg; transform: rotateY(var(--tilt)) rotateX(2deg) translateY(-6px); }
+.book3d:focus-visible { outline: none; }
+.book3d:focus-visible .book3d-cover { outline: 2px solid var(--accent); outline-offset: 4px; }
+.book3d > span { position: absolute; display: block; backface-visibility: hidden; }
+/* capa: a capa editorial de antes, agora com relevo de papelao e luz na quina */
+.book3d-cover {
+  inset: 0;
+  transform: translateZ(calc(var(--thick) / 2));
+  border-radius: 2px 6px 6px 2px;
+  overflow: hidden;
+  box-shadow: inset 4px 0 6px -2px rgb(0 0 0 / .35), inset -1px 0 0 rgb(255 255 255 / .25), 0 1px 2px rgb(0 0 0 / .2);
+}
+.book3d-cover > .editorial-cover { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; box-shadow: none; transform: none !important; }
+.book3d-cover::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, rgb(0 0 0 / .28), transparent 5% 7%, rgb(255 255 255 / .08) 9%, transparent 14%),
+              linear-gradient(115deg, rgb(255 255 255 / .16), transparent 35%);
+}
+/* lombada: girada para a esquerda, com o titulo em pe */
+.book3d-spine {
+  top: 0; left: 0;
+  width: var(--thick); height: 100%;
+  transform-origin: left center;
+  transform: translateZ(calc(var(--thick) / 2)) rotateY(-90deg);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--book-ink) 70%, black), var(--book-ink) 30% 70%, color-mix(in srgb, var(--book-ink) 60%, black));
+  border-radius: 3px 0 0 3px;
+}
+.book3d-spine > em {
+  position: absolute; inset: 14px 0;
+  display: grid; place-items: center;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font: 600 10px var(--font-sans-family); font-style: normal; letter-spacing: .12em; text-transform: uppercase;
+  color: rgb(255 255 255 / .82); white-space: nowrap; overflow: hidden;
+}
+/* paginas: a borda branca das folhas no lado direito e embaixo */
+.book3d-pages {
+  top: 3px; right: 0;
+  width: calc(var(--thick) - 4px); height: calc(100% - 6px);
+  transform-origin: right center;
+  transform: translateZ(calc(var(--thick) / 2 - 2px)) rotateY(90deg);
+  background: repeating-linear-gradient(90deg, #f7f3ea 0 2px, #e3dccd 2px 3px);
+}
+.book3d-back {
+  inset: 0;
+  transform: translateZ(calc(var(--thick) / -2)) rotateY(180deg);
+  background: color-mix(in srgb, var(--book-ink) 80%, black);
+  border-radius: 6px 2px 2px 6px;
+}
+.book3d-shadow {
+  left: 8%; right: -6%; bottom: -16px; height: 22px;
+  transform: rotateX(90deg) translateZ(-2px);
+  background: radial-gradient(closest-side, rgb(0 0 0 / .4), transparent);
+  filter: blur(4px);
+}
+.book3d-meta { display: flex; justify-content: space-between; gap: 8px; margin-top: 18px; font-size: 12px; color: var(--text-secondary); }
+[data-photo="on"] .book3d-meta { color: #f3f7ff; text-shadow: 0 1px 3px #000a; }
+[data-motion="off"] .book3d { transition: none; }
+@media (prefers-reduced-motion: reduce) { .book3d { transition: none; } }
+
+/* ── Leitor ─────────────────────────────────────────────────────────────────────────── */
+.book-room { --paper: #f4efe4; --ink: #24211c; --muted: #6e675c; --gap: 64px; display: grid; grid-template-rows: auto 1fr auto; height: 100%; padding: 10px 18px 14px; gap: 10px; }
+.book-room[data-model="ereader"] { --paper: #ecebe6; --ink: #1f1f1d; --muted: #5d5c57; }
+.book-toolbar { display: flex; align-items: center; gap: 12px; }
+.book-toolbar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text-secondary); }
+[data-photo="on"] .book-toolbar-title { color: #eef4ff; text-shadow: 0 1px 3px #000a; }
+.book-stage { display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; align-items: stretch; min-height: 0; }
+.book-turn { border-radius: 14px; cursor: pointer; }
+.book-turn:hover:not(:disabled) { background: var(--bg-hover); }
+.book-turn:disabled { cursor: default; }
+.book-turn[data-side="prev"]::before, .book-turn[data-side="next"]::before {
+  content: ""; display: block; margin: auto; width: 12px; height: 12px;
+  border-left: 2px solid var(--text-secondary); border-bottom: 2px solid var(--text-secondary);
+  transform: rotate(45deg); opacity: .8;
+}
+.book-turn[data-side="next"]::before { transform: rotate(-135deg); }
+.book-turn:disabled::before { opacity: .2; }
+
+.book-object {
+  position: relative;
+  justify-self: center;
+  display: grid; grid-template-rows: 1fr auto;
+  width: min(100%, 720px); height: 100%; min-height: 0;
+  padding: 46px 54px 16px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 0 #fff8 inset, 0 30px 60px -24px #000c, 0 4px 14px #0004;
+}
+/* E-reader: moldura de aparelho, papel de e-ink */
+.book-room[data-model="ereader"] .book-object { border-radius: 10px; outline: 14px solid #2a2b2e; outline-offset: 0; margin: 14px 0; height: calc(100% - 28px); }
+/* Livro aberto: duas paginas, sombra na dobra do meio e borda das folhas */
+.book-room[data-model="livro"] .book-object {
+  width: min(100%, 1240px);
+  padding: 50px 66px 18px;
+  border-radius: 3px;
+  /* Dobra: cada pagina escurece ao se curvar para a lombada, um vinco fino no meio e um brilho logo depois dele;
+     nas bordas externas as folhas clareiam (a curva do papel pega luz). */
+  background:
+    linear-gradient(90deg,
+      transparent calc(50% - 120px),
+      rgb(60 44 20 / .07) calc(50% - 46px),
+      rgb(60 44 20 / .22) calc(50% - 10px),
+      rgb(40 28 12 / .42) calc(50% - 1px),
+      rgb(255 255 255 / .55) calc(50% + 1px),
+      rgb(60 44 20 / .2) calc(50% + 6px),
+      rgb(60 44 20 / .07) calc(50% + 40px),
+      transparent calc(50% + 110px)),
+    linear-gradient(90deg, #ddd4c0, #ece5d5 2%, var(--paper) 6% 94%, #ece5d5 98%, #ddd4c0);
+  /* folhas empilhadas dos dois lados e a capa dura por baixo */
+  box-shadow:
+    0 1px 0 #fff8 inset,
+    3px 1px 0 -1px #e6dfcf, 6px 2px 0 -2px #d9d1bf, 9px 3px 0 -3px #cfc6b2,
+    -3px 1px 0 -1px #e6dfcf, -6px 2px 0 -2px #d9d1bf, -9px 3px 0 -3px #cfc6b2,
+    0 0 0 12px color-mix(in srgb, var(--book-cover, #3b3127) 92%, black),
+    0 40px 70px -26px #000d;
+  margin: 14px 12px;
+  height: calc(100% - 28px);
+}
+/* sombra funda bem na lombada, por cima do texto (nao bloqueia clique nem selecao) */
+.book-room[data-model="livro"] .book-object::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: calc(50% - 18px); width: 36px; pointer-events: none;
+  background: radial-gradient(50% 60% at 50% 50%, rgb(30 20 8 / .16), transparent 70%);
+}
+/* O quadro rola (scrollLeft) para mostrar a pagina; a rolagem do usuario fica desligada (overflow hidden) */
+.book-frame { position: relative; min-height: 0; overflow: hidden; overscroll-behavior: contain; }
+.book-flow {
+  height: 100%;
+  column-gap: var(--gap);
+  column-fill: auto;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.62;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  overflow-wrap: break-word;
+  orphans: 2;
+  widows: 2;
+}
+.book-room[data-model="livro"] .book-flow { font-size: 15.5px; }
+/* o texto do livro usa as cores do papel, nao as do tema do app */
+.book-flow, .book-flow :is(p, li, h1, h2, h3, h4, strong, em, td, th, blockquote) { color: var(--ink); }
+.book-flow :is(h2, h3), .book-flow .prose :is(h1, h2, h3, h4) { break-after: avoid; font-family: inherit; text-align: left; margin: 1.2em 0 .5em; letter-spacing: -.01em; }
+.book-flow h2 { font-size: 1.32em; font-weight: 600; }
+.book-flow h3 { font-size: 1.1em; font-weight: 600; }
+.book-flow p { margin: 0 0 .8em; text-indent: 1.4em; }
+.book-flow :is(h2, h3) + p, .book-opening p { text-indent: 0; }
+/* Codigo no meio da frase: sem caixa e quebravel. A caixa larga e inquebravel abria buracos enormes entre as
+   palavras do paragrafo justificado (caminhos como app/core/journal.py). */
+.book-flow :not(pre) > code {
+  padding: 0; border: 0; background: none; font-size: .86em; font-weight: 500;
+  overflow-wrap: anywhere; word-break: break-word; hyphens: none; color: color-mix(in srgb, var(--ink) 82%, #6b3f12);
+}
+.book-flow pre { break-inside: avoid; white-space: pre-wrap; font-size: .8em; text-align: left; line-height: 1.45;
+  padding: .7em .9em; border-radius: 4px; background: #0000000a; border: 1px solid #00000014; max-height: 80%; overflow: hidden; }
+.book-flow pre code { padding: 0; background: none; border: 0; }
+.book-flow :is(ul, ol) { padding-left: 1.3em; margin: 0 0 .8em; text-align: left; }
+.book-flow li { margin-bottom: .25em; }
+.book-flow :is(table, img, figure, blockquote) { break-inside: avoid; max-width: 100%; }
+.book-flow img { max-height: 60%; object-fit: contain; }
+.book-flow table { font-size: .84em; border-collapse: collapse; text-align: left; }
+.book-flow :is(td, th) { padding: .25em .5em; border-bottom: 1px solid #00000018; }
+.book-flow blockquote { margin: .6em 0; padding-left: .9em; border-left: 2px solid #00000026; font-style: italic; }
+.book-flow a { color: #3b5a8a; }
+.book-flow .prose { max-width: none; }
+.book-opening { break-after: column; display: grid; align-content: center; justify-items: center; height: 100%; text-align: center; padding: 0 6%; }
+.book-room[data-model="livro"] .book-opening { border: 1.5px solid #8b7f6a; outline: 1px solid #8b7f6a; outline-offset: -8px; padding: 10% 9%; }
+.book-kicker { font-size: .78em; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+.book-ornament { margin: 14px 0 6px; font-size: 26px; color: var(--muted); }
+.book-opening h1 { font-size: 2.05em; line-height: 1.12; font-weight: 600; letter-spacing: -.02em; margin: 0 0 18px; }
+.book-room[data-model="livro"] .book-opening h1 { font-variant: small-caps; letter-spacing: .02em; }
+.book-lede { font-size: 1.04em; font-style: italic; color: var(--muted); }
+.book-why { margin-top: 18px; font-size: .92em; }
+.book-refs { padding-left: 1.2em; font-size: .9em; text-align: left; }
+.book-refs li { margin-bottom: .5em; }
+.book-end { text-align: center; font-size: 22px; color: var(--muted); margin-top: 1em; }
+.book-footer { display: flex; align-items: center; gap: 14px; padding-top: 10px; font: 12px var(--font-mono-family); color: var(--muted); }
+.book-meter { flex: 1; height: 3px; background: #0001; border-radius: 3px; overflow: hidden; }
+.book-meter > i { display: block; height: 100%; background: #555; }
+.book-room[data-model="livro"] .book-footer { justify-content: space-between; font-family: inherit; }
+.book-running { font-size: 11px; letter-spacing: .16em; text-transform: uppercase; }
+.book-hint { display: flex; justify-content: center; min-height: 30px; align-items: center; font-size: 12px; color: var(--text-secondary); }
+[data-photo="on"] .book-hint { color: #eef4ff; text-shadow: 0 1px 3px #000a; }
+@media (max-width: 900px) {
+  .book-room[data-model="livro"] .book-object { padding: 40px 34px 14px; }
+  .book-object { padding: 34px 28px 14px; }
+}

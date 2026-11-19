@@ -88,6 +88,6 @@ class InteractionLayer:
         try:
             from core.ocr_local import read_screen_text
             texts = read_screen_text()
-            return {"identified": True, "method": "OCR", "visible_texts": [t["text"] for t in texts]}
+            return {"identified": bool(texts), "method": "OCR", "visible_texts": [t["text"] for t in texts]}
         except:
             return {"identified": False}

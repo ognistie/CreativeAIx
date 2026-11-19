@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Spinner, StatusDot } from "../components/ui";
 import { core } from "../lib/host";
 import { useCoreEvent, useCoreStatus } from "../lib/useCore";
-import { Page, Row, Section, Switch } from "./Page";
+import { Row, Section, Switch } from "./Page";
 
 // SettingsView: execucao, voz, interface, instrucoes e atalhos (desktop/data/settings.json via saveSettings).
 // Mais o estado do nucleo e dos provedores (antes na tela de diagnostico da Fase 2).
@@ -45,7 +45,7 @@ const mcpHint = (m: unknown) => {
 };
 const pretty = (k?: string) => (k ? k.split("+").map((x) => (x === "space" ? "Espaço" : x[0]!.toUpperCase() + x.slice(1))).join(" + ") : "—");
 
-export function SettingsView() {
+export function GeneralSettings() {
   const status = useCoreStatus();
   const [s, setS] = useState<Settings | null>(null);
   const [instructions, setInstructions] = useState("");
@@ -83,7 +83,7 @@ export function SettingsView() {
   };
 
   return (
-    <Page title="Configurações" subtitle="Como o app executa, fala e se conecta. Muda na hora; nada aqui libera o que o agente não pode fazer.">
+    <>
       {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
 
       <Section title="Núcleo" icon="bolt">
@@ -192,6 +192,6 @@ export function SettingsView() {
           </Section>
         </>
       )}
-    </Page>
+    </>
   );
 }

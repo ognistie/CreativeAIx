@@ -25,7 +25,7 @@ from typing import Callable, Optional
 
 from core.session import Session
 
-KINDS = {"new", "continue", "question", "clarify", "undo", "cancel"}
+KINDS = {"new", "continue", "question", "clarify", "undo", "cancel", "look"}
 
 _CANCEL = re.compile(r"^(?:para|pare|parar|cancela|cancelar|chega|esquece|stop)\b[\s.!]*$")
 _UNDO = re.compile(r"\b(?:desfa(?:z|ca|zer)|desfaz\w*|reverte\w*|volta(?:r)?\s+(?:como|ao\s+que)\s+(?:estava|era))\b")
@@ -174,6 +174,11 @@ def resolve(said: str, session: Session,
     if _CANCEL.match(n):
         session.clear_pending()
         return {**base, "kind": "cancel"}
+
+    # Pergunta sobre a tela ("voce esta vendo o YouTube?"): o Vision olha e responde; nada e executado
+    from core.screen_question import is_screen_question
+    if is_screen_question(said):
+        return {**base, "kind": "look", "via": "tela"}
 
     # Pendências salvas por versões antigas não carregam uma ação executável.
     from core.action_risk import effect_reply, spoken_effect_code

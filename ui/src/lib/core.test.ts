@@ -139,4 +139,13 @@ describe("CoreClient", () => {
     await connected();
     await expect(client.call("loadHistory")).rejects.toThrow(/sem resposta/);
   });
+
+  it("a call with its own deadline outlives the default one (Windows dialogs)", async () => {
+    const s = await connected();
+    const picked = client.callWithin(2_000, "pickFiles");
+    await new Promise((r) => setTimeout(r, 300));          // passou do prazo padrao (200 ms)
+    const req = s.sent[1] as { id: number };
+    s.push({ jsonrpc: "2.0", id: req.id, result: ["C:\\a.txt"] });
+    await expect(picked).resolves.toEqual(["C:\\a.txt"]);
+  });
 });

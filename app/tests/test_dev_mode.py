@@ -37,6 +37,8 @@ class DevSchemaTests(unittest.TestCase):
         self.assertEqual(validate({"dev": "nada"})["dev"], DEFAULT["dev"])
 
     def test_path_rules(self):
+        for path in ("../ui/src/views/Test.tsx", "ui/src/views/../../../outside.tsx", "/ui/src/views/Test.tsx", "C:/ui/src/views/Test.tsx"):
+            self.assertIn("fora", path_violation(path))
         self.assertEqual(path_violation("ui/src/views/AboutView.tsx"), "")
         self.assertEqual(path_violation("ui/src/dev/Novo.tsx"), "")
         self.assertEqual(path_violation("ui/src/components/ui/Button.tsx"), "")

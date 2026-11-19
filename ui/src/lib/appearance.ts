@@ -2,6 +2,9 @@
 // Mesmo conjunto que Theme.applyAppearance() aceita no app anterior.
 
 export interface Appearance {
+  wallpaper?: string;
+  art?: unknown;
+  dim?: number;
   mode?: string;
   palette?: string;
   accent?: string;

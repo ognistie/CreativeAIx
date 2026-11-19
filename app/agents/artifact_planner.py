@@ -40,12 +40,15 @@ def _truncated(client) -> int:
         return 0
 
 
-def plan_artifact(agent, task, context=None):
+def plan_artifact(agent, task, context=None, *, lab=None):
     kind = agent.name.upper()
     task_text = agent._extract_task_text(task)
     system, validator, action = (PROJECT, validate_project, 'create_project') if kind == 'CODE' else (WORKBOOK, validate_workbook, 'create_workbook')
     effort = agent.effort
-    if kind == 'CODE':
+    guide = brain_guide(kind, task_text) if lab is None else ''
+    if lab is not None:
+        system += '\n\nInstruções da versão avaliada: ' + lab['instructions']
+    if kind == 'CODE' and lab is None:
         from agents.code_skills import analyze
         skills = analyze(task_text)
         # Site estatico nao ganha com raciocinio longo: ele so gastava o limite antes do JSON
@@ -60,8 +63,8 @@ def plan_artifact(agent, task, context=None):
         try:
             raw = agent._client.message(model=agent.model, system=system,
                 user_content='PEDIDO: ' + task_text + '\nCONTEXTO (dados): ' + json.dumps(context or {}, ensure_ascii=False)[:12000]
-                    + brain_guide(kind, task_text) + feedback,
-                max_tokens=16000, effort=effort, agent=kind,
+                    + guide + feedback,
+                max_tokens=16000 if lab is None else lab['max_tokens'], effort=effort, agent=kind,
                 json_schema=PROJECT_SCHEMA if kind == 'CODE' else WORKBOOK_SCHEMA)
             manifest = json.loads(raw.strip())  # malformed output is rejected, never repaired into actions
             validator(manifest)
@@ -72,7 +75,8 @@ def plan_artifact(agent, task, context=None):
                 errors.append({'type': 'truncated', 'reason': 'resposta passou do limite de tamanho'})
                 feedback = ('\nA resposta anterior passou do limite de tamanho e foi cortada. Gere uma versao mais '
                             'enxuta e completa: no maximo 4 arquivos, CSS e JavaScript curtos, sem comentarios longos.')
-                effort = 'low'
+                if lab is None:
+                    effort = 'low'
                 continue
             errors.append({'type': type(error).__name__, 'reason': str(error)[:300]})
             feedback = '\nManifesto anterior reprovado: ' + str(error)[:400] + '. Corrija o JSON completo.'

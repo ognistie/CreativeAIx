@@ -241,6 +241,10 @@ class Bridge(QObject, BridgeCore):
     def harnessSave(self, payload: str, label: str) -> str:
         return BridgeCore.harnessSave(self, payload, label)
 
+    @Slot(str, str, result=str)
+    def harnessPatch(self, payload: str, label: str) -> str:
+        return BridgeCore.harnessPatch(self, payload, label)
+
     @Slot(str, result=str)
     def harnessRestore(self, version_id: str) -> str:
         return BridgeCore.harnessRestore(self, version_id)
@@ -317,6 +321,10 @@ class Bridge(QObject, BridgeCore):
     def labVersions(self, agent: str) -> str:
         return BridgeCore.labVersions(self, agent)
 
+    @Slot(str, bool, result=str)
+    def labArchive(self, version_id: str, archived: bool) -> str:
+        return BridgeCore.labArchive(self, version_id, archived)
+
     @Slot(str, result=str)
     def labCreateVariant(self, payload: str) -> str:
         return BridgeCore.labCreateVariant(self, payload)
@@ -326,12 +334,28 @@ class Bridge(QObject, BridgeCore):
         return BridgeCore.labDiff(self, a, b)
 
     @Slot(str, result=str)
+    def labDraftRoute(self, payload: str) -> str:
+        return BridgeCore.labDraftRoute(self, payload)
+
+    @Slot(str, result=str)
     def labPublish(self, version_id: str) -> str:
         return BridgeCore.labPublish(self, version_id)
 
     @Slot(result=str)
     def labEvalSets(self) -> str:
         return BridgeCore.labEvalSets(self)
+
+    @Slot(str, result=str)
+    def labDataset(self, payload: str) -> str:
+        return BridgeCore.labDataset(self, payload)
+
+    @Slot(str, str, str, result=str)
+    def labReport(self, run_id: str, format: str, hypothesis: str) -> str:
+        return BridgeCore.labReport(self, run_id, format, hypothesis)
+
+    @Slot(str, str, bool, result=str)
+    def labRollback(self, agent: str, active: str, confirmed: bool) -> str:
+        return BridgeCore.labRollback(self, agent, active, confirmed)
 
     @Slot(result=str)
     def labRuns(self) -> str:
@@ -493,9 +517,9 @@ class Bridge(QObject, BridgeCore):
     def forceStop(self) -> None:
         BridgeCore.forceStop(self)
 
-    @Slot(result=str)
-    def loadConversations(self) -> str:
-        return BridgeCore.loadConversations(self)
+    @Slot(bool, result=str)
+    def loadConversations(self, include_turns: bool = False) -> str:
+        return BridgeCore.loadConversations(self, include_turns)
 
     @Slot(str, result=str)
     def openConversation(self, sid: str) -> str:

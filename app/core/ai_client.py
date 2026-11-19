@@ -18,11 +18,26 @@ import copy
 import os
 import time
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Optional
 
 from anthropic import Anthropic, APIError, Timeout
 
 logger = logging.getLogger("ai_client")
+
+_call_observation: ContextVar[Optional[list]] = ContextVar("ai_call_observation", default=None)
+
+
+@contextmanager
+def observe_calls():
+    """Mede apenas chamadas do fluxo atual, inclusive reparos de JSON."""
+    rows = []
+    token = _call_observation.set(rows)
+    try:
+        yield rows
+    finally:
+        _call_observation.reset(token)
 
 
 # Precos por modelo (USD por 1M tokens). Prefixo mais longo vence.
@@ -31,6 +46,7 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     "claude-sonnet-5":   {"input": 2.00, "output": 10.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-sonnet-4":   {"input": 3.00, "output": 15.00},
+    "claude-haiku-5-5":  {"input": 0.10, "output": 0.50},
     "claude-haiku-4-5":  {"input": 1.00, "output": 5.00},
     "claude-opus-5":     {"input": 5.00, "output": 25.00},
     "claude-opus-4":     {"input": 15.00, "output": 75.00},
@@ -45,7 +61,7 @@ CACHE_READ_MULTIPLIER = 0.10
 _EFFORT_MODELS = (
     "claude-sonnet-5", "claude-sonnet-4-6",
     "claude-opus-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
-    "claude-fable",
+    "claude-fable", "claude-haiku-5-5",
 )
 
 
@@ -195,9 +211,19 @@ class AIClient:
             params["thinking"] = {"type": "disabled"}
 
         start = time.time()
+        from core.lab_budget import current
+        budget = current.get()
+        client = self._client
+        if budget is not None:
+            client = client.with_options(max_retries=0)
+            reserved = budget.start(client, params)
+            params["timeout"] = budget.time_left()
         try:
-            with self._client.messages.stream(**params) as stream:
-                if self.on_progress:
+            with client.messages.stream(**params) as stream:
+                if budget is not None:
+                    for _ in stream:
+                        budget.time_left()
+                elif self.on_progress:
                     self._relay_progress(stream, agent, start)
                 resp = stream.get_final_message()
         except APIError as e:
@@ -209,6 +235,8 @@ class AIClient:
 
         if resp.stop_reason == "refusal":
             self._metrics["errors"] += 1
+            if budget is not None:
+                budget.settle(reserved, self._record_success(resp, model, duration_ms, agent))
             details = getattr(resp, "stop_details", None)
             category = getattr(details, "category", None) if details else None
             raise RuntimeError(f"Modelo recusou a tarefa (categoria: {category})")
@@ -217,7 +245,18 @@ class AIClient:
             logger.warning(f"Resposta truncada em max_tokens={max_tokens} "
                            f"({agent or model})")
 
-        return self._record_success(resp, model, duration_ms, agent)
+        meta = self._record_success(resp, model, duration_ms, agent)
+        if budget is not None:
+            budget.settle(reserved, meta)
+        observer = _call_observation.get()
+        if observer is not None:
+            observer.append({
+                "agent": agent, "model": getattr(resp, "model", None) or model, "max_tokens": max_tokens,
+                "effort": params.get("output_config", {}).get("effort"),
+                "tokens": sum(meta[key] for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")),
+                "cost_usd": meta["cost_usd"],
+            })
+        return meta
 
     # ─── Helpers internos ──────────────────────────────────────────
 

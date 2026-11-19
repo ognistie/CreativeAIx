@@ -36,6 +36,7 @@ export interface Methods {
   forceStop: [args: [], result: null];
   getSettings: [args: [], result: unknown];
   harnessGet: [args: [], result: unknown];
+  harnessPatch: [args: [payload: string, label: string], result: unknown];
   harnessRestore: [args: [version_id: string], result: unknown];
   harnessSave: [args: [payload: string, label: string], result: unknown];
   historyDetail: [args: [task_id: string], result: unknown];
@@ -50,16 +51,21 @@ export interface Methods {
   journalSetPrivate: [args: [entry_id: string, private_: boolean], result: unknown];
   journalSummarize: [args: [entry_id: string], result: null];
   journalUseInBrain: [args: [on: boolean], result: unknown];
+  labArchive: [args: [version_id: string, archived: boolean], result: unknown];
   labCancel: [args: [], result: null];
   labCreateVariant: [args: [payload: string], result: unknown];
+  labDataset: [args: [payload: string], result: unknown];
   labDiff: [args: [a: string, b: string], result: unknown];
+  labDraftRoute: [args: [payload: string], result: unknown];
   labEvalSets: [args: [], result: unknown];
   labFeedback: [args: [payload: string], result: unknown];
   labObserve: [args: [agent: string, state: string], result: unknown];
   labPromote: [args: [version_id: string], result: unknown];
   labPromotionCheck: [args: [version_id: string], result: unknown];
   labPublish: [args: [version_id: string], result: unknown];
+  labReport: [args: [run_id: string, format: string, hypothesis: string], result: unknown];
   labResearch: [args: [payload: string], result: unknown];
+  labRollback: [args: [agent: string, active: string, confirmed: boolean], result: unknown];
   labRun: [args: [payload: string], result: unknown];
   labRunDetail: [args: [run_id: string], result: unknown];
   labRuns: [args: [], result: unknown];
@@ -70,7 +76,7 @@ export interface Methods {
   libraryCatalog: [args: [query: string, level: string, kind: string], result: unknown];
   librarySearch: [args: [query: string, level: string, kind: string], result: unknown];
   libraryTopic: [args: [topic_id: string], result: unknown];
-  loadConversations: [args: [], result: unknown];
+  loadConversations: [args: [include_turns: boolean], result: unknown];
   loadHistory: [args: [], result: unknown];
   mainActivated: [args: [], result: null];
   newSession: [args: [], result: null];
@@ -104,6 +110,8 @@ export interface Methods {
   pickFiles: [args: [], result: unknown];
   /** So no host Qt (desktop/web_host.py). */
   pickFolder: [args: [], result: unknown];
+  /** So no host Qt (desktop/web_host.py). */
+  saveLabFile: [args: [name: string, content: string], result: unknown];
   /** So no host Qt (desktop/web_host.py). */
   windowClose: [args: [], result: null];
   /** So no host Qt (desktop/web_host.py). */

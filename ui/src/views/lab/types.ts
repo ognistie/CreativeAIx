@@ -19,6 +19,8 @@ export interface Spec {
   limits: string[];
   examples: string[];
   config: { model: string; effort: string; thinking: string; max_tokens: number; provider: string; notes?: string[] };
+  evaluation?: { available: boolean; version?: { id: string; created: string; hash: string };
+    last?: { id: string; origin: string; started: string; passed: number; valid: number } };
   authorization: string;
   tools: Array<{ name: string; params: string[]; permission: string }>;
   skills: Array<{ name: string; purpose: string; triggers: string[] }>;
@@ -43,6 +45,7 @@ export const call = (p: Promise<unknown>): Promise<Reply> =>
   p.then((r) => r as Reply).catch((e: Error) => ({ ok: false, error: e.message }) as Reply);
 
 export const AGENTS = ["MAESTRO", "WEB", "DESKTOP", "CODE", "DATA", "FILE", "EXTCODE"] as const;
+export type Agent = (typeof AGENTS)[number];
 
 export const AGENT_LOOK: Record<string, { icon: IconName; color: string; name: string }> = {
   MAESTRO: { icon: "route", color: "#8b5cf6", name: "Maestro" },

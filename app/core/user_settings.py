@@ -32,7 +32,11 @@ def load(path: Path = PATH) -> dict:
     try:
         stored = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(stored, dict):
-            data.update({k: v for k, v in stored.items() if k in DEFAULTS})
+            for key, value in stored.items():
+                if key == "instructions" and isinstance(value, str):
+                    data[key] = value.strip()[:INSTRUCTIONS_MAX]
+                elif key in DEFAULTS and isinstance(value, bool):
+                    data[key] = value
     except (OSError, ValueError):
         pass
     return data
@@ -42,13 +46,19 @@ def save(updates: dict, path: Path = PATH) -> dict:
     """Grava so chaves conhecidas, com o tipo certo (texto limitado; o resto booleano)."""
     with _lock:
         data = load(path)
+        if not isinstance(updates, dict):
+            raise ValueError("preferências inválidas")
         for k, v in (updates or {}).items():
             if k not in DEFAULTS:
                 continue
             if k == "instructions":
-                data[k] = str(v or "").strip()[:INSTRUCTIONS_MAX]
+                if not isinstance(v, str):
+                    raise ValueError("as instruções precisam ser texto")
+                data[k] = v.strip()[:INSTRUCTIONS_MAX]
             else:
-                data[k] = bool(v)
+                if not isinstance(v, bool):
+                    raise ValueError("as opções precisam estar ligadas ou desligadas")
+                data[k] = v
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")

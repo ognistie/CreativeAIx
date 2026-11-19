@@ -25,6 +25,11 @@ def _vault(root: Path) -> Path:
 
 
 class Layers(unittest.TestCase):
+    def test_windows_reserved_names_are_rejected(self):
+        for rel in ("CON", "NUL.md", "Pasta/AUX.txt", "COM1", "Pasta./nota.md", "LPT9.md"):
+            with self.subTest(rel=rel), self.assertRaises(ValueError):
+                clean_rel(rel)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

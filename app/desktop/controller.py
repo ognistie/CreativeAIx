@@ -37,7 +37,9 @@ NO_SCREENSHOT = {
     "excel_write", "wait_for_window", "wait_for_element", "browser_read", "open_path", "browser_task", "app_task", "edit_project",
     "revert_project", "blank_document",
 }
-RETRY_ACTIONS = {"vision_click", "vision_type", "uia_click", "uia_type", "browser_click"}
+# So cliques repetem sozinhos. Digitar de novo depois de uma falha que ja digitou parte do texto duplicaria o
+# texto (a conferencia pode falhar com o texto ja no campo); vision_type ja tenta achar o campo duas vezes.
+RETRY_ACTIONS = {"vision_click", "uia_click", "browser_click"}
 
 
 MAX_TASK_LENGTH = 2000
@@ -70,6 +72,10 @@ def turn_content(subtasks: list, request: str = "") -> str:
 
 class Controller:
     """Coracao do desktop. Executa tarefas em background e publica eventos."""
+
+    # Troca de conversa (nova/abrir) x resposta escrita em segundo plano: a resposta de um pedido so e
+    # gravada na conversa dele. Na classe porque os testes montam o Controller com __new__.
+    _session_lock = threading.RLock()
 
     def __init__(self) -> None:
         from agents.maestro import Maestro
@@ -128,6 +134,7 @@ class Controller:
         # Conversa: o que foi feito e o que ficou aberto, entre pedidos
         from core.session import Session
         self.session = Session()
+        self.session.restore_active()
         # Pedido falado ja entendido COM a conversa (continua em qual alvo?): evita
         # a 2a chamada do resolvedor. Chave = texto do pedido; validado em followup.from_hint.
         self._voice_hints: Dict[str, dict] = {}
@@ -198,7 +205,9 @@ class Controller:
         with self._lock:
             if self.state["running"]:
                 return
-        self.session.reset()
+        with self._session_lock:
+            self.session.reset()
+            self.session.remember_active("")
         bus.emit("session_reset", {"session": self.session.id})
 
     # ── conversas salvas ─────────────────────────────────────────────
@@ -216,17 +225,45 @@ class Controller:
         data = Session.read_saved(sid)
         if not data:
             return None
-        self.session.load(data)
+        with self._session_lock:
+            self.session.load(data)
+            self.session.remember_active(sid)
         bus.emit("session_reset", {"session": self.session.id, "loaded": True})
         return data
 
-    def _after_turn(self, said: str, task: str, turn: dict, entry: dict) -> None:
-        """Depois de cada pedido: a resposta do assistente (natural, como numa conversa)
-        + gravar a conversa. Em segundo plano: nao atrasa o proximo pedido."""
+    def _record_turn(self, said: str, task: str, turn: dict, entry: dict):
+        """O pedido entra na conversa e a conversa e gravada JA, antes da resposta (que leva segundos):
+        trocar de conversa nesse meio tempo nao pode apagar o pedido. Devolve (id da conversa, Turn)."""
+        with self._session_lock:
+            recorded = self.session.add_turn(said, task, turn["kind"], turn["agents"], entry.get("success"),
+                                             turn["summary"] or entry.get("error") or "", turn.get("content", ""))
+            session_id = self.session.id
+            try:
+                self.session.save()
+                if len(self.session.turns) == 1:
+                    self.session.remember_active(session_id)
+            except Exception as e:
+                print(f"  [Sessao] nao gravou: {type(e).__name__}: {e}")
+        return session_id, recorded
+
+    def _store_reply(self, session_id: str, recorded, reply: str) -> None:
+        """Grava a resposta no pedido que a originou: na conversa aberta se ainda for a dele, senao direto no
+        arquivo da conversa dele. Nunca em outra conversa nem em outro pedido."""
+        from core.session import Session
+        with self._session_lock:
+            if self.session.id == session_id and self.session.set_reply(recorded, reply):
+                self.session.save()
+                return
+        Session.set_saved_reply(session_id, recorded, reply)
+
+    def _after_turn(self, said: str, task: str, turn: dict, entry: dict,
+                    session_id: Optional[str] = None, recorded=None) -> None:
+        """Depois de cada pedido: a resposta do assistente (natural, como numa conversa). Em segundo plano:
+        nao atrasa o proximo pedido. O pedido ja foi gravado (_record_turn); aqui so entra a resposta."""
         err = str(entry.get("error") or "")
         kind = turn.get("kind")
         reply_run_id = getattr(getattr(self, '_tls', None), 'run_id', getattr(self, '_run_id', None))
-        reply_session_id = getattr(self.session, 'id', None)
+        reply_session_id = session_id or getattr(self.session, 'id', None)
 
         def work():
             reply, speak = "", False
@@ -234,7 +271,9 @@ class Controller:
                 if kind == "question":
                     reply = turn.get("summary", "")
                 elif err.startswith("clarification"):
-                    reply = (self.session.pending or {}).get("question", "")
+                    with self._session_lock:
+                        reply = (self.session.pending or {}).get("question", "") \
+                            if self.session.id == reply_session_id else ""
                 elif err.startswith("limitation"):
                     reply = err.split(":", 1)[-1].strip()
                 elif kind != "cancel" and turn.get("say"):
@@ -248,22 +287,19 @@ class Controller:
                                                    "run_id": reply_run_id, "session_id": reply_session_id})
                 elif kind != "cancel":
                     from core.reply import compose
-                    recent = [t.reply for t in self.session.turns[-4:] if t.reply]
+                    with self._session_lock:
+                        recent = [t.reply for t in self.session.turns[-4:] if t.reply]
                     r = compose(said, task, turn.get("summary", ""), bool(entry.get("success")), err, recent)
                     reply, speak = r["text"], r["speak"]
                     bus.emit("assistant_message", {"said": said, "text": reply, "speak": speak,
                                                    "success": bool(entry.get("success")),
                                                    "run_id": reply_run_id, "session_id": reply_session_id})
-                if reply:
-                    self.session.set_last_reply(reply)
+                if reply and recorded is not None and reply_session_id:
+                    self._store_reply(reply_session_id, recorded, reply)
             except Exception as e:
-                print(f"  [Resposta] falhou: {e}")
+                print(f"  [Resposta] falhou: {type(e).__name__}: {e}")
             finally:
-                try:
-                    self.session.save()
-                    bus.emit("conversations_changed", {"id": self.session.id})
-                except Exception as e:
-                    print(f"  [Sessao] nao gravou: {e}")
+                bus.emit("conversations_changed", {"id": reply_session_id})
         threading.Thread(target=work, daemon=True, name="assistant-reply").start()
 
     # Rotulo do andamento enquanto o modelo escreve (tarefas longas)
@@ -518,6 +554,20 @@ class Controller:
             task = res["task"]
             entry["resolved"] = task
 
+            if kind == "look":
+                # Camada de harness: o Vision so olha a tela e responde; nenhuma acao no computador
+                self._emit("phase", {"phase": "maestro", "msg": "Olhando a tela..."})
+                from core.screen_question import answer as look_answer
+                seen = look_answer(said, getattr(self.engine, "vision", None))
+                self._emit_usage()
+                self._emit("answer", {"msg": seen["answer"]})
+                entry["subtasks"] = [{"agent": "VISION", "task": "olhar a tela e responder"}]
+                turn["kind"] = "question"
+                turn["summary"] = seen["answer"]
+                entry["success"] = bool(seen["ok"])
+                if not seen["ok"]:
+                    entry["error"] = "leitura da tela sem resposta"
+                return
             if kind == "cancel":
                 self._emit("answer", {"msg": "Nada em execução para parar."})
                 entry["success"] = True
@@ -1025,12 +1075,11 @@ class Controller:
                     entry.update(success=False, status="cancelled", error="cancelado pelo usuario")
                 entry["verified"] = bool(all_records) and entry.get("success") is True and all(
                     r.get("verified") is True for r in all_records)
-                # Conversa: este pedido vira contexto do proximo (mesmo se falhou)
+                # Conversa: este pedido vira contexto do proximo (mesmo se falhou) e ja fica gravado
+                reply_target = (None, None)
                 if not turn["recorded"]:
                     try:
-                        self.session.add_turn(said, task, turn["kind"], turn["agents"],
-                                              entry.get("success"), turn["summary"]
-                                              or entry.get("error") or "", turn.get("content", ""))
+                        reply_target = self._record_turn(said, task, turn, entry)
                     except Exception as sess_err:
                         print(f"  [Sessao] Falhou ao registrar: {sess_err}")
                 entry["ended_at"] = datetime.now().isoformat(timespec="seconds")
@@ -1050,7 +1099,7 @@ class Controller:
                 # A resposta ao usuario sai primeiro (em segundo plano); gravar no
                 # Obsidian nao atrasa o "Pronto" na tela nem na voz.
                 if not turn["recorded"]:
-                    self._after_turn(said, task, turn, entry)
+                    self._after_turn(said, task, turn, entry, *reply_target)
                 # Segundo cerebro: plano vira "executado"/"falhou" e a execucao
                 # entra em 40 Execucoes/Sucesso ou Falhas (consulta futura).
                 if not str(entry.get("error") or "").startswith(("clarification", "limitation")):

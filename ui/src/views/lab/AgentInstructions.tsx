@@ -17,7 +17,7 @@ export function AgentInstructions({ agent, examples, onDirty }: { agent: string;
 
   useEffect(() => {
     void call(core().call("harnessGet")).then((r) => {
-      if (!r.ok) return setError(r.error || "Harness indisponível.");
+      if (!r.ok) return setError(r.error || "Preferências do agente indisponíveis.");
       const h = r.harness as { agents: Record<string, { instructions: string }> };
       setHarness(h as unknown as Record<string, unknown>);
       const t = h.agents?.[agent]?.instructions ?? "";
@@ -33,9 +33,8 @@ export function AgentInstructions({ agent, examples, onDirty }: { agent: string;
   const save = async () => {
     if (!harness) return;
     setState("saving");
-    const next = JSON.parse(JSON.stringify(harness)) as { agents: Record<string, { instructions: string }> };
-    next.agents[agent] = { ...(next.agents[agent] ?? {}), instructions: text.trim() };
-    const r = await call(core().call("harnessSave", JSON.stringify(next), `Instruções: ${AGENT_LOOK[agent]?.name ?? agent}`));
+    const next = { agents: { [agent]: { instructions: text.trim() } } };
+    const r = await call(core().call("harnessPatch", JSON.stringify(next), `Instruções: ${AGENT_LOOK[agent]?.name ?? agent}`));
     if (!r.ok) return (setState("error"), setError(r.error || "Não salvou."));
     setHarness(r.harness as Record<string, unknown>);
     setSaved(text.trim());
@@ -86,7 +85,7 @@ export function AgentInstructions({ agent, examples, onDirty }: { agent: string;
           <ul className="mt-2 space-y-1.5 text-sm text-fg-muted">
             <li>Entra no prompt deste agente a cada pedido, depois das regras dele.</li>
             <li>Muda estilo e prioridade. Não libera ferramenta nem passa por cima das políticas.</li>
-            <li>Cada vez que você salva, a versão anterior fica no Harness › Versões.</li>
+            <li>Cada vez que você salva, a versão anterior fica em Configurações › Versões.</li>
           </ul>
         </GlassPanel>
         {examples.length > 0 && (

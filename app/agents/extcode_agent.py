@@ -47,19 +47,18 @@ def _prompt_from(task: str) -> str:
 
 
 def _folder_from(task: str, session) -> Optional[str]:
+    """Pasta do projeto: a citada no pedido (se existir) ou a da conversa. Caminho citado que nao existe da None
+    (vira pergunta em extcode_plan): nunca cai numa pasta vizinha de nome parecido nem no projeto anterior."""
     import os
-    from core.paths import extract_path, resolve_path
+    from core.paths import existing_prefix, extract_path
     cited = extract_path(task)
     if cited:
-        # O caminho citado vai ate o fim da frase ("C:\x\meu projeto com o claude"): fica o maior
-        # prefixo que existe de verdade.
-        parts = cited.split(" ")
-        for i in range(len(parts), 0, -1):
-            path = resolve_path(" ".join(parts[:i]))
-            if os.path.isdir(path):
-                return path
-            if os.path.isfile(path):
-                return os.path.dirname(path)
+        # O caminho citado vai ate o fim da frase ("C:\x\meu projeto com o claude"): so palavras de continuacao
+        # sao cortadas, nunca pedaco do nome ("Nova pasta (2)" nao vira "Nova pasta").
+        found = existing_prefix(cited)
+        if found and os.path.isfile(found):
+            return os.path.dirname(found)
+        return found if found and os.path.isdir(found) else None
     if session is not None:
         code = getattr(session, "code", None) or {}
         if isinstance(code, dict) and code.get("folder"):
@@ -84,6 +83,12 @@ def extcode_plan(task: str, session=None) -> Optional[dict]:
                         f"agentes do computador, então segui por eles."}
     folder = _folder_from(task, session)
     if not folder:
+        from core.paths import extract_path
+        cited = extract_path(task)
+        if cited:
+            return {"needs_clarification": True, "why": "pasta citada nao existe", "subtasks": [],
+                    "question": f"Não encontrei a pasta {cited.strip()}. Ela já existe? Se for nova, crie a pasta "
+                                f"e me diga de novo; se for outra, me passe o caminho certo."}
         return {"needs_clarification": True, "question": _FOLDER_QUESTION.format(name=name),
                 "why": "pasta do projeto ausente", "subtasks": []}
     bad = folder_error(folder)

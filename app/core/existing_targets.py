@@ -18,13 +18,15 @@ from pathlib import Path
 from typing import Optional
 
 from core.lexicon import norm
-from core.paths import EXECUTABLE_EXT, OPEN_REFUSED_EXT, _ALIASES, known_folder
+from core.paths import EXECUTABLE_EXT, OPEN_REFUSED_EXT, _ALIASES, is_open_folder_request, known_folder
 
 _OPEN = re.compile(r"\b(?:abr\w*|abre|mostr\w*|ver|veja|exib\w*|acess\w*|entr\w*|rod\w*|execut\w*|traz\w*|traga|"
                    r"volt\w*|clic\w*|cliqu\w*)\b")
 _COMPOUND = re.compile(r"\b(?:e depois|e tambem|depois disso|em seguida)\b")
 _PROJECT_FOLDER = re.compile(r"\bpasta\s+(?:d[oa]s?\s+)?(?:arquivos\s+)?(?:d[oa]\s+|desse\s+|deste\s+)?(?:projeto|site)\b|"
                              r"\bpasta\s+(?:que\s+)?(?:voce\s+)?(?:criou|gerou|fez)\b")
+_DIRECT_FOLDER = re.compile(r"""^\s*(?:por favor[:,]?\s+)?(?:abra|abre|abrir|mostre|acessar|acesse)\s+
+                                 (?:a\s+)?pasta\s+["']?[A-Za-z]:[\\/]""", re.IGNORECASE | re.VERBOSE)
 _SITE = re.compile(r"\b(?:site|pagina|projeto|resultado|index(?:\.html)?|html)\b")
 _BROWSER = re.compile(r"\b(?:navegador|browser|chrome|edge|firefox|google)\b")
 _RUN_SITE = re.compile(r"\b(?:rod\w*|execut\w*|ver|veja)\s+(?:o\s+)?(?:site|programa do site|resultado)\b")
@@ -95,19 +97,36 @@ def _locate_folder(spoken: str, text: str, session) -> Optional[str]:
 _EDITOR = re.compile(r"\b(?:vs ?code|visual studio code|no code)\b")
 
 
-def _cited_folder(task: str) -> Optional[str]:
-    """Pasta citada por caminho no pedido, se existir (o texto pode seguir depois do caminho)."""
+def _cited_raw(task: str) -> Optional[str]:
+    """Caminho local escrito no pedido (C:\\...), como veio; None se nao houver."""
     from core.paths import extract_path, is_network_path
     raw = extract_path(task or "")
     if not raw or is_network_path(raw) or not re.match(r"^[A-Za-z]:[\\/]", raw):
         return None
-    words = raw.split()
-    while words:                                  # "C:\...\proj e depois ..." -> "C:\...\proj"
-        candidate = " ".join(words).rstrip(".,;)")
-        if os.path.isdir(candidate):
-            return candidate
-        words.pop()
-    return None
+    return raw
+
+
+def _cited_folder(task: str) -> Optional[str]:
+    """Pasta citada por caminho no pedido, se existir. O texto pode seguir depois do caminho: so palavras de
+    continuacao da frase sao cortadas, nunca pedaco do nome (o "(2)" de "Nova pasta (2)")."""
+    from core.paths import existing_prefix
+    raw = _cited_raw(task)
+    found = existing_prefix(raw) if raw else None
+    if found and os.path.isfile(found):
+        found = os.path.dirname(found)
+    return found if found and os.path.isdir(found) else None
+
+
+def _folder_for(task: str, project: Optional[str]) -> tuple:
+    """-> (pasta, pergunta). Caminho citado que nao existe vira pergunta: nunca e trocado pela pasta do projeto
+    da conversa nem por uma pasta vizinha de nome parecido."""
+    raw = _cited_raw(task)
+    if not raw:
+        return project, None
+    folder = _cited_folder(task)
+    if folder:
+        return folder, None
+    return None, f"Não encontrei a pasta {raw.strip()}. Confere o caminho para eu abrir a certa?"
 
 
 def _project_folder(session) -> Optional[str]:
@@ -193,7 +212,9 @@ def existing_plan(task: str, session=None) -> Optional[dict]:
     # do projeto em C:\...\x"): o editor recebe o caminho direto. Antes o piloto digitava o caminho no
     # dialogo de abrir pasta e batia no limite de acoes.
     if _EDITOR.search(n) and re.search(r"\b(?:projeto|pasta|site|codigo)\b", n):
-        folder = _cited_folder(task) or project
+        folder, question = _folder_for(task, project)
+        if question:
+            return _ask(question)
         if folder:
             return _plan(task, {"action": "open_in_editor", "path": folder},
                          f"abrir {os.path.basename(folder.rstrip(os.sep))} no VS Code")
@@ -201,7 +222,9 @@ def existing_plan(task: str, session=None) -> Optional[dict]:
 
     # 1. O site do projeto no navegador ("abrir o site no navegador", "rodar o site")
     if (_SITE.search(n) and _BROWSER.search(n)) or _RUN_SITE.search(n):
-        project = _cited_folder(task) or project
+        project, question = _folder_for(task, project)
+        if question:
+            return _ask(question)
         if project:
             page = _site_page(project)
             if page:
@@ -212,10 +235,20 @@ def existing_plan(task: str, session=None) -> Optional[dict]:
             return _ask("Ainda não há um projeto criado nesta conversa. Qual pasta ou endereço devo abrir?")
         return None
 
+    # Um caminho direto pode ser aberto sem modelo, mesmo sem projeto ativo.
+    if _DIRECT_FOLDER.match(task) and is_open_folder_request(task):
+        folder, question = _folder_for(task, None)
+        if question:
+            return _ask(question)
+        if folder:
+            return _open(task, folder, f"abrir a pasta {os.path.basename(folder.rstrip(os.sep))}")
+
     # 2. A pasta do projeto ("abrir a pasta dos arquivos do projeto"). O caminho citado vale mesmo sem projeto
     # anotado: a resposta a uma pergunta ("Abrir a pasta do projeto C:\...") ja traz a pasta.
     if _PROJECT_FOLDER.search(n):
-        folder = _cited_folder(task) or project
+        folder, question = _folder_for(task, project)
+        if question:
+            return _ask(question)
         if folder and _wants_editor(n, session):
             return _plan(task, {"action": "open_in_editor", "path": folder},
                          f"abrir {os.path.basename(folder.rstrip(os.sep))} no VS Code")

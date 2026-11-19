@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Hint, Icon, IconButton, TogglePill } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { useVoice } from "../../lib/stores";
 import { core, inApp, pickFiles, pickFolder } from "../../lib/host";
 import { parseSlash, SLASH_COMMANDS, slashMatches, toolName, withTool, type SlashTool } from "../../lib/slash";
+
+// Editor da memoria dos agentes (o mesmo do Lab), carregado so quando a pessoa abre: nao pesa na conversa
+const AgentMemoryDialog = lazy(() => import("../lab/AgentMemoryDialog"));
 
 // Caixa de pedido. Enter envia, Shift+Enter quebra linha. Microfone grava e envia como mensagem de audio;
 // "Conversa" deixa o microfone aberto. Simular e Relatorio vao junto do pedido.
@@ -53,6 +56,7 @@ const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ||
 export function Composer({
   running,
   compact,
+  home,
   placeholder = "Descreva uma tarefa...",
   onSubmit,
   autoFocus,
@@ -60,6 +64,7 @@ export function Composer({
 }: {
   running: boolean;
   compact?: boolean;
+  home?: boolean;
   placeholder?: string;
   onSubmit: (text: string, opts: ComposerOptions) => void;
   autoFocus?: boolean;
@@ -69,6 +74,7 @@ export function Composer({
   const [dryRun, setDryRun] = useState(false);
   const [report, setReport] = useState(false);
   const [tool, setTool] = useState<SlashTool | null>(null);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [folder, setFolder] = useState("");
   const [menuIndex, setMenuIndex] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -200,7 +206,7 @@ export function Composer({
 
   // @container: os rotulos encolhem pela largura da propria caixa (com a barra lateral aberta a janela engana)
   return (
-    <div className="@container relative">
+    <div className="@container relative" data-wallpaper-safe>
       {/* Bandeja de cima: pasta do projeto (so com /claude ou /codex) */}
       {full && (
         <div className="tray" data-open={!!tool} aria-hidden={!tool}>
@@ -258,7 +264,7 @@ export function Composer({
       {/* A caixa */}
       <div
         className={cn(
-          "surface-strong relative z-10 rounded-[22px]",
+          "surface-strong relative z-10 rounded-[22px]", home && "home-composer",
           "motion-normal transition-[border-color,box-shadow] focus-within:border-[color-mix(in_oklab,var(--accent)_45%,var(--edge))]",
         )}
       >
@@ -354,6 +360,7 @@ export function Composer({
           </TogglePill>
           {voice.queued > 0 && <span className="whitespace-nowrap text-xs text-fg-muted">{voice.queued} na fila</span>}
           <span className="min-w-0 flex-1" />
+          {home && <span className="hidden whitespace-nowrap font-mono text-[11px] text-fg-muted @3xl:inline">↵ envia · ⇧↵ quebra linha</span>}
           <Hint text={voice.hotkey ? `Gravar voz (${voice.hotkey})` : "Gravar voz"}>
             <IconButton
               icon="mic"
@@ -380,7 +387,7 @@ export function Composer({
       </div>
 
       {/* Bandeja de baixo: ferramentas que o "/" chama (some quando uma esta escolhida) */}
-      {full && (
+      {full && !home && (
         <div className="tray" data-open={!tool} aria-hidden={!!tool}>
           <div className="tray-inner">
             <div className="composer-tray -mt-5 flex h-[56px] items-end gap-2 rounded-b-composer px-4 pb-2.5 text-[13px]">
@@ -401,6 +408,13 @@ export function Composer({
                 digite <kbd className="rounded bg-chip px-1 font-mono">/</kbd> para chamar
               </span>
               <span className="flex-1" />
+              <Hint text="Ver e corrigir o que cada agente lembra">
+                <button type="button" tabIndex={tool ? -1 : 0} onClick={() => setMemoryOpen(true)}
+                  className="press motion-fast inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-1 text-fg-muted transition-colors hover:bg-hover hover:text-fg">
+                  <Icon name="brain" size={13} className="text-accent-ink" />
+                  <span className="hidden @lg:inline">Memória dos agentes</span>
+                </button>
+              </Hint>
               <span className="hidden items-center gap-1.5 whitespace-nowrap text-xs text-fg-subtle @3xl:flex">
                 <Icon name="command" size={12} /> Enter envia · Shift+Enter quebra linha
               </span>
@@ -408,6 +422,7 @@ export function Composer({
           </div>
         </div>
       )}
+      {memoryOpen && <Suspense fallback={null}><AgentMemoryDialog open={memoryOpen} onOpenChange={setMemoryOpen} /></Suspense>}
     </div>
   );
 }

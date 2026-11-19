@@ -6,11 +6,12 @@ import { IconButton } from "../ui";
 // Grade de botoes (Tab/Enter); setas trocam o mes.
 
 const WEEK = ["D", "S", "T", "Q", "Q", "S", "S"];
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** Dia LOCAL em AAAA-MM-DD (toISOString usa UTC: no Brasil, depois das 21h, ja virava o dia seguinte). */
+export const localDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function MonthCalendar({ dates, selected, onSelect }: { dates: string[]; selected: string; onSelect: (day: string) => void }) {
   const has = useMemo(() => new Set(dates), [dates]);
-  const today = iso(new Date());
+  const today = localDay(new Date());
   const [cursor, setCursor] = useState(() => {
     const base = selected || today;
     return new Date(Number(base.slice(0, 4)), Number(base.slice(5, 7)) - 1, 1);
@@ -28,7 +29,7 @@ export function MonthCalendar({ dates, selected, onSelect }: { dates: string[]; 
   }, [cursor]);
 
   const month = cursor.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-  const inMonth = dates.filter((d) => d.startsWith(iso(cursor).slice(0, 7))).length;
+  const inMonth = dates.filter((d) => d.startsWith(localDay(cursor).slice(0, 7))).length;
 
   return (
     <div>
@@ -49,7 +50,7 @@ export function MonthCalendar({ dates, selected, onSelect }: { dates: string[]; 
           </span>
         ))}
         {cells.map((d) => {
-          const key = iso(d);
+          const key = localDay(d);
           const out = d.getMonth() !== cursor.getMonth();
           const on = key === selected;
           const mark = has.has(key);

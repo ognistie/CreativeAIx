@@ -138,6 +138,10 @@ def _build_steps(app, params):
 
 
 TEXT_EDITORS = ("notepad", "bloco de notas", "word", "wordpad")
+# Acoes sobre o documento que JA esta aberto num editor. A rotina do editor so sabe abrir e criar documento em
+# branco: "salvar o arquivo no Bloco de Notas" abria um documento NOVO e contava como sucesso (incidente de
+# 2026-11-17). Essas acoes vao para o piloto na janela aberta.
+EDITOR_ACTS = re.compile(r"\b(?:salv\w*|grav\w*|fech\w*|imprim\w*|renome\w*|export\w*|desfa\w*|refa\w*)\b")
 
 # Configuracoes do Windows: abre a pagina certa direto (ms-settings:), sem procurar no menu
 _SETTINGS = re.compile(r"\b(configura\w*|config|ajustes|settings|painel de controle)\b")
@@ -298,9 +302,8 @@ def _utility_steps(task_lower):
                 s(5, "hotkey", {"keys": ["alt", "f4"]}, "Fechar próxima")]
 
     if any(kw in task_lower for kw in ["print da tela", "screenshot", "captura de tela", "tire um print", "tirar print"]):
-        return [s(1, "run_python", {
-            "code": "import pyautogui, os, subprocess\nfrom datetime import datetime\ndesktop = os.path.join(os.path.expanduser('~'), 'Desktop')\nfp = os.path.join(desktop, f'screenshot_{datetime.now().strftime(\"%H%M%S\")}.png')\npyautogui.screenshot().save(fp)\nsubprocess.Popen(['explorer', '/select,', fp])\nprint(f'Salvo: {fp}')",
-            "description": "Capturar tela"}, "Screenshot → Desktop")]
+        # Acao declarativa (destino fixo no motor): run_python e reprovado pelo validador e pelo motor
+        return [s(1, "screenshot", {"reveal": True}, "Capturar a tela na Área de Trabalho")]
 
     if any(kw in task_lower for kw in ["volta pra tela", "trocar janela", "alt tab", "janela anterior"]):
         return [s(1, "hotkey", {"keys": ["alt", "tab"]}, "Alt+Tab")]
@@ -328,19 +331,15 @@ PROMPT_FALLBACK = (
     "ACOES:\n"
     "app_search(name) | app_type(window_title, text) | focus_window(title)\n"
     "vision_click(description) | vision_type(description, text)\n"
-    "type_text(text) | hotkey(keys) | wait(seconds) | click(x,y)\n"
-    "run_python(code, description)\n\n"
+    "type_text(text) | hotkey(keys) | wait(seconds)\n\n"
 
     "═══ EXEMPLOS (few-shot) ═══\n\n"
 
-    "Tarefa: 'abra o paint e desenhe um circulo'\n"
+    "Tarefa: 'abra o paint e selecione a ferramenta circulo'\n"
     '{"steps":['
     '{"step":1,"action":"app_search","params":{"name":"Paint"},"description":"Abrir Paint"},'
     '{"step":2,"action":"wait","params":{"seconds":4},"description":"Aguardar"},'
-    '{"step":3,"action":"vision_click","params":{"description":"ferramenta Circulo ou Oval DENTRO do Paint"},"description":"Selecionar circulo"},'
-    '{"step":4,"action":"wait","params":{"seconds":0.5},"description":"Aguardar"},'
-    '{"step":5,"action":"click","params":{"x":400,"y":350},"description":"Ponto inicial"},'
-    '{"step":6,"action":"run_python","params":{"code":"import pyautogui; pyautogui.drag(200,200,duration=0.5)","description":"Arrastar"},"description":"Desenhar"}'
+    '{"step":3,"action":"vision_click","params":{"description":"ferramenta Circulo ou Oval DENTRO do Paint"},"description":"Selecionar circulo"}'
     ']}\n\n'
 
     "Tarefa: 'abra a calculadora e calcule 15+20'\n"
@@ -461,6 +460,18 @@ class DesktopAgent:
             return {"steps": [{"step": 1, "action": "open_path", "params": {"path": path},
                                "description": f"Abrir {path}", "agent": "DESKTOP"}],
                     "agent": "DESKTOP"}
+
+        from core.lexicon import norm as _norm_text
+        if app in TEXT_EDITORS and EDITOR_ACTS.search(_norm_text(str(task_text))):
+            from core.lexicon import get_lexicon
+            key = get_lexicon().app_key(app) or app
+            text = (params.get("text") or params.get("message") or "").strip()
+            # Com texto novo: abre e escreve primeiro; sem texto: age no documento que ja esta aberto
+            steps = (_build_steps(app, params) or []) if text else []
+            steps.append({"step": len(steps) + 1, "action": "app_task", "params": {"goal": str(task_text), "app": key},
+                          "description": f"No {app} aberto: {str(task_text)[:50]}", "agent": "DESKTOP"})
+            print(f"  [DESKTOP] Editor aberto: {len(steps)} steps")
+            return {"steps": steps, "agent": "DESKTOP"}
 
         if app:
             steps = _build_steps(app, params)

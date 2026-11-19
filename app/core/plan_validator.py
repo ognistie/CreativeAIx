@@ -30,6 +30,9 @@ _CREATIVE = re.compile(
 )
 _SEARCH_VERB = re.compile(r"\b(pesquis\w*|procur\w*|busc\w*|busqu\w*)\b", re.IGNORECASE)
 _CLICK_INTENT = re.compile(r"\b(clic\w*|clique|selecion\w*|aperte|aperta)\b")
+# Pedido de SALVAR um documento aberto
+_SAVE_INTENT = re.compile(r"\b(salv\w*|grav\w*)\b")
+_SAVE_STEP = re.compile(r"\b(salv\w*|grav\w*|save)\b")
 
 
 def _plain(s: str) -> str:
@@ -256,6 +259,23 @@ def validate_steps(agent: str, subtask: dict, steps: list, task: str) -> Validat
                      for a in actions)
         if not clicks:
             v.add("POL-007", "o pedido manda clicar/selecionar, mas nenhum passo clica")
+
+    # POL-007 no Desktop: pedido de SALVAR precisa de um passo que salve (Ctrl+S, o piloto na janela ou um clique
+    # em Salvar). Antes "salvar o arquivo no Bloco de Notas" virava "abrir + documento em branco" e saia como
+    # concluido sem salvar nada (incidente de 2026-11-17).
+    if agent == "DESKTOP" and _SAVE_INTENT.search(_plain(subtask.get("task", "") + " " + task)):
+        def saves(step: dict) -> bool:
+            p = step.get("params") or {}
+            if step.get("action") == "app_task":
+                return True
+            if step.get("action") == "hotkey":
+                from core.action_risk import norm_keys
+                return set(norm_keys(p.get("keys"))) == {"ctrl", "s"}
+            text = _plain(" ".join(str(p.get(k) or "") for k in ("description", "element", "goal"))
+                          + " " + str(step.get("description") or ""))
+            return step.get("action") in ("vision_click", "uia_click", "click") and bool(_SAVE_STEP.search(text))
+        if not any(saves(s) for s in steps):
+            v.add("POL-007", "o pedido manda salvar, mas nenhum passo salva o documento")
 
     # So exige digitacao quando o pedido e de ESCREVER/ENVIAR. Abrir (pagina das
     # Configuracoes, pasta) com um "text" de rotulo (ex.: "Bluetooth") nao e escrever.

@@ -1,12 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AppDialog, Button, Chip, EmptyState, Field, GlassPanel, Spinner, StatusDot } from "../../components/ui";
-import { agentLabel } from "../../lib/agents";
-import { cn } from "../../lib/cn";
-import { core } from "../../lib/host";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppDialog, Button, EmptyState, Field, GlassPanel, Spinner } from "../../components/ui";
+import { core, saveLabDocument } from "../../lib/host";
+import { LabCases, type EvalSet } from "./LabCases";
 import { useCoreEvent } from "../../lib/useCore";
-
-// Aba Testes do AI Research Lab (antes LabView). Versoes das instrucoes de um agente, comparacao nos mesmos casos
-// (simulado, ou real com confirmacao e teto de custo), resultado por caso com o rastro e promocao.
 
 interface Version {
   id: string;
@@ -15,397 +11,563 @@ interface Version {
   instructions: string;
   params: { model?: string; effort?: string; max_tokens?: number };
   published: boolean;
+  archived?: boolean;
+  tested?: boolean;
 }
-
+interface Trace {
+  kind: string;
+  action?: string;
+  params?: Record<string, unknown>;
+  reason?: string;
+  checks?: Array<{ ok: boolean; check: string }>;
+}
 interface Result {
   case: string;
+  task?: string;
+  trial?: number;
+  feedback?: { note: string }[];
   version: string;
   status: string;
-  trace: Array<{ kind: string; action?: string; params?: Record<string, unknown>; reason?: string; checks?: Array<{ ok: boolean; check: string }> }>;
+  trace: Trace[];
+  reason?: string;
+  source_run?: string;
+  applied?: Record<string, unknown>;
 }
-
-interface Run {
+interface RunRow {
   id: string;
+  origin: "real" | "simulado" | "fixture";
+  agent?: string;
+  status: string;
+  set: string;
+  set_version: number;
   versions: string[];
-  summary: Record<string, { passed: number; cases: number; cost_usd: number; latency_ms_avg: number | null; origin: string }>;
+}
+interface Run extends RunRow {
+  summary: Record<string, { passed: number; cases: number; valid?: number; cost_usd: number; calls?: number; latency_ms_avg: number | null;
+    latency_ms_p50?: number | null; latency_ms_p95?: number | null; warnings?: string[] }>;
   results: Result[];
+  dataset_snapshot?: EvalSet;
+  stopped_by?: string;
+  task_id?: string;
+  events?: { seq: number; at: string; type: string; case?: string; version?: string; status?: string }[];
+  protocol?: { hypothesis?: string };
+  split?: string;
+  context_mode?: string;
+  repeats?: number;
+  comparison?: { regressions: { case: string; trial: number }[]; improvements: { case: string; trial: number }[]; pairs: number; recommendation: string };
 }
 
-type Reply = { ok?: boolean; error?: string } & Record<string, unknown>;
+type Proposal = { agent: string; baseline: string; dataset_hash: string; origin: string; objective: string; instructions: string;
+  hypothesis: string; measurement: string; risk: string; count: number };
 
 const STATUS: Record<string, string> = {
-  passou: "Passou",
-  falhou: "Falhou",
-  falha_ferramenta: "Falha da ferramenta",
-  falha_planejamento: "Falha no plano",
-  indisponivel: "Indisponível",
-  cancelado: "Cancelado",
+  passou: "Passou", falhou: "Falhou", falha_ferramenta: "Falha da ferramenta",
+  falha_planejamento: "Falha no plano", falha_execucao: "Falha na execução",
+  indisponivel: "Indisponível", cancelado: "Cancelado", concluido: "Concluído",
+  timeout: "Tempo esgotado", orcamento: "Limite atingido", running: "Em andamento", interrupted: "Interrompido",
 };
-const EFFORTS = [
-  { v: "", l: "Igual" },
-  { v: "low", l: "Baixo" },
-  { v: "medium", l: "Médio" },
-  { v: "high", l: "Alto" },
-];
-const money = (v: number) => `US$ ${(v || 0).toFixed(3).replace(".", ",")}`;
-const BUDGET_MAX = 5;
+const amount = (value: number) => `US$ ${value.toFixed(3).replace(".", ",")}`;
+const origin = (run: RunRow) => run.origin === "real" ? "Inferência real" : run.origin === "fixture" ? "Fixture local" : "Replay";
+const selectClass = "min-w-0 rounded-r2 border border-hairline bg-surface px-3 py-2 text-sm text-fg";
+type Reply = { ok?: boolean; error?: string } & Record<string, unknown>;
 
-/** Experimentos do agente: versoes das instrucoes, comparacao nos mesmos casos e promocao. */
-export function Experiments({ agent }: { agent: string }) {
+export function Experiments({ agent, evidence, onEvidence, onExperiments }: { agent: string; evidence: boolean; onEvidence: () => void; onExperiments: () => void }) {
   const [versions, setVersions] = useState<Version[]>([]);
-  const [versionA, setA] = useState("");
-  const [versionB, setB] = useState("");
-  const [sets, setSets] = useState<Array<{ name: string; cases?: unknown[] }>>([]);
+  const [candidate, setCandidate] = useState("");
+  const [sets, setSets] = useState<EvalSet[]>([]);
+  const [selectedSet, setSelectedSet] = useState("");
+  const [historical, setHistorical] = useState<EvalSet | null>(null);
+  const [casesOpen, setCasesOpen] = useState(false);
+  const [history, setHistory] = useState<RunRow[]>([]);
   const [run, setRun] = useState<Run | null>(null);
-  const [mode, setMode] = useState<"simulado" | "real">("simulado");
+  const selectionRequest = useRef(0);
+  const [mode, setMode] = useState<RunRow["origin"]>(agent === "MAESTRO" ? "fixture" : "simulado");
+  const [split, setSplit] = useState("all");
+  const [repeats, setRepeats] = useState(1);
+  const [deadline, setDeadline] = useState(180);
+  const [calls, setCalls] = useState(40);
+  const [tokens, setTokens] = useState(160000);
+  const [context, setContext] = useState("fixture");
   const [budget, setBudget] = useState("0,50");
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState<Array<Record<string, unknown>>>([]);
-  const [message, setMessage] = useState("");
-  const [promo, setPromo] = useState<{ ok: boolean; reasons?: string[] } | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [instr, setInstr] = useState("");
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState("");
+  const [promo, setPromo] = useState<{ ok: boolean; reasons?: string[]; warning?: string } | null>(null);
+  const [rollback, setRollback] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [parent, setParent] = useState<Version | null>(null);
+  const [variantNote, setVariantNote] = useState("");
+  const [notice, setNotice] = useState("");
+  const [includeHypothesis, setIncludeHypothesis] = useState(false);
   const [effort, setEffort] = useState("");
-  const [ask, setAsk] = useState<"" | "real" | "promote">("");
-  const [open, setOpen] = useState<Result | null>(null);
-  const testable = agent === "FILE";
-  const runCases = (sets[0]?.cases?.length ?? 0) * [versionA, versionB].filter((v, i, a) => v && a.indexOf(v) === i).length;
+  const [model, setModel] = useState("");
+  const [maxTokens, setMaxTokens] = useState("");
+  const [diff, setDiff] = useState<string[] | null>(null);
+  const [objective, setObjective] = useState("");
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [ask, setAsk] = useState<"" | "real" | "promote" | "rollback" | "research">("");
+  const testable = ["FILE", "MAESTRO", "CODE", "DATA"].includes(agent);
+  const base = versions.find((v) => v.published);
+  const variant = versions.find((v) => v.id === candidate);
+  const dataset = historical ?? sets.find((s) => s.name === selectedSet) ?? sets[0];
+  const count = (dataset?.cases ?? []).filter((row) => split === "all" || (row.split ?? "development") === split).length;
+  const limit = Number(budget.replace(",", "."));
+  const validBudget = limit >= 0.01 && limit <= 5;
+  const validLimits = deadline >= 15 && deadline <= 600 && calls >= 1 && calls <= 200 && tokens >= 512 && tokens <= 1000000;
+  const available = Boolean(base && (mode === "fixture" || variant) && dataset && count && repeats >= 1 && repeats <= 5);
 
-  const call = useCallback(async (p: Promise<unknown>): Promise<Reply> => {
+  const call = useCallback(async (promise: Promise<unknown>, showError = true): Promise<Reply> => {
     try {
-      const r = (await p) as Reply;
-      if (r.ok === false) setMessage(r.error || "Não deu certo.");
-      return r;
-    } catch (e) {
-      setMessage((e as Error).message);
+      const response = (await promise) as Reply;
+      if (response.ok === false && showError) setError(response.error || "A operação falhou.");
+      return response;
+    } catch (err) {
+      setError((err as Error).message);
       return { ok: false };
     }
   }, []);
 
-  const label = (id: string) => {
-    const v = versions.find((x) => x.id === id);
-    return v ? `v${v.n}` : id;
-  };
-
   const loadVersions = useCallback(async () => {
-    const r = await call(core().call("labVersions", agent));
-    if (!r.ok) return;
-    const vs = (r.versions as Version[]) ?? [];
-    setVersions(vs);
-    const pub = vs.find((v) => v.published);
-    const a = pub ? pub.id : (vs[0]?.id ?? "");
-    setA(a);
-    setB((b) => (vs.some((v) => v.id === b) && b !== a ? b : (vs.filter((v) => v.id !== a).at(-1)?.id ?? "")));
+    const reply = await call(core().call("labVersions", agent));
+    if (!reply.ok) return;
+    const rows = (reply.versions as Version[]) ?? [];
+    setVersions(rows);
+    setRollback(Boolean(reply.rollback_available));
+    setCandidate((id) => rows.some((v) => v.id === id && !v.published && !v.archived) ? id : rows.filter((v) => !v.published && !v.archived).at(-1)?.id ?? "");
     setPromo(null);
   }, [agent, call]);
 
-  useEffect(() => {
-    void loadVersions();
-    setCreating(false);
-  }, [loadVersions]);
-
-  useEffect(() => {
-    void (async () => {
-      const s = await call(core().call("labEvalSets"));
-      if (s.ok) setSets((s.sets as Array<{ name: string; cases?: unknown[] }>) ?? []);
-      const r = await call(core().call("labRuns"));
-      const runs = (r.runs as Array<{ id: string }>) ?? [];
-      if (r.ok && runs.length) {
-        const d = await call(core().call("labRunDetail", runs[0]!.id));
-        if (d.ok) setRun(d.run as Run);
-      }
-      if (r.busy) setBusy(true);
-    })();
+  const loadRun = useCallback(async (id: string) => {
+    const selection = ++selectionRequest.current;
+    setIncludeHypothesis(false);
+    const reply = await call(core().call("labRunDetail", id));
+    if (reply.ok && selection === selectionRequest.current) setRun(reply.run as Run);
   }, [call]);
 
-  const checkPromo = useCallback(async () => {
-    if (!versionB) return;
-    const r = await call(core().call("labPromotionCheck", versionB));
-    if (r.ok !== undefined) setPromo(r as { ok: boolean; reasons?: string[] });
-  }, [versionB, call]);
+  const loadHistory = useCallback(async (chooseLatest = false) => {
+    if (!testable) return;
+    const reply = await call(core().call("labRuns"));
+    if (!reply.ok) return;
+    const running = Boolean(reply.busy);
+    const rows = ((reply.runs as RunRow[]) ?? [])
+      .filter((row) => row.agent === agent || (!row.agent && row.versions.some((id) => id.startsWith(`${agent.toLowerCase()}-`))));
+    setHistory(rows);
+    setBusy(running);
+    if (chooseLatest && rows[0]) await loadRun(rows[0].id);
+  }, [agent, call, loadRun, testable]);
 
-  useCoreEvent("labProgress", useCallback((p: unknown) => setProgress((x) => [...x, p as Record<string, unknown>]), []));
-  useCoreEvent(
-    "labFinished",
-    useCallback(
-      (p: unknown) => {
-        const r = p as { ok: boolean; run?: Run; error?: string };
-        setBusy(false);
-        if (!r.ok) return setMessage(r.error || "O experimento falhou.");
-        setRun(r.run ?? null);
-        void checkPromo();
-      },
-      [checkPromo],
-    ),
-  );
+  useEffect(() => { void loadVersions(); }, [loadVersions]);
+  useEffect(() => {
+    if (!testable) return;
+    void call(core().call("labEvalSets")).then((reply) => {
+      if (reply.ok) setSets(((reply.sets as EvalSet[]) ?? []).filter((set) => set.agent === agent));
+    });
+    void loadHistory(true);
+  }, [agent, call, loadHistory, testable]);
+
+  useCoreEvent("labProgress", useCallback((payload) => {
+    if ((payload as { agent?: string }).agent === agent) setProgress((n) => n + 1);
+  }, [agent]));
+  useCoreEvent("labFinished", useCallback((payload: unknown) => {
+    if (!testable) return;
+    const reply = payload as { ok: boolean; run?: Run; proposal?: Proposal; error?: string };
+    setBusy(false);
+    setPromo(null);
+    if (reply.proposal?.agent === agent) setProposal(reply.proposal);
+    if (reply.ok && reply.run?.agent === agent) {
+      ++selectionRequest.current;
+      setRun(reply.run);
+      void loadRun(reply.run.id);
+    }
+    if (!reply.ok) setError(reply.error || "O experimento falhou.");
+    void loadHistory();
+  }, [agent, loadHistory, loadRun, testable]));
+
+  const create = async () => {
+    if (!base || draft === null) return;
+    setError("");
+    const result = await call(core().call("labCreateVariant", JSON.stringify({
+      agent, base: parent?.id ?? base.id, instructions: draft, note: variantNote.trim(),
+      params: { ...(effort ? { effort } : {}), ...(model.trim() ? { model: model.trim() } : {}), ...(maxTokens ? { max_tokens: Number(maxTokens) } : {}) },
+    })));
+    if (!result.ok) return;
+    await loadVersions();
+    setCandidate((result.version as Version).id);
+    setDraft(null);
+  };
 
   const start = async (confirmed: boolean) => {
-    const vs = [versionA, versionB].filter((v, i, a) => v && a.indexOf(v) === i);
-    const r = await call(
-      core().call("labRun", JSON.stringify({ set: sets[0]?.name ?? "", versions: vs, mode, confirmed, budget: parseFloat(budget.replace(",", ".")) || 0 })),
-    );
-    if (r.ok) {
-      setBusy(true);
-      setProgress([]);
-      setMessage("");
-      setOpen(null);
-      setPromo(null);
+    if (!base || !dataset || busy || !available || (mode !== "fixture" && !variant)) return;
+    setBusy(true);
+    setProgress(0);
+    setError("");
+    const reply = await call(core().call("labRun", JSON.stringify({
+      set: dataset.name, revision: dataset.hash, versions: mode === "fixture" ? [base.id] : [base.id, variant!.id],
+      mode, confirmed, budget: limit, split, repeats, timeout: deadline, calls, tokens, context, objective, hypothesis: variant?.note,
+    })));
+    if (!reply.ok) setBusy(false);
+    else onEvidence();
+  };
+
+  const chooseDataset = (row: EvalSet) => {
+    const latest = sets.find((set) => set.name === row.name);
+    setHistorical(latest && latest.version > row.version ? row : null);
+    if (!latest || latest.version <= row.version) {
+      setSets((items) => [...items.filter((item) => item.name !== row.name), row]);
     }
+    setSelectedSet(row.name);
+    setProposal(null);
   };
 
-  const createVersion = async () => {
-    const r = await call(core().call("labCreateVariant", JSON.stringify({ agent, base: versionA, instructions: instr, params: effort ? { effort } : {}, note: "" })));
-    if (!r.ok) return;
-    setCreating(false);
-    setInstr("");
-    await loadVersions();
-    setB((r.version as Version).id);
+  const suggest = async (paid: boolean) => {
+    if (!dataset || !objective.trim() || busy) return;
+    setError("");
+    setBusy(true);
+    setProposal(null);
+    const reply = await call(core().call("labResearch", JSON.stringify({
+      agent, objective, set: dataset.name, revision: dataset.hash, mode: paid ? "real" : "fixture", confirmed: paid, budget: limit,
+    })));
+    if (!reply.ok) setBusy(false);
   };
 
-  const cases = useMemo(() => {
-    if (!run) return [];
-    return [...new Set(run.results.map((r) => r.case))];
-  }, [run]);
+  const exportReport = async (format: "md" | "json") => {
+    if (!run) return;
+    setError("");
+    try {
+      const reply = await call(core().call("labReport", run.id, format, includeHypothesis ? run.protocol?.hypothesis ?? "" : ""));
+      if (reply.ok && typeof reply.content === "string" && await saveLabDocument(`lab-relatorio-${run.id}.${format}`, reply.content)) setNotice("Relatório salvo.");
+    } catch (reason) { setError((reason as Error).message); }
+  };
+
+  const chooseHistorical = (row: EvalSet) => {
+    setHistorical({ ...row, name: row.name ?? run!.set, version: row.version ?? run!.set_version });
+    setSelectedSet(row.name ?? run!.set);
+    setContext(run?.context_mode ?? "fixture");
+    setMode("simulado");
+    setCasesOpen(false);
+    onExperiments();
+  };
 
   return (
-    <div>
-        {message && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{message}</p>}
-
-        <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-          {/* 1. Versoes */}
-          <GlassPanel className="p-5">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-md font-medium text-fg">1 · Versões</h2>
-              {!creating && (
-                <Button size="compact" icon="plus" onClick={() => setCreating(true)}>
-                  Nova versão
-                </Button>
-              )}
+    <div className="space-y-4">
+      {notice && <p role="status" className="text-sm text-fg">{notice}</p>}
+      {error && <p role="alert" className="rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
+      {busy && (
+        <div className="flex flex-wrap items-center gap-3 rounded-r3 border border-hairline p-3" role="status">
+          <Spinner /><span className="text-sm text-fg">Experimento em andamento · {progress} casos concluídos nesta sessão</span>
+          <Button size="compact" onClick={() => void core().call("labCancel").catch((err: Error) => setError(err.message))}>Parar após o caso atual</Button>
+        </div>
+      )}
+      {evidence ? (
+        !testable ? <EmptyState icon="flask" title="Avaliação ainda não disponível" /> :
+        <GlassPanel className="space-y-4 p-5">
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-md font-semibold text-fg">Histórico de comparações</h3>
+            {history.length > 0 && <select aria-label="Comparação no histórico" value={run?.id ?? ""} className={selectClass}
+              onChange={(e) => {
+                const entry = history.find((row) => row.id === e.target.value);
+                if (entry) void loadRun(entry.id);
+              }}>
+              {!run && <option value="" disabled>Escolher comparação</option>}
+              {history.map((row) => <option key={row.id} value={row.id}>
+                {row.id} · {origin(row)} · {STATUS[row.status] ?? row.status}
+              </option>)}
+            </select>}
+          </header>
+          {!run ? <EmptyState icon="flask" title="Ainda sem evidências">Execute uma comparação em Experimentos.</EmptyState> : <RunEvidence key={run.id} run={run} onFeedback={async (row, note) => {
+            const reply = await call(core().call("labFeedback", JSON.stringify({ run: run.id, version: row.version, case: row.case, trial: row.trial ?? 1, note })));
+            if (reply.ok) await loadRun(run.id);
+            return Boolean(reply.ok);
+          }} />}
+          {run && <div className="flex flex-wrap items-center gap-2">
+            {run.protocol?.hypothesis && <label className="flex items-center gap-2 text-xs text-fg-muted"><input type="checkbox" checked={includeHypothesis}
+              onChange={(e) => setIncludeHypothesis(e.target.checked)} /> Incluir a hipótese no relatório</label>}
+            <Button size="compact" onClick={() => void exportReport("md")}>Exportar relatório Markdown</Button>
+            <Button size="compact" onClick={() => void exportReport("json")}>Exportar relatório JSON</Button>
+            {run.dataset_snapshot && <Button size="compact" onClick={() => chooseHistorical(run.dataset_snapshot!)}>Selecionar esta revisão para novo teste</Button>}
+          </div>}
+          {variant && run?.origin === "real" && run.versions.includes(variant.id) && (
+            <div className="flex flex-wrap items-center gap-3 border-t border-hairline pt-3">
+              <Button size="compact" onClick={async () => {
+                const result = await call(core().call("labPromotionCheck", variant.id), false);
+                setPromo({ ok: !!result.ok, reasons: (result.reasons as string[]) ?? [result.error || "Evidência insuficiente."], warning: String(result.warning ?? "") });
+              }}>Conferir promoção de {variant.id}</Button>
+              {promo?.warning && <p className="text-sm text-warn-ink">{promo.warning}</p>}
+              {promo && (promo.ok
+                ? <Button size="compact" variant="primary" onClick={() => setAsk("promote")}>Promover instruções</Button>
+                : <p className="text-sm text-fg-muted">{promo.reasons?.join(". ")}</p>)}
             </div>
-            {creating && (
-              <div className="mb-4 rounded-r3 border border-hairline bg-surface p-3">
-                <textarea
-                  value={instr}
-                  onChange={(e) => setInstr(e.target.value)}
-                  rows={4}
-                  placeholder="Instruções desta versão (ex.: confira o destino antes de copiar)"
-                  aria-label="Instruções da versão"
-                  className="w-full select-text resize-y bg-transparent text-[13px] text-fg outline-none placeholder:text-fg-subtle"
-                />
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs text-fg-subtle">Esforço</span>
-                  {EFFORTS.map((e) => (
-                    <Chip key={e.v} selected={effort === e.v} onClick={() => setEffort(e.v)}>
-                      {e.l}
-                    </Chip>
-                  ))}
-                </div>
-                <div className="mt-3 flex justify-end gap-2">
-                  <Button size="compact" variant="ghost" onClick={() => setCreating(false)}>
-                    Cancelar
-                  </Button>
-                  <Button size="compact" variant="primary" disabled={!instr.trim()} onClick={() => void createVersion()}>
-                    Criar versão
-                  </Button>
+          )}
+        </GlassPanel>
+      ) : (
+        casesOpen ? <LabCases key={dataset?.hash ?? agent} agent={agent} selection={sets.find((s) => s.name === dataset?.name)}
+          onChange={chooseDataset} onClose={() => setCasesOpen(false)} /> :
+        <div className="grid gap-4 lg:grid-cols-[1fr_1.2fr]">
+          <GlassPanel className="space-y-4 p-5">
+            <header className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-md font-semibold text-fg">Versões</h3>
+              <Button size="compact" icon="plus" disabled={!base || draft !== null} onClick={() => {
+                setParent(base!);
+                setDraft(base!.instructions);
+                setEffort(""); setModel(""); setMaxTokens("");
+                setVariantNote("");
+              }}>Criar variante</Button>
+            </header>
+            {base && <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-fg-muted">Referência ativa <strong className="text-fg">{base.id}</strong></p>
+              {rollback && <Button size="compact" onClick={() => setAsk("rollback")}>Restaurar versão anterior</Button>}
+            </div>}
+            {draft !== null && (
+              <div className="grid gap-3 rounded-r3 border border-hairline bg-surface p-3">
+                <p className="text-xs text-fg-muted">Rascunho a partir de {parent?.id ?? base?.id}</p>
+                <Field aria-label="Hipótese da variante" placeholder="Hipótese da variante" value={variantNote} maxLength={200} onChange={(e) => setVariantNote(e.target.value)} />
+                <textarea className="w-full resize-y rounded-r2 border border-hairline bg-surface p-3 text-sm text-fg" rows={5}
+                  aria-label="Instruções da variante" maxLength={700} value={draft} onChange={(e) => setDraft(e.target.value)} />
+                {testable && <label className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">Esforço no teste
+                  <select className={selectClass} value={effort} onChange={(e) => setEffort(e.target.value)}>
+                    <option value="">Herdar</option><option value="low">Baixo</option><option value="medium">Médio</option><option value="high">Alto</option>
+                  </select>
+                </label>}
+                {testable && <div className="grid gap-2 sm:grid-cols-2">
+                  <Field aria-label="Modelo da variante" value={model} placeholder={(parent ?? base)?.params.model} onChange={(e) => setModel(e.target.value)} />
+                  <Field aria-label="Tokens máximos da variante" type="number" min={256} max={32000} value={maxTokens} placeholder={String((parent ?? base)?.params.max_tokens ?? "")} onChange={(e) => setMaxTokens(e.target.value)} />
+                </div>}
+                <div className="flex justify-end gap-2">
+                  <Button size="compact" onClick={() => setDraft(null)}>Cancelar</Button>
+                  <Button size="compact" variant="primary" disabled={draft === (parent ?? base)?.instructions && !effort && !model && !maxTokens} onClick={() => void create()}>Salvar variante</Button>
                 </div>
               </div>
             )}
-            <ul className="space-y-1.5">
-              {versions.map((v) => {
-                const isB = v.id === versionB;
-                return (
-                  <li key={v.id}>
-                    <button
-                      type="button"
-                      onClick={() => !v.published && (setB(v.id), setPromo(null))}
-                      className={cn("w-full rounded-r2 border px-3 py-2 text-left", isB ? "border-accent/50 bg-accent/10" : "border-hairline hover:bg-hover")}
-                    >
-                      <span className="flex items-center gap-2 text-sm">
-                        <span className="font-medium text-fg">v{v.n}</span>
-                        {v.published && <span className="text-xs text-ok-ink">publicada · A</span>}
-                        {isB && <span className="text-xs text-accent-ink">comparando · B</span>}
-                        {v.params.effort && <span className="ml-auto text-xs text-fg-subtle">esforço {v.params.effort}</span>}
-                      </span>
-                      <span className="mt-0.5 line-clamp-2 block text-xs text-fg-muted">{v.note || v.instructions || "Sem instruções extras"}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <label className="grid gap-1 text-sm text-fg-muted">Variante para comparar
+              <select className={selectClass} value={candidate} onChange={(e) => { setCandidate(e.target.value); setPromo(null); setDiff(null); }}>
+                <option value="">Escolher variante</option>
+                {versions.filter((v) => !v.published && !v.archived).map((v) => <option key={v.id} value={v.id}>{v.id} · {v.tested ? "Testada" : "Pronta para teste"}{v.note ? ` · ${v.note}` : ""}</option>)}
+              </select>
+            </label>
+            {variant && <details className="text-sm text-fg-muted">
+              <summary className="cursor-pointer text-fg">Ver instruções e parâmetros da variante</summary>
+              <p className="my-2 whitespace-pre-wrap break-words">{variant.instructions || "Sem instruções adicionais"}</p>
+              <p>{variant.params.model} · esforço {variant.params.effort} · até {variant.params.max_tokens} tokens por chamada de planejamento</p>
+            </details>}
+            {base && variant && <div className="flex flex-wrap gap-2"><Button size="compact" onClick={async () => {
+              const result = await call(core().call("labDiff", base.id, variant.id));
+              if (result.ok) setDiff((result.lines as string[]) ?? []);
+            }}>Ver diferenças</Button>
+              <Button size="compact" disabled={draft !== null} onClick={() => {
+                setParent(variant); setDraft(variant.instructions); setVariantNote(""); setEffort(""); setModel(""); setMaxTokens("");
+              }}>Duplicar como rascunho</Button>
+              <Button size="compact" disabled={busy} onClick={async () => {
+                if ((await call(core().call("labArchive", variant.id, true))).ok) { setDiff(null); await loadVersions(); }
+              }}>Arquivar variante</Button>
+            </div>}
+            {versions.some((v) => v.archived) && <details className="rounded-r2 border border-hairline p-3">
+              <summary className="cursor-pointer text-sm text-fg">Variantes arquivadas</summary>
+              <ul className="mt-2 space-y-2">{versions.filter((v) => v.archived).map((row) => <li key={row.id} className="flex items-center justify-between gap-2 text-sm text-fg-muted">
+                {row.id}<Button size="compact" disabled={busy} onClick={async () => {
+                  if ((await call(core().call("labArchive", row.id, false))).ok) await loadVersions();
+                }}>Reativar</Button>
+              </li>)}</ul>
+            </details>}
+            {diff && <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-r2 bg-surface p-3 text-xs text-fg">{diff.join("\n") || "Sem diferenças"}</pre>}
           </GlassPanel>
-
-          <div className="space-y-5">
-            {/* 2. Comparar */}
-            <GlassPanel className="p-5">
-              <h2 className="mb-3 text-md font-medium text-fg">2 · Comparar</h2>
-              {!testable ? (
-                <p className="text-sm text-fg-muted">
-                  Para {agentLabel(agent)} dá para criar e publicar versões, mas ainda não há casos que confiram o resultado no disco. Hoje a comparação roda só com o
-                  agente de Arquivos.
-                </p>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm text-fg">
-                    {label(versionA)} × {versionB ? label(versionB) : "—"}
-                  </span>
-                  <span className="text-sm text-fg-subtle">em {sets[0]?.name ?? "—"}</span>
-                  <span className="mx-2 h-5 w-px bg-hairline" />
-                  <Chip selected={mode === "simulado"} onClick={() => setMode("simulado")}>
-                    Simulado
-                  </Chip>
-                  <Chip selected={mode === "real"} onClick={() => setMode("real")}>
-                    Real (custa)
-                  </Chip>
-                  {mode === "real" && (
-                    <label className="flex items-center gap-1.5 text-sm text-fg-muted">
-                      até US$
-                      <Field value={budget} onChange={(e) => setBudget(e.target.value)} className="h-8 w-20 text-sm" aria-label="Orçamento em dólares" />
+          <GlassPanel className="space-y-4 p-5">
+            <header className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-md font-semibold text-fg">Comparar versões</h3>
+              {testable && <Button size="compact" onClick={() => setCasesOpen(true)}>Casos de teste</Button>}
+            </header>
+            {testable ? <>
+              <label className="grid gap-1 text-sm text-fg-muted">Conjunto de casos
+                <select className={selectClass} value={historical ? "historical" : (dataset?.name ?? "")} onChange={(e) => {
+                  if (e.target.value !== "historical") { setHistorical(null); setSelectedSet(e.target.value); setProposal(null); setContext("fixture"); }
+                }}>
+                  {historical && <option value="historical">{historical.name} · revisão {historical.version} do histórico</option>}
+                  {!sets.length && <option value="">Nenhum conjunto disponível</option>}
+                  {sets.map((s) => <option key={s.name} value={s.name}>{s.title || s.name} · v{s.version} · {s.cases.length} casos</option>)}
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm text-fg-muted">Modo de execução
+                <select className={selectClass} value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+                  {agent === "MAESTRO" && <option value="fixture">Roteamento local · sem execução</option>}
+                  <option value="simulado">Replay de planos gravados · sem custo</option>
+                  <option value="real">Inferência real · usa o provedor</option>
+                </select>
+              </label>
+              <p className="text-sm text-fg-muted">{mode === "simulado"
+                ? "O replay reaplica planos gravados nas mesmas versões e na mesma revisão de casos."
+                : mode === "fixture" ? "Verifica os atalhos reais do Maestro no cenário local, sem executar subtarefas."
+                : "Cada chamada reserva orçamento com base na estimativa de entrada e no limite de saída. Use apenas dados sintéticos que podem ser enviados ao provedor."}</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-1 text-sm text-fg-muted">Grupo de casos
+                  <select className={selectClass} value={split} onChange={(e) => setSplit(e.target.value)}>
+                    <option value="all">Todos</option><option value="development">Desenvolvimento</option><option value="holdout">Validação reservada</option>
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm text-fg-muted">Repetições por caso
+                  <Field type="number" min={1} max={5} value={repeats} onChange={(e) => setRepeats(Number(e.target.value))} />
+                </label>
+              </div>
+              {mode === "real" && <>
+                <label className="flex items-center gap-2 text-sm text-fg-muted">Limite de custo estimado em US$
+                  <Field value={budget} onChange={(e) => setBudget(e.target.value)} className="w-24" />
+                </label>
+                <details className="rounded-r2 border border-hairline p-3">
+                  <summary className="cursor-pointer text-sm text-fg">Tempo, chamadas e contexto</summary>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <label className="grid gap-1 text-sm text-fg-muted">Tempo máximo (segundos)
+                      <Field type="number" value={deadline} min={15} max={600} onChange={(e) => setDeadline(Number(e.target.value))} />
                     </label>
-                  )}
-                  <span className="flex-1" />
-                  {busy ? (
-                    <>
-                      <Spinner />
-                      <span className="text-sm text-fg-muted">{progress.length} casos</span>
-                      <Button size="compact" onClick={() => void core().call("labCancel")}>
-                        Parar
-                      </Button>
-                    </>
-                  ) : (
-                    <Button size="compact" variant="primary" icon="play" disabled={!versionA} onClick={() => (mode === "real" ? setAsk("real") : void start(false))}>
-                      Rodar
-                    </Button>
-                  )}
-                </div>
-              )}
-            </GlassPanel>
-
-            {/* 3. Resultado */}
-            <GlassPanel className="p-5">
-              <h2 className="mb-3 text-md font-medium text-fg">3 · Resultado</h2>
-              {!run ? (
-                <EmptyState icon="flask" title="Ainda sem comparação">
-                  Crie uma versão, escolha-a à esquerda e clique em Rodar.
-                </EmptyState>
-              ) : (
-                <>
-                  <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                    {run.versions.map((v) => {
-                      const s = run.summary[v];
-                      if (!s) return null;
-                      return (
-                        <div key={v} className="rounded-r3 border border-hairline p-3">
-                          <p className="text-sm font-medium text-fg">
-                            {label(v)} · {s.passed} de {s.cases} passaram
-                          </p>
-                          <p className="mt-0.5 text-xs text-fg-muted">
-                            {money(s.cost_usd)} · {s.latency_ms_avg !== null ? `${(s.latency_ms_avg / 1000).toFixed(1).replace(".", ",")} s por caso` : "—"} ·{" "}
-                            {s.origin === "real" ? "medido com o modelo" : "simulado"}
-                          </p>
-                        </div>
-                      );
-                    })}
+                    <label className="grid gap-1 text-sm text-fg-muted">Chamadas máximas
+                      <Field type="number" value={calls} min={1} max={200} onChange={(e) => setCalls(Number(e.target.value))} />
+                    </label>
+                    <label className="grid gap-1 text-sm text-fg-muted">Tokens totais
+                      <Field type="number" value={tokens} min={512} max={1000000} onChange={(e) => setTokens(Number(e.target.value))} />
+                    </label>
+                    <label className="grid gap-1 text-sm text-fg-muted">Contexto dos casos
+                      <select className={selectClass} value={context} onChange={(e) => setContext(e.target.value)}>
+                        <option value="fixture">Referências sintéticas da fixture</option><option value="none">Sem referências extras</option>
+                      </select>
+                    </label>
                   </div>
-                  <ul className="overflow-hidden rounded-r3 border border-hairline">
-                    {cases.map((c) => {
-                      const rows = run.versions.map((v) => run.results.find((r) => r.case === c && r.version === v)).filter(Boolean) as Result[];
-                      return (
-                        <li key={c} className="border-b border-hairline last:border-0">
-                          <button type="button" onClick={() => setOpen(rows.at(-1) ?? null)} className="flex w-full flex-wrap items-center gap-3 px-3 py-2 text-left hover:bg-row-hover">
-                            <span className="min-w-0 flex-1 text-sm text-fg">{c}</span>
-                            {rows.map((r) => (
-                              <span key={r.version} className="flex items-center gap-1.5 text-xs text-fg-muted">
-                                <StatusDot status={r.status === "passou" ? "ok" : r.status === "cancelado" || r.status === "indisponivel" ? "cancelled" : "failed"} size={13} />
-                                {label(r.version)} · {STATUS[r.status] ?? r.status}
-                              </span>
-                            ))}
-                          </button>
-                          {open && open.case === c && (
-                            <ul className="space-y-1 border-t border-hairline bg-surface/50 px-4 py-2 font-mono text-[12px]">
-                              {open.trace
-                                .filter((t) => t.kind !== "planejado")
-                                .map((t, i) => (
-                                  <li key={i} className={cn(t.kind === "bloqueado" || t.kind === "falha_ferramenta" ? "text-warn-ink" : "text-fg-muted")}>
-                                    {t.kind === "verificado"
-                                      ? (t.checks ?? []).map((k) => `${k.ok ? "✓" : "✗"} ${k.check}`).join("    ")
-                                      : `${t.kind === "bloqueado" ? "bloqueado pelo executor: " : t.kind === "falha_ferramenta" ? "falhou: " : ""}${t.action ?? ""} ${Object.entries(t.params ?? {})
-                                          .map(([k, v]) => `${k}=${String(v)}`)
-                                          .join(", ")}${t.reason ? ` (${t.reason})` : ""}`}
-                                  </li>
-                                ))}
-                            </ul>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                  {versionB && (
-                    <div className="mt-4 flex flex-wrap items-center gap-3">
-                      <Button size="compact" variant="primary" disabled={!promo?.ok} onClick={() => setAsk("promote")}>
-                        Promover {label(versionB)}
-                      </Button>
-                      {!promo ? (
-                        <Button size="compact" variant="ghost" onClick={() => void checkPromo()}>
-                          Conferir se pode promover
-                        </Button>
-                      ) : (
-                        <span className={cn("text-sm", promo.ok ? "text-ok-ink" : "text-fg-subtle")}>
-                          {promo.ok ? "Pode promover: não piorou em nenhum caso no teste real." : `Para promover: ${(promo.reasons ?? []).join("; ")}.`}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </>
-              )}
-            </GlassPanel>
-          </div>
+                </details>
+              </>}
+              <Button variant="primary" icon="play" disabled={busy || !available || (mode === "real" && (!validBudget || !validLimits))}
+                onClick={() => mode === "real" ? setAsk("real") : void start(false)}>{mode === "fixture" ? "Verificar roteamento" : "Rodar comparação"}</Button>
+              <details className="rounded-r2 border border-hairline p-3">
+                <summary className="cursor-pointer text-sm font-medium text-fg">Pesquisa assistida</summary>
+                <div className="mt-3 space-y-2">
+                  <label className="grid gap-1 text-sm text-fg-muted">Objetivo
+                    <Field value={objective} maxLength={400} onChange={(e) => { setObjective(e.target.value); setProposal(null); }} />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="compact" disabled={busy || !dataset || !objective.trim()} onClick={() => void suggest(false)}>Propor hipótese local</Button>
+                    <Button size="compact" disabled={busy || !dataset || !objective.trim()} onClick={() => setAsk("research")}>Propor com o provedor</Button>
+                  </div>
+                  {proposal && <article className="space-y-2 rounded-r2 bg-surface p-3 text-sm text-fg-muted">
+                    <p className="font-medium text-fg">Hipótese · {proposal.origin}</p>
+                    <p>{proposal.hypothesis}</p><p>{proposal.measurement} · {proposal.count} casos.</p><p>{proposal.risk}</p>
+                    <p className="whitespace-pre-wrap">{proposal.instructions}</p>
+                    <Button size="compact" variant="primary" disabled={draft !== null || proposal.baseline !== base?.id || proposal.dataset_hash !== dataset?.hash}
+                      onClick={() => {
+                        setParent(base ?? null);
+                        setDraft(proposal.instructions); setVariantNote(proposal.hypothesis); setEffort(""); setModel(""); setMaxTokens("");
+                        setSplit("development"); setMode("real");
+                      }}>Revisar como variante</Button>
+                  </article>}
+                </div>
+              </details>
+            </> : <p className="text-sm text-fg-muted">Avaliação ainda não disponível para este agente. Você pode editar e salvar variantes para revisão.</p>}
+          </GlassPanel>
         </div>
+      )}
+      <AppDialog open={ask === "real"} onOpenChange={(open) => !open && setAsk("")}
+        title="Rodar com o provedor?"
+        description={`Até ${count * repeats} avaliações por versão, ${calls} chamadas no total e teto estimado de ${validBudget ? amount(limit) : "US$ —"}. Pedidos sintéticos e instruções das versões serão enviados ao provedor. A cobrança pode divergir da estimativa.`}
+        actions={<><Button onClick={() => setAsk("")}>Cancelar</Button>
+          <Button variant="primary" disabled={!validBudget} onClick={() => { setAsk(""); void start(true); }}>Rodar</Button></>} />
+      <AppDialog open={ask === "promote"} onOpenChange={(open) => !open && setAsk("")}
+        title="Promover instruções da variante?"
+        description={`As instruções desta versão vão alterar o Harness ativo. A versão anterior ficará disponível para restauração no Lab. ${promo?.warning ?? ""}`}
+        actions={<><Button onClick={() => setAsk("")}>Cancelar</Button>
+          <Button variant="primary" onClick={async () => {
+            setAsk("");
+            if (!variant) return;
+            const result = await call(core().call("labPromote", variant.id));
+            if (result.ok) { setNotice("Instruções publicadas no Harness ativo."); void loadVersions(); }
+          }}>Promover</Button></>} />
+      <AppDialog open={ask === "rollback"} onOpenChange={(open) => !open && setAsk("")}
+        title="Restaurar a versão anterior?"
+        description="As instruções anteriores voltam ao Harness ativo. O histórico de variantes e evidências continua disponível."
+        actions={<><Button onClick={() => setAsk("")}>Cancelar</Button>
+          <Button variant="primary" onClick={async () => {
+            setAsk("");
+            if (base && (await call(core().call("labRollback", agent, base.id, true))).ok) {
+              setNotice("A versão anterior voltou a ficar ativa.");
+              await loadVersions();
+            }
+          }}>Restaurar</Button></>} />
+      <AppDialog open={ask === "research"} onOpenChange={(open) => !open && setAsk("")}
+        title="Usar o provedor para a hipótese?"
+        description="Uma chamada recebe o objetivo, as instruções da versão ativa e uma contagem de resultados de desenvolvimento. A comparação exige uma confirmação separada."
+        actions={<><Button onClick={() => setAsk("")}>Cancelar</Button>
+          <label className="flex items-center gap-2 text-xs text-fg-muted">Limite em US$ <Field className="w-24" value={budget} onChange={(e) => setBudget(e.target.value)} /></label>
+          <Button variant="primary" disabled={!validBudget} onClick={() => { setAsk(""); void suggest(true); }}>Propor hipótese</Button></>} />
+    </div>
+  );
+}
 
-      <AppDialog
-        open={ask === "real"}
-        onOpenChange={(o) => !o && setAsk("")}
-        title="Rodar com o modelo de verdade?"
-        description={`${runCases} casos, até ${2 * runCases} chamadas ao modelo. Para quando o orçamento de US$ ${budget} acabar (teto US$ ${BUDGET_MAX},00). As ações rodam numa pasta temporária e passam pelas regras de sempre.`}
-        actions={
-          <>
-            <Button variant="ghost" onClick={() => setAsk("")}>
-              Cancelar
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => {
-                setAsk("");
-                void start(true);
-              }}
-            >
-              Rodar
-            </Button>
-          </>
-        }
-      />
-      <AppDialog
-        open={ask === "promote"}
-        onOpenChange={(o) => !o && setAsk("")}
-        title="Promover esta versão?"
-        description={`As instruções de ${label(versionB)} passam a valer no Harness. A configuração anterior fica nas versões do Harness.`}
-        actions={
-          <>
-            <Button variant="ghost" onClick={() => setAsk("")}>
-              Cancelar
-            </Button>
-            <Button
-              variant="primary"
-              onClick={async () => {
-                setAsk("");
-                const r = await call(core().call("labPromote", versionB));
-                if (r.ok) void loadVersions();
-              }}
-            >
-              Promover
-            </Button>
-          </>
-        }
-      />
+function RunEvidence({ run, onFeedback }: { run: Run; onFeedback: (row: Result, note: string) => Promise<boolean> }) {
+  const [feedback, setFeedback] = useState("");
+  const [writing, setWriting] = useState<string | null>(null);
+  const cases = [...new Map(run.results.map((row) => [`${row.case}#${row.trial ?? 1}`, row])).entries()];
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-fg-muted">
+        {origin(run)} · {run.set} v{run.set_version} · {STATUS[run.status] ?? run.status}
+        {run.dataset_snapshot ? ` · conjunto ${run.dataset_snapshot.hash.slice(0, 12)}` : " · registro anterior aos snapshots"}
+      </p>
+      {run.task_id && <details className="rounded-r2 border border-hairline p-3 text-xs text-fg-muted">
+        <summary className="cursor-pointer">Eventos da execução · {run.task_id}</summary>
+        {run.events ? <ol className="mt-2 max-h-52 space-y-1 overflow-y-auto">{run.events.map((event) => <li key={event.seq}>
+          {event.at.slice(11)} · {event.case ? `${event.case} · ${event.version} · ${STATUS[event.status ?? ""] ?? event.status}` : event.type === "created" ? "Início" : "Encerramento"}
+        </li>)}</ol> : <p className="mt-2">Selecione a rodada no histórico para carregar os eventos.</p>}
+      </details>}
+      {run.stopped_by && <p className="text-sm text-warn-ink">{run.stopped_by}</p>}
+      {run.comparison && run.versions.length === 2 && <p className="rounded-r2 border border-hairline p-2 text-sm text-fg">
+        {run.comparison.pairs} pares válidos · {run.comparison.regressions.length} regressões · {run.comparison.improvements.length} melhorias · Próximo passo {run.comparison.recommendation}
+      </p>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        {run.versions.map((id) => {
+          const stats = run.summary?.[id];
+          if (!stats) return null;
+          return (
+            <div key={id} className="rounded-r2 border border-hairline p-3">
+              <p className="font-medium text-fg">{id}</p>
+              <p className="mt-1 text-sm text-fg-muted">{stats.passed} de {stats.valid ?? stats.cases} casos válidos passaram</p>
+              <p className="text-sm text-fg-muted">
+                {stats.latency_ms_avg == null ? "Latência indisponível" : `${stats.latency_ms_avg} ms por caso, medidos localmente`}
+              </p>
+              <p className="text-sm text-fg-muted">
+                {run.origin !== "real" ? "Sem chamadas ao provedor" : stats.calls ? `${amount(stats.cost_usd)} estimados · ${stats.calls} chamadas` : "Custo indisponível"}
+              </p>
+              {stats.latency_ms_p50 != null && <p className="text-sm text-fg-muted">p50 {stats.latency_ms_p50} ms{stats.latency_ms_p95 != null ? ` · p95 ${stats.latency_ms_p95} ms` : ""}</p>}
+              {stats.warnings?.length ? <p className="mt-1 text-xs text-warn-ink">{stats.warnings.join(" · ")}</p> : null}
+            </div>
+          );
+        })}
+      </div>
+      {cases.map(([key, row]) => {
+        const rows = run.versions.flatMap((v) => run.results.filter((r) => r.case === row.case && (r.trial ?? 1) === (row.trial ?? 1) && r.version === v));
+        const regression = rows[0]?.status === "passou" && Boolean(rows[1]) && !["passou", "indisponivel", "cancelado", "falha_execucao", "timeout"].includes(rows[1]!.status);
+        return <details className="rounded-r2 border border-hairline p-3" key={key}>
+          <summary className="cursor-pointer text-sm font-medium text-fg">
+            {row.case}{(run.repeats ?? 1) > 1 ? ` · rodada ${row.trial ?? 1}` : ""} · {rows.map((r) => STATUS[r.status] ?? r.status).join(" / ")}{regression ? " · Regressão" : ""}
+          </summary>
+          {row.task && <p className="mt-2 text-sm text-fg-muted">{row.task}</p>}
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            {rows.map((r) => <div key={r.version} className="min-w-0 space-y-1 break-words text-sm text-fg-muted">
+              <p className="font-medium text-fg">{r.version}</p>
+              {r.reason && <p>{r.reason}</p>}
+              {r.source_run && <p>Plano gravado em {r.source_run}</p>}
+              {r.applied && <p>Planejamento aplicado · {Object.entries(r.applied).map(([key, val]) => `${key}: ${val ?? "padrão"}`).join(" · ")}</p>}
+              <ul className="list-inside list-disc">
+                {r.trace.flatMap((t, i) => t.kind === "verificado"
+                  ? (t.checks ?? []).map((c, j) => <li key={`${i}-${j}`}>{c.ok ? "✓" : "✗"} {c.check}</li>)
+                  : t.action ? [<li key={i}>{t.action} · {t.reason ?? t.kind}{t.params ? ` · ${Object.values(t.params).join(" → ")}` : ""}</li>] : [])}
+              </ul>
+              {r.feedback?.map((item, index) => <p key={index} className="rounded-r2 bg-hover p-2">{item.note}</p>)}
+              {run.status !== "running" && (writing === `${key}:${r.version}`
+                ? <form className="flex flex-wrap gap-2" onSubmit={async (event) => {
+                    event.preventDefault();
+                    if (feedback.trim() && await onFeedback(r, feedback)) { setFeedback(""); setWriting(null); }
+                  }}>
+                    <Field aria-label={`Observação de ${r.version}`} value={feedback} maxLength={500} onChange={(e) => setFeedback(e.target.value)} />
+                    <Button type="submit" size="compact" disabled={!feedback.trim()}>Salvar observação</Button>
+                  </form>
+                : <Button size="compact" onClick={() => { setFeedback(""); setWriting(`${key}:${r.version}`); }}>Anotar</Button>)}
+            </div>)}
+          </div>
+        </details>;
+      })}
     </div>
   );
 }

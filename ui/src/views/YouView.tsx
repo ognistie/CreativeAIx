@@ -1,159 +1,109 @@
-import { useEffect, useRef, useState } from "react";
-import { IntroCard } from "../components/IntroCard";
-import { ProgressRing } from "../components/ProgressRing";
-import { Button, GlassPanel, Icon, Skeleton, type IconName } from "../components/ui";
-import { cn } from "../lib/cn";
+import { useEffect, useState } from "react";
+import { Button, GlassPanel, Icon, Skeleton } from "../components/ui";
 import { core } from "../lib/host";
 import { Page } from "./Page";
-
-// YouView: secoes do perfil que vao junto dos pedidos. Salva sozinho (1 s depois de parar de digitar).
 
 interface Section {
   name: string;
   hint: string;
-  rel: string;
   text: string;
 }
 
 const MAX = 700; // core/harness.py > YOU_MAX
-const ICONS: Record<string, IconName> = {
-  Perfil: "user",
-  Rotinas: "calendar",
-  "Tarefas frequentes": "checklist",
-  "Jeito de falar": "messages",
-  "Padrão de respostas": "file-text",
-  "Skills para os agentes": "layers",
+const WORK_FIELDS: Record<string, { label: string; hint: string }> = {
+  Perfil: { label: "Contexto de trabalho", hint: "Inclua o contexto e as ferramentas que ajudam os agentes a preparar suas entregas." },
+  "Jeito de falar": { label: "Termos e apelidos", hint: "Explique os nomes e atalhos que usa nos pedidos." },
+  "Skills para os agentes": { label: "Convenções e revisão", hint: "Registre os cuidados, formatos de entrega e pontos de revisão que importam no seu trabalho." },
 };
 
-export function YouView({ onOpenBrain }: { onOpenBrain?: () => void }) {
+export function YouView({ onBack, onOpenBrain }: { onBack: () => void; onOpenBrain?: () => void }) {
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [filled, setFilled] = useState<Record<string, boolean>>({});
-  const [writable, setWritable] = useState(true);
+  const [writable, setWritable] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    core()
-      .call("youProfile")
-      .then((r) => {
-        const v = r as { ok: boolean; writable?: boolean; sections?: Section[]; error?: string };
-        if (!v.ok) setError(v.error || "Não deu para ler o perfil.");
-        setWritable(v.writable !== false);
-        setSections(v.sections ?? []);
-        setFilled(Object.fromEntries((v.sections ?? []).map((s) => [s.name, !!s.text.trim()])));
-      })
-      .catch((e: Error) => setError(e.message));
+    void core().call("youProfile").then((r) => {
+      const profile = r as { ok: boolean; writable?: boolean; sections?: Section[]; error?: string };
+      if (!profile.ok) {
+        setError(profile.error || "Não deu para ler o perfil.");
+        return;
+      }
+      setWritable(profile.writable !== false);
+      setSections(profile.sections ?? []);
+    }).catch((e: Error) => setError(e.message));
   }, []);
 
-  const total = sections?.length ?? 0;
-  const done = Object.values(filled).filter(Boolean).length;
-
+  const previous = sections?.filter((s) => !WORK_FIELDS[s.name] && s.text.trim()) ?? [];
   return (
-    <Page
-      wide
-      title="Você"
-      subtitle="O que os agentes devem saber sobre você. Escreva do seu jeito: salva sozinho e vale para as próximas tarefas."
-      actions={
-        sections && total > 0 ? (
-          <div className="flex items-center gap-3 rounded-full border border-edge bg-glass py-1.5 pl-1.5 pr-4 backdrop-blur-xl">
-            <ProgressRing done={done} total={total} size={34} className="text-accent-ink" />
-            <span className="text-sm text-fg">
-              {done} de {total} preenchidos
-            </span>
+    <Page wide title="Como trabalhar comigo"
+      subtitle="Preferências que ajudam os agentes a entender seus pedidos e preparar entregas."
+      actions={<Button size="compact" icon="arrow-left" onClick={onBack}>Diário</Button>}>
+      {error ? <p role="alert" className="rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>
+        : !sections ? <Skeleton className="h-48 rounded-r4" />
+        : <>
+          {!writable && <p className="mb-4 text-sm text-fg-muted">A pasta pessoal está indisponível para salvar.</p>}
+          <div className="grid gap-4 xl:grid-cols-3">
+            {sections.filter((s) => WORK_FIELDS[s.name]).map((s) => (
+              <SectionEditor key={s.name} section={s} disabled={!writable} />
+            ))}
           </div>
-        ) : undefined
-      }
-    >
-      {error && <p className="mb-4 rounded-r2 bg-bad/10 p-3 text-sm text-bad-ink">{error}</p>}
-      <IntroCard which="you" />
-      {!writable && <p className="mb-4 rounded-r2 bg-warn/10 p-3 text-sm text-fg">A pasta do seu cérebro não está disponível: dá para ler, mas não salvar.</p>}
-      {!sections ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {[0, 1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-48 rounded-r4" />
-          ))}
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 [&>*]:min-w-0">
-          {sections.map((s, i) => (
-            <div key={s.name} className="animate-enter" style={{ animationDelay: `${i * 40}ms` }}>
-              <SectionEditor section={s} disabled={!writable} onFilled={(f) => setFilled((x) => (x[s.name] === f ? x : { ...x, [s.name]: f }))} />
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-        <p className="flex max-w-xl items-start gap-2 text-sm text-fg-muted">
-          <Icon name="shield-check" size={15} className="mt-0.5 shrink-0" />
-          Guardado na pasta do seu cérebro e enviado junto com os pedidos ao modelo de IA. É preferência: não libera nada que os agentes não possam fazer.
-        </p>
-        {onOpenBrain && (
-          <Button size="compact" icon="brain" onClick={onOpenBrain}>
-            Abrir no Cérebro
-          </Button>
-        )}
-      </div>
+          {previous.length > 0 && (
+            <details className="mt-5 rounded-r3 border border-hairline bg-surface p-4">
+              <summary className="cursor-pointer text-sm font-medium text-fg">Dados do perfil anterior</summary>
+              <dl className="mt-3 space-y-3">
+                {previous.map((s) => (
+                  <div key={s.name}>
+                    <dt className="text-sm font-medium text-fg">{s.name}</dt>
+                    <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-fg-muted">{s.text}</dd>
+                  </div>
+                ))}
+              </dl>
+              {onOpenBrain && <Button className="mt-3" size="compact" icon="brain" onClick={onOpenBrain}>Abrir no Cérebro</Button>}
+            </details>
+          )}
+          <p className="mt-5 flex max-w-2xl items-start gap-2 text-sm text-fg-muted">
+            <Icon name="shield-check" size={15} className="mt-0.5 shrink-0" />
+            O perfil fica na sua pasta pessoal. Trechos salvos, inclusive do perfil anterior, podem acompanhar pedidos
+            enviados ao modelo, sujeitos às regras de execução. O compartilhamento das entradas do Diário tem um controle próprio.
+          </p>
+        </>}
     </Page>
   );
 }
 
-function SectionEditor({ section, disabled, onFilled }: { section: Section; disabled: boolean; onFilled: (f: boolean) => void }) {
+function SectionEditor({ section, disabled }: { section: Section; disabled: boolean }) {
   const [text, setText] = useState(section.text);
-  const [state, setState] = useState<"" | "saving" | "saved" | "error">("");
-  const saved = useRef(section.text);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saved, setSaved] = useState(section.text);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const id = `you-${section.name.replace(/\s+/g, "-")}`;
-
-  useEffect(() => onFilled(!!text.trim()), [text, onFilled]);
-
-  useEffect(() => {
-    if (text === saved.current || disabled) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      setState("saving");
-      core()
-        .call("youSave", section.name, text)
-        .then((r) => {
-          const ok = (r as { ok?: boolean }).ok !== false;
-          if (ok) saved.current = text;
-          setState(ok ? "saved" : "error");
-        })
-        .catch(() => setState("error"));
-    }, 1000);
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-    };
-  }, [text, section.name, disabled]);
-
-  const has = !!text.trim();
+  const field = WORK_FIELDS[section.name]!;
+  const save = async () => {
+    setState("saving");
+    try {
+      const result = await core().call("youSave", section.name, text) as { ok: boolean };
+      if (!result.ok) return setState("error");
+      setSaved(text);
+      setState("saved");
+    } catch {
+      setState("error");
+    }
+  };
   return (
-    <GlassPanel className={cn("flex h-full flex-col p-4 transition-colors", has && "border-hairline-hi")}>
-      <div className="flex items-start gap-3">
-        <span className={cn("grid size-9 shrink-0 place-items-center rounded-r2", has ? "bg-accent/15 text-accent-ink" : "bg-chip text-fg-muted")}>
-          <Icon name={ICONS[section.name] ?? "pen"} size={17} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <label htmlFor={id} className="block text-md font-semibold text-fg">
-            {section.name}
-          </label>
-          <p className="mt-0.5 text-sm text-fg-muted">{section.hint}</p>
-        </div>
-        <span className="shrink-0 pt-1 text-xs text-fg-muted" aria-live="polite">
-          {state === "saving" ? "Salvando…" : state === "saved" ? "Salvo" : state === "error" ? <span className="text-bad-ink">Não salvou</span> : has ? "" : "Vazio"}
-        </span>
+    <GlassPanel className="flex flex-col p-4">
+      <label htmlFor={id} className="text-md font-semibold text-fg">{field.label}</label>
+      <p id={`${id}-hint`} className="mt-1 text-sm text-fg-muted">{field.hint}</p>
+      <textarea id={id} aria-describedby={`${id}-hint`} value={text} maxLength={MAX} rows={5}
+        disabled={disabled || state === "saving"}
+        onChange={(e) => { setText(e.target.value); setState("idle"); }}
+        className="mt-3 w-full flex-1 select-text resize-y rounded-r2 border border-hairline bg-surface p-3 text-md leading-relaxed text-fg outline-none focus:border-accent/45" />
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p aria-live="polite" className="text-xs text-fg-muted">
+          {state === "error" ? "Falha ao salvar. Tente novamente." : state === "saved" ? "Salvo" : `${text.length}/${MAX}`}
+        </p>
+        <Button size="compact" disabled={disabled || state === "saving" || text === saved} onClick={() => void save()}>
+          {state === "saving" ? "Salvando…" : "Salvar"}
+        </Button>
       </div>
-      <textarea
-        id={id}
-        value={text}
-        maxLength={MAX}
-        disabled={disabled}
-        onChange={(e) => setText(e.target.value)}
-        rows={5}
-        placeholder="Escreva aqui. Um item por linha funciona bem."
-        className="mt-3 w-full flex-1 select-text resize-y rounded-r2 border border-hairline bg-surface p-3 text-md leading-relaxed text-fg outline-none placeholder:text-fg-subtle focus:border-accent/45 disabled:opacity-60"
-      />
-      <p className="mt-1.5 text-right text-xs tabular-nums text-fg-muted">
-        {text.length}/{MAX}
-      </p>
     </GlassPanel>
   );
 }

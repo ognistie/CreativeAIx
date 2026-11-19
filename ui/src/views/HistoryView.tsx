@@ -15,8 +15,10 @@ interface Entry {
   success: boolean;
   duration_ms?: number;
   created_at?: number | string;
+  started_at?: string;
   error?: string;
   agents?: string[];
+  subtasks?: Array<{ agent?: string }>;
   metrics?: { api_calls?: number; tokens_est?: number; cost_usd?: number };
 }
 
@@ -42,6 +44,10 @@ function when(v: Entry["created_at"]): string {
   const d = typeof v === "number" ? new Date(v * 1000) : new Date(v);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function entryAgents(entry: Entry): string[] {
+  return [...new Set(entry.agents ?? entry.subtasks?.flatMap(({ agent }) => agent ? [agent] : []) ?? [])];
 }
 
 export function HistoryView() {
@@ -117,11 +123,11 @@ export function HistoryView() {
                     <span className="block truncate text-md font-medium text-fg">{e.task}</span>
                     <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-fg-muted">
                       <span className="flex items-center gap-1">
-                        <Icon name="calendar" size={11} /> {when(e.created_at)}
+                        <Icon name="calendar" size={11} /> {when(e.started_at ?? e.created_at)}
                       </span>
-                      {(e.agents ?? []).length > 0 && (
+                      {entryAgents(e).length > 0 && (
                         <span className="flex items-center gap-1">
-                          <Icon name="network" size={11} /> {(e.agents ?? []).map(agentLabel).join(", ")}
+                          <Icon name="network" size={11} /> {entryAgents(e).map(agentLabel).join(", ")}
                         </span>
                       )}
                       <span className={cn("font-mono uppercase tracking-[0.08em]", e.success ? "text-ok-ink" : "text-bad-ink")}>{e.success ? "concluída" : "falhou"}</span>

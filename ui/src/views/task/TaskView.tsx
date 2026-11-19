@@ -37,7 +37,7 @@ type Card = { title?: string; text?: string; icon?: string; request?: string };
 
 const iconOr = (name: unknown, fallback: IconName): IconName => (typeof name === "string" && name in ICONS ? (name as IconName) : fallback);
 
-export function TaskView({ dev }: { go?: (page: "brain" | "you" | "harness") => void; dev?: DevMode } = {}) {
+export function TaskView({ dev }: { dev?: DevMode } = {}) {
   const s = useTask();
   const [prefill, setPrefill] = useState<{ text: string; at: number } | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -55,27 +55,26 @@ export function TaskView({ dev }: { go?: (page: "brain" | "you" | "harness") => 
     return (
       <div className="chat-font h-full overflow-y-auto px-6">
         {/* Centralizado, um pouco abaixo do meio: o olho cai na caixa de pedido, nao no topo da janela */}
-        <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col justify-center pb-12 pt-[16vh]">
-          <div className="photo-ink mx-auto mb-8 text-center">
-            <h1 className="text-[34px] font-semibold leading-[1.15] tracking-[-0.03em] text-fg">{(devOn && dev?.greeting) || "Você é o criador, eu apenas executo."}</h1>
+        <div className="chat-landing mx-auto flex min-h-full w-full flex-col justify-center">
+          <div className="chat-intro photo-ink mx-auto text-center" data-wallpaper-safe>
+            <h1 className="text-fg">{(devOn && dev?.greeting) || "Você é o criador, eu apenas executo."}</h1>
             <p className="photo-ink-muted mx-auto mt-2.5 max-w-lg text-[15px] text-fg-muted">
-              {(devOn && dev?.hint) || "Peça em linguagem natural. O Maestro escolhe o agente e executa no seu computador."}
+              {(devOn && dev?.hint) || "Descreva o que precisa. O Maestro organiza os próximos passos."}
             </p>
           </div>
           <div>
-            <Composer running={false} onSubmit={(t, o) => startTask(t, o)} autoFocus prefill={prefill} placeholder="Ex.: crie uma planilha de vendas do trimestre e abra no Excel" />
+            <Composer home running={false} onSubmit={(t, o) => startTask(t, o)} autoFocus prefill={prefill} placeholder="Escreva um pedido ou digite / para selecionar um agente" />
           </div>
-          <div className="mt-6 flex flex-wrap justify-center gap-2">
+          <div className="chat-examples mt-5 flex flex-wrap justify-center gap-2">
             {[
               ...shortcuts.map((x) => ({ icon: iconOr(x.icon, "sparkle"), text: x.label || x.request!, request: x.request! })),
               ...SUGGESTIONS.map((x) => ({ icon: x.icon, text: x.text, request: x.text })),
-            ].map((x, i) => (
+            ].map((x) => (
               <button
                 key={x.text}
                 type="button"
                 onClick={() => setPrefill({ text: x.request, at: Date.now() })}
-                style={{ animationDelay: `calc(120ms + var(--stagger) * ${i})` }}
-                className="surface animate-pop press motion-fast inline-flex h-8 items-center gap-2 rounded-full px-3.5 text-[13px] text-fg transition-[background-color,transform] hover:-translate-y-px hover:bg-glass-hi"
+                className="press motion-fast inline-flex min-h-8 items-center gap-2 rounded-full px-3.5 text-[13px] text-fg transition-[background-color,transform] hover:-translate-y-px hover:bg-glass-hi"
               >
                 <Icon name={x.icon} size={14} className="text-fg-muted" />
                 {x.text}

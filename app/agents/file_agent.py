@@ -246,6 +246,8 @@ def _category_hint(task: str) -> str:
 class FileAgent(BaseAgent):
     """Agente sysadmin com skills + safety gates + validacao."""
 
+    max_tokens = 8000
+
     def __init__(self):
         super().__init__(name="FILE", system_prompt=BASE_PROMPT)
 
@@ -322,10 +324,26 @@ class FileAgent(BaseAgent):
 
     # ── Internos ──────────────────────────────────────────────────
 
+    def plan_lab(self, task, workspace, instructions="", context=""):
+        """Usa o planejador FILE apenas com o contexto sintético e a raiz do caso."""
+        self._allowed_roots = [str(workspace)]
+        self._allow_delete = False
+        if instructions:
+            self.system_prompt += "\n\nInstruções da variante:\n" + instructions[:700]
+        prompt = (task + "\nUse {ws} como raiz literal em todos os caminhos. "
+                  "Use apenas os nomes da tarefa e da fixture.")
+        if context:
+            prompt += "\nReferência sintética do caso:\n" + context
+        result = self._call_and_validate(prompt, None, lab_root=workspace)
+        if not result["ok"] and not result["reason"].startswith("chamada LLM"):
+            result = self._call_and_validate(prompt, result["reason"], lab_root=workspace)
+        return {"steps": result.get("steps", []), "error": result["reason"]}
+
     def _call_and_validate(self, user_input: str,
-                           retry_feedback: Optional[str]) -> dict:
+                           retry_feedback: Optional[str], *, lab_root=None) -> dict:
         from agents.base_agent import brain_guide
-        message = f"TAREFA: {user_input}{brain_guide('FILE', user_input)}\nJSON puro."
+        guide = brain_guide("FILE", user_input) if lab_root is None else ""
+        message = f"TAREFA: {user_input}{guide}\nJSON puro."
         if retry_feedback:
             message = (
                 f"TAREFA: {user_input}\n\n"
@@ -338,20 +356,34 @@ class FileAgent(BaseAgent):
                 model=self.model,
                 system=self.system_prompt,
                 user_content=message,
-                max_tokens=8000,
+                max_tokens=self.max_tokens,
                 effort=self.effort,
                 agent=self.name,
             )
             plan = safe_parse(raw, self.model)
         except Exception as e:
-            return {"ok": False, "reason": f"chamada LLM falhou: {e}"}
+            reason = str(e) if lab_root is None else type(e).__name__
+            return {"ok": False, "reason": f"chamada LLM falhou: {reason}"}
 
-        steps_raw = plan.get("steps", [])
+        steps_raw = plan.get("steps", []) if isinstance(plan, dict) else []
         if not steps_raw:
             return {"ok": False, "reason": NO_FILE_OPERATION}
 
         from core.file_contracts import validate
+        if lab_root is not None and isinstance(steps_raw, list):
+            for step in steps_raw:
+                params = step.get("params") if isinstance(step, dict) else None
+                if not isinstance(params, dict):
+                    continue
+                for key in ("path", "source", "destination"):
+                    value = params.get(key)
+                    if isinstance(value, str) and (value == "{ws}" or value.startswith(("{ws}/", "{ws}\\"))):
+                        params[key] = str(lab_root) + value[4:]
         error = validate(steps_raw, self._allowed_roots, self._allow_delete)
+        if lab_root is not None and error:
+            error = error.replace(str(lab_root), "{ws}")
+            if "fora do escopo" in error:
+                error = "O plano tentou usar um caminho fora de {ws}."
         if error:
             return {"ok": False, "reason": error}
         steps = [{**step, "step": i, "agent": "FILE"} for i, step in enumerate(steps_raw, 1)]

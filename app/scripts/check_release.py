@@ -23,7 +23,7 @@ def source_digest():
     digest = hashlib.sha256()
     for base in ('agents', 'core', 'desktop', 'scripts', 'tests'):
         for path in sorted((APP / base).rglob('*')):
-            if path.is_file() and path.suffix == '.py':
+            if path.is_file() and path.suffix in ('.py', '.ps1'):
                 digest.update(path.relative_to(APP).as_posix().encode())
                 digest.update(path.read_bytes())
     for path in (REPO / 'config.yaml', APP / 'main.py', APP / 'requirements.txt',
@@ -68,7 +68,9 @@ def main():
     logs = APP / 'memory' / 'release-check'
     logs.mkdir(parents=True, exist_ok=True)
     tmp = APP / 'memory' / 'test_tmp'; tmp.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, 'TMP': str(tmp), 'TEMP': str(tmp), 'PYTHONIOENCODING': 'utf-8'}
+    env = {**os.environ, 'TMP': str(tmp), 'TEMP': str(tmp), 'PYTHONIOENCODING': 'utf-8',
+           # registro de acoes dos testes fora do logs/actions.jsonl real (core/action_logger.py)
+           'CREATIVE_AIX_ACTION_LOG': str(tmp / 'actions.jsonl')}
     report = {'schema': 1, 'python': sys.version.split()[0], 'source_digest': source_digest(), 'checks': []}
     commands = [
         ('dependencies', [sys.executable, '-m', 'pip', 'check']),
@@ -82,7 +84,10 @@ def main():
         started = time.monotonic()
         with (logs / (name + '.txt')).open('w', encoding='utf-8') as log:
             try:
-                process = subprocess.run(command, cwd=REPO, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=300)
+                # A suíte completa já se aproxima de cinco minutos em máquinas ocupadas.
+                # Mantém um limite finito sem interromper regressões válidas por disputa de CPU.
+                timeout = 600 if name == 'regressions' else 300
+                process = subprocess.run(command, cwd=REPO, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
                 passed, code = process.returncode == 0, process.returncode
             except subprocess.TimeoutExpired:
                 passed, code = False, 'timeout'
@@ -125,7 +130,7 @@ def main():
     token = re.compile(r'sk-ant-[A-Za-z0-9_\-]{24,}')
     for relative in candidates:
         path = REPO / relative
-        if not relative or not path.is_file() or path.suffix.lower() not in ('.py', '.md', '.json', '.yaml', '.yml', '.txt', '.example', '.env'):
+        if not relative or not path.is_file() or path.suffix.lower() not in ('.py', '.ps1', '.js', '.mjs', '.ts', '.tsx', '.css', '.html', '.md', '.json', '.yaml', '.yml', '.txt', '.example', '.env'):
             continue
         if path.stat().st_size > 2 * 1024 * 1024:
             continue

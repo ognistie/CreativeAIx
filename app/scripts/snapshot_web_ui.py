@@ -22,9 +22,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --disable-logging --log-level=3")
 os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-snapshot-not-a-real-key")
 
-LABELS = {"task": "Nova conversa", "history": "Histórico", "activity": "Atividade", "brain": "Cérebro", "you": "Você",
-          "journal": "Diário", "library": "Biblioteca", "lab": "AI Research Lab", "harness": "Harness",
-          "settings": "Configurações", "about": "Sobre"}
+LABELS = {"task": "Nova conversa", "history": "Histórico", "activity": "Atividade", "brain": "Cérebro",
+          "journal": "Diário", "library": "Biblioteca", "lab": "AI Research Lab",
+          "settings": "Configurações"}
 
 
 def main() -> int:

@@ -94,7 +94,12 @@ export class CoreClient {
   }
 
   /** Chama um metodo do nucleo. Espera a conexao abrir (ate openTimeoutMs). */
-  async call<M extends MethodName>(method: M, ...args: Methods[M][0]): Promise<Methods[M][1]> {
+  call<M extends MethodName>(method: M, ...args: Methods[M][0]): Promise<Methods[M][1]> {
+    return this.callWithin(this.callTimeoutMs, method, ...args);
+  }
+
+  /** Como `call`, com prazo proprio: dialogos do Windows esperam a pessoa escolher (minutos, nao 30 s). */
+  async callWithin<M extends MethodName>(timeoutMs: number, method: M, ...args: Methods[M][0]): Promise<Methods[M][1]> {
     await this.whenOpen();
     const socket = this.socket;
     if (!socket || socket.readyState !== OPEN) throw new CoreError("nucleo desconectado");
@@ -103,7 +108,7 @@ export class CoreClient {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new CoreError(`${method}: sem resposta do nucleo`));
-      }, this.callTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       socket.send(JSON.stringify({ jsonrpc: "2.0", id, method, params: args }));
     });

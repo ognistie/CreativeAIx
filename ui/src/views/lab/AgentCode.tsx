@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { DevProposals } from "../../components/DevProposals";
-import { Button, Field, GlassPanel, Icon, Skeleton, Spinner } from "../../components/ui";
+import { Button, Field, Icon, Skeleton, Spinner } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { core } from "../../lib/host";
 import { call, type Spec } from "./types";
@@ -13,7 +13,9 @@ export function AgentCode({ agent, name, files }: { agent: string; name: string;
   const own = files.filter((f) => !f.shared);
   const shared = files.filter((f) => f.shared);
   const [path, setPath] = useState(own[0]?.path ?? files[0]?.path ?? "");
-  const [text, setText] = useState<string | null>(null);
+  const [opened, setOpened] = useState(() => path ? [path] : []);
+  const [source, setSource] = useState<{ path: string; text: string } | null>(null);
+  const text = source?.path === path ? source.text : null;
   const [error, setError] = useState("");
   const [find, setFind] = useState("");
   const [codeOn, setCodeOn] = useState<boolean | null>(null);
@@ -21,10 +23,16 @@ export function AgentCode({ agent, name, files }: { agent: string; name: string;
 
   useEffect(() => {
     if (!path) return;
-    setText(null);
+    let active = true;
     setError("");
-    void call(core().call("studioSource", agent, path)).then((r) => (r.ok ? setText((r.file as { text: string }).text) : setError(r.error || "Não deu para abrir.")));
+    void call(core().call("studioSource", agent, path)).then((r) => {
+      if (!active) return;
+      if (r.ok) setSource({ path, text: (r.file as { text: string }).text });
+      else setError(r.error || "Não deu para abrir.");
+    });
+    return () => { active = false; };
   }, [agent, path]);
+
 
   useEffect(() => {
     void call(core().call("harnessGet")).then((r) => r.ok && setCodeOn(!!(r.harness as { dev?: { code_changes?: boolean } }).dev?.code_changes));
@@ -45,24 +53,42 @@ export function AgentCode({ agent, name, files }: { agent: string; name: string;
 
   const context = `[Agente ${name}] Arquivos principais: ${own.map((f) => f.path).join(", ")}.`;
 
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-4 xl:grid-cols-[250px_minmax(0,1fr)] [&>*]:min-w-0">
-        <GlassPanel className="p-3">
-          <FileGroup title="Deste agente" files={own} path={path} onPick={setPath} />
-          {shared.length > 0 && <FileGroup title="Compartilhados" files={shared} path={path} onPick={setPath} />}
-        </GlassPanel>
+  const openFile = (file: string) => {
+    setOpened((tabs) => tabs.includes(file) ? tabs : [...tabs, file]);
+    setPath(file);
+  };
+  const closeFile = (file: string) => {
+    const index = opened.indexOf(file);
+    const next = opened.filter((item) => item !== file);
+    setOpened(next);
+    if (path === file) setPath(next[Math.min(index, next.length - 1)] ?? "");
+  };
 
-        <GlassPanel className="min-w-0 overflow-hidden p-0">
+  return (
+    <div className="code-workbench">
+      <div className="code-layout">
+        <nav aria-label="Explorador de arquivos do agente" className="code-files">
+          <h3 className="mb-2 px-2 text-sm font-semibold text-fg">Explorador</h3>
+          <FileGroup title="Deste agente" files={own} path={path} onPick={openFile} />
+          {shared.length > 0 && <FileGroup title="Compartilhados" files={shared} path={path} onPick={openFile} />}
+        </nav>
+
+        <div className="code-document">
+          <div className="code-filetabs" aria-label="Arquivos abertos">
+            {opened.map((file) => <div key={file} data-active={path === file}>
+              <button type="button" title={file} aria-current={path === file ? "true" : undefined} onClick={() => setPath(file)}>{file.split("/").at(-1)}</button>
+              <button type="button" aria-label={`Fechar ${file.split("/").at(-1)}`} onClick={() => closeFile(file)}><Icon name="x" size={12} /></button>
+            </div>)}
+          </div>
           <div className="flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-2.5">
             <Icon name="file" size={14} className="text-fg-muted" />
-            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-fg">app/{path}</span>
+            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-fg">{path ? `app/${path}` : "Nenhum arquivo aberto"}</span>
             <span className="flex items-center gap-1 rounded-full bg-chip px-2 py-0.5 text-xs text-fg-muted">
               <Icon name="lock" size={11} /> Só leitura
             </span>
             <Field value={find} onChange={(e) => setFind(e.target.value)} placeholder="Destacar no arquivo" aria-label="Destacar texto no arquivo" className="h-7 w-48 text-xs" />
           </div>
-          {error ? (
+          {!path ? <p className="p-5 text-sm text-fg-muted">Escolha um arquivo no Explorador.</p> : error ? (
             <p className="p-4 text-sm text-bad-ink">{error}</p>
           ) : text === null ? (
             <div className="space-y-2 p-4">
@@ -71,15 +97,15 @@ export function AgentCode({ agent, name, files }: { agent: string; name: string;
               ))}
             </div>
           ) : (
-            <CodeView text={text} find={find} />
+            <CodeView key={path} text={text} find={find} />
           )}
-        </GlassPanel>
+        </div>
       </div>
 
-      <GlassPanel className="p-5">
-        <h3 className="flex items-center gap-2 text-md font-semibold text-fg">
-          <Icon name="code" size={16} className="text-fg-muted" /> Mudar o código de {name}
-        </h3>
+      <details className="code-proposals">
+        <summary className="cursor-pointer text-md font-semibold text-fg">
+          Propor alteração em {name}
+        </summary>
         <p className="mt-1 max-w-3xl text-sm text-fg-muted">
           Descreva a mudança. O Claude Code ou o Codex trabalha numa cópia separada do projeto; você lê o diff, roda os testes (gate) e só então aplica. Dá
           para desfazer depois.
@@ -101,7 +127,7 @@ export function AgentCode({ agent, name, files }: { agent: string; name: string;
             </div>
           )}
         </div>
-      </GlassPanel>
+      </details>
     </div>
   );
 }
@@ -173,6 +199,7 @@ function highlight(line: string): React.ReactNode[] {
 
 const CodeView = memo(function CodeView({ text, find }: { text: string; find: string }) {
   const lines = useMemo(() => text.split("\n"), [text]);
+  const highlighted = useMemo(() => lines.map(highlight), [lines]);
   const q = find.trim().toLowerCase();
   const hits = useMemo(() => (q.length >= 2 ? lines.reduce((n, l) => n + (l.toLowerCase().includes(q) ? 1 : 0), 0) : 0), [lines, q]);
   return (
@@ -186,7 +213,7 @@ const CodeView = memo(function CodeView({ text, find }: { text: string; find: st
               <span aria-hidden className="w-12 shrink-0 select-none pr-3 text-right tabular-nums text-fg-subtle/70">
                 {i + 1}
               </span>
-              <code className="whitespace-pre pr-6">{highlight(l)}</code>
+              <code className="whitespace-pre pr-6">{highlighted[i]}</code>
             </div>
           );
         })}
