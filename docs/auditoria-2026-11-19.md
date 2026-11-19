@@ -38,6 +38,8 @@ Objetivo: consolidar uma versão na `main` para testes internos autorizados. Nã
 | YouTube no navegador Windows | Abertura em perfil separado e leitura local de título, URL e texto aprovadas |
 | Histórico | Recusa real de uma URL proibida registrada como falha, com erro e agente |
 | Haiku real | Código sintético 4826 identificado em 4,08 s, uma chamada; custo estimado pelo app: US$ 0,000168 |
+| Claude Code real | Sessão Claude.ai confirmada; arquivo Markdown sintético criado em 14,3 s; custo informado pela CLI: US$ 0,0625087 |
+| Ciclo de proposta real | Gate completo aprovado, aplicação, build, conteúdo conferido em disco, reversão e novo build aprovados; arquivo removido após desfazer |
 | Arquivos candidatos ao Git | Sem arquivos de estado pessoal ou nomes com caracteres de controle; padrões encontrados eram fixtures sintéticas de testes |
 
 As provas de interface e desktop utilizaram dados e perfis separados. Capturas, relatórios de execução,
@@ -46,10 +48,12 @@ O catálogo removido de imagens e as mudanças visuais existentes foram preserva
 
 ## Limites e pendências externas
 
-- Claude Code: a CLI foi localizada na instalação do Claude Desktop, mas a consulta de autenticação
-  retornou sessão não conectada. A proposta real foi interrompida antes de qualquer geração paga.
-  Ainda falta repetir proposta, verificação, aplicação e reversão reais após o login. Os testes locais
-  do ciclo de propostas passaram; não substituem essa prova com o provedor.
+- Claude Code: pendência de autenticação resolvida após o login. O fluxo real foi concluído em uma
+  cópia independente da revisão `2e17ca4`, usando somente `ui/src/dev/ValidacaoInterna.md` e sem consulta
+  ao Cérebro pessoal. A primeira pasta de teste excedeu o limite de comprimento de caminho do Windows;
+  a mesma worktree foi movida para um caminho curto e revalidada, preservando a proposta e seu snapshot.
+  A verificação reprovada bloqueou a aplicação; após o gate aprovado, aplicação e reversão passaram.
+  O custo estimado acumulado das provas Haiku + Claude Code foi US$ 0,0626767, dentro dos US$ 0,50 autorizados.
 - Voz humana: microfone e transcrição local capturaram áudio. A frase reconhecida foi
   `Abra computadora.`; o sistema pediu esclarecimento e não executou. Isso comprova captura e recusa
   de uma tarefa não entendida, mas não aprova reconhecimento correto nem execução completa por voz.
@@ -69,5 +73,5 @@ Mantida a separação entre React, Bridge tipado, servidor local autenticado, Co
 e políticas de execução em código. Novas preferências não ampliam permissões de ações. Dados de páginas,
 notas e ferramentas continuam sem autoridade para alterar essas políticas.
 
-Para a próxima validação: concluir a autenticação do agente externo, repetir a voz com a configuração
-normal e medir reconhecimento, execução, interrupções e memória em uma conversa representativa.
+Para a próxima validação: repetir a voz com a configuração normal e medir reconhecimento, execução,
+interrupções e memória em uma conversa representativa.
