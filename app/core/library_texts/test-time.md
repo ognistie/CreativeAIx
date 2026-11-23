@@ -183,7 +183,7 @@ O registro de tarefas, `app/core/task_ledger.py`, complementa isso com um evento
 
 ### Verificação como custo
 
-O supervisor visual, em `app/agents/vision_maestro.py`, mostra que verificar também é computação em teste. Cada verificação antes ou depois de uma ação de tela custa uma captura e uma chamada ao modelo, com esforço baixo definido no `config.yaml`. Para não pagar isso onde não precisa, o código mantém listas de ações que pulam a verificação visual, como escrever ou ler arquivo, cujo efeito é conferido de outro jeito. A decisão de onde verificar é uma decisão de orçamento.
+Verificar também é computação em teste. No Creative AIx, a conferência barata vem primeiro: a árvore de acessibilidade diz se a janela ou a página mudou, e o disco diz se o arquivo foi gravado. A captura de tela com chamada ao modelo fica para quando não há outro jeito, como achar um elemento que a acessibilidade não expõe ou responder o que aparece na tela. Um supervisor visual que pagava uma captura e uma chamada antes e depois de cada ação foi aposentado por isso. A decisão de onde verificar é uma decisão de orçamento.
 
 ### Medir no AI Research Lab e nos scripts
 

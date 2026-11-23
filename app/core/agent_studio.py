@@ -29,7 +29,7 @@ AGENTS = ("MAESTRO", "WEB", "DESKTOP", "CODE", "DATA", "FILE", "EXTCODE")
 AGENT_FILES = {
     "MAESTRO": ["agents/maestro.py", "core/plan_validator.py", "core/routing.py"],
     "WEB": ["agents/web_agent.py", "core/browser_pilot.py", "core/browser_uia.py"],
-    "DESKTOP": ["agents/desktop_agent.py", "agents/app_routines.py", "core/app_pilot.py", "core/uia_driver.py"],
+    "DESKTOP": ["agents/desktop_agent.py", "core/app_pilot.py", "core/uia_driver.py"],
     "CODE": ["agents/code_agent.py", "agents/code_planner.py", "agents/code_prompts.py", "agents/code_skills.py",
              "agents/code_validators.py"],
     "DATA": ["agents/data_agent.py", "agents/artifact_planner.py", "core/artifact_builder.py"],

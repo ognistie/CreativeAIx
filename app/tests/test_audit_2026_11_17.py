@@ -1,4 +1,4 @@
-"""Correcoes da auditoria de 2026-11-17 (docs/auditoria-2026-11-17.md), cada uma com o caso real."""
+"""Correcoes da auditoria interna de 2026-11-17, cada uma com o caso real."""
 
 import asyncio
 import json

@@ -77,7 +77,6 @@ DEFAULTS = {
     # Agentes → modelos
     "agent_models": {
         "maestro": "strong",
-        "vision_maestro": "fast",
         "vision": "fast",
         "narrator": "fast",
         "planner": "fast",
@@ -94,7 +93,6 @@ DEFAULTS = {
     # Agentes → esforco de raciocinio (output_config.effort)
     "agent_effort": {
         "maestro": "low",
-        "vision_maestro": "low",
         "vision": "low",
         "narrator": "low",
         "planner": "medium",

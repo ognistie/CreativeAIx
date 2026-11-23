@@ -10,7 +10,6 @@ models:
 
 agent_models:
   maestro: strong
-  vision_maestro: fast
   vision: fast
   narrator: fast
   planner: fast
@@ -27,7 +26,6 @@ agent_models:
 # low = roteamento/respostas curtas, medium = planos simples, high = codigo.
 agent_effort:
   maestro: low
-  vision_maestro: low
   vision: low
   narrator: low
   planner: medium
