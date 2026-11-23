@@ -1,6 +1,6 @@
 # Arquitetura do Creative AIx
 
-Estado em 2026-11-15 (versão `0.1.0-internal`). Um app só: `python app/main.py`.
+Estado em 2026-11-19 (versão `0.1.0-internal`). Um app só: `python app/main.py`.
 
 ## Visão geral
 
@@ -19,8 +19,8 @@ python.exe (Qt / PySide6)
 
 ## Fluxo de um pedido
 
-1. **Interface** (`ui/src`) chama `executeTask` pelo WebSocket. Fala transcrita chega como evento `voiceCommand` e a
-   interface chama o mesmo método.
+1. **Interface** (`ui/src`) chama `executeTask` pelo WebSocket para pedidos digitados. A voz chama o Controller
+   diretamente; o evento `voiceCommand` apresenta a execução já aceita, sem uma segunda chamada da interface.
 2. **Controller** resolve a conversa (`core/followup.py`: continuação, resposta a pergunta pendente, pedido novo),
    tenta atalhos sem modelo (`existing_targets`, `extcode_agent`, `vault_plan`, `continue_plan`) e só então o Maestro.
 3. **Políticas em código** validam o plano antes de qualquer ação (`core/plan_validator.py`, `action_policy.py`,
@@ -55,11 +55,14 @@ inteira só se o alvo não estiver nela. Pedidos de salvar/fechar num editor abe
 
 ## Estado e memória
 
+A integração entre conversa, visão, resultados e seus limites está em [voice.md](voice.md).
+
 | O quê | Onde | Observação |
 | --- | --- | --- |
 | Conversa (pedidos, alvos abertos, pergunta pendente) | `core/session.py` | `context_block()` = últimos 6 pedidos detalhados + `done_log()` com tudo o que foi feito |
 | Histórico de execuções | `desktop/data/history.jsonl` | ignorado pelo git |
 | Segundo cérebro | `vault/` (fábrica) + `Documentos/AI Farm Agent` (pessoal) | `core/brain_store.py`; escrita só na camada pessoal |
+| Planos aprendidos | `memory/learned_plans.json` | `core/learned_plans.py`: um tipo de pedido com 3 sucessos seguidos e o mesmo plano passa a rodar sem chamar o Maestro; uma falha rebaixa o molde e duas o bloqueiam; políticas e porta de efeitos valem sempre; `learning.autopilot` desliga |
 | Preferências e Harness | `core/user_settings.py`, `core/harness.py` | validados por esquema |
 | Aparência | `app/design/theme.json` → `ui/src/styles/tokens.css` | contraste AA conferido no gate |
 | Papéis de parede gerativos | `ui/src/lib/scenes.ts`, `lib/wallpaper/` | cena → buffer → estilo; ver [wallpapers.md](wallpapers.md) |

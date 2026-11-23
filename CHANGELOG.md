@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Learned plans (bounded self-improvement).** A request type that succeeds three times in a row with the same plan is planned without calling the Maestro model from then on (`app/core/learned_plans.py`). A failure demotes the template, two block it, and a change to the Maestro prompt or plan policies makes every template stale. Only routing is learned: plan validation, per-agent tool policy and the effect gate run on every execution. Local state, personal data redacted; `learning.autopilot: false` turns it off.
+- **Model-free shortcuts** for opening a folder, a Windows Settings page and searching on an explicitly named site (Google, YouTube).
+- **Offline agent scenario bench** (`app/scripts/bench_agents_offline.py`, locked by `tests/test_agent_scenarios.py`) and a **budget-capped live evaluation** (`app/scripts/eval_agents_live.py --allow-paid --usd N`) that only plans, never executes.
+- The mini chat shows plan review and effect confirmation (Confirm/Cancel and "open full window").
+
+### Fixed
+- **Actions nobody asked for.** A comment such as "legal, ficou bom" could become a task (the conversation resolver had no chat kind); a pending question captured any utterance for three minutes (TV, status questions, unrelated remarks); Enter in an app field without an accessible name and Delete/Shift+Delete were not treated as effects; calls, sign-out, block/report and follow/like were not effect kinds.
+- **Hangs.** Stop now aborts the in-flight model call and a per-call deadline applies; plan-provided waits are capped at 30 s and honor Stop; an inactivity watchdog ends a task with no progress for 5 minutes (waiting for the person does not count); the pilots' clock pauses while waiting for confirmation; voice speaks the confirmation code and understands it in digits or words.
+- A click that happened but did not change the page is no longer retried; writing into a document already open requires the resolver to point at it; Maestro dependency indices are remapped when a redundant subtask is removed; voice dedupe ignores case, accents and punctuation.
+
+### Removed
+- Unused `agents/vision_maestro.py` (per-action screenshot supervisor that failed open and proposed corrective steps) and the outdated `agents/app_routines.py` (superseded by `desktop_agent._build_steps`).
+- Dated internal audit notes from `docs/`; their fixes are covered by regression tests.
+
+---
+
 ## [0.1.0-internal] — 2026-11-15 (first version for authorized internal testers; not public)
 
 ### Changed
