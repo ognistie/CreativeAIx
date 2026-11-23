@@ -31,6 +31,9 @@ def continue_target_for(session, agent: str, params: dict, target: Optional[str]
         from core.lexicon import get_lexicon
         key = get_lexicon().app_key(params["app"])
         tgt = session.target(f"app:{key}") if key else None
-        if tgt and not WANTS_NEW.search((task or "").lower()):
+        # Escrever num documento aberto so quando o interprete disse que a fala continua nele: "abre o bloco
+        # de notas e escreve X" escrevia no documento da conversa (talvez editado pela pessoa) em vez de um novo
+        writes = bool(params.get("text") or params.get("message")) or             str(params.get("action_type") or "").lower() in ("write_text", "send_message", "type", "paste")
+        if tgt and not WANTS_NEW.search((task or "").lower()) and (target or not writes):
             return tgt, "app já aberto"
     return None, ""

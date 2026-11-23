@@ -1034,7 +1034,19 @@ def test_voice_mode():
 
     class FakeCtrl:
         state = {"running": False}
-        session = None
+        _run_id = 0
+
+        def __init__(self):
+            self.session = Session()
+            self.session.save = lambda *args, **kwargs: None
+
+        def execute_task(self, task, dry_run=False, generate_report=False, *, source="text", heard="", session_id=None):
+            if session_id is not None and session_id != self.session.id:
+                return False
+            self._run_id += 1
+            bus.emit("voice_command", {"text": task, "heard": heard, "executing": True,
+                                      "run_id": self._run_id, "session_id": self.session.id})
+            return True
 
         def force_stop(self):
             got.append("STOP")
@@ -1045,8 +1057,9 @@ def test_voice_mode():
         def stop(self): pass
         def wait(self, timeout=0): pass
 
-    vc = VoiceController(FakeCtrl(), {})
-    vc.tts = MuteSpeaker()
+    from unittest.mock import patch as _patch
+    with _patch("core.voice.tts.create_speaker", return_value=MuteSpeaker()):
+        vc = VoiceController(FakeCtrl(), {})
     fake = lambda kind, **kw: (lambda h, c, ctx, rec: {"kind": kind, "command": kw.get("command", ""),
                                                        "reply": kw.get("reply", ""), "guess": kw.get("guess", "")})
     vc.handle_text("Abre o Bloco de Notas.", 0.9, understand_fn=fake("command", command="abrir o Bloco de Notas",
@@ -2227,6 +2240,15 @@ def test_voice_round4():
     class Ctrl:
         state = {"running": False}
         session = s3
+        _run_id = 0
+
+        def execute_task(self, task, dry_run=False, generate_report=False, *, source="text", heard="", session_id=None):
+            if session_id is not None and session_id != self.session.id:
+                return False
+            self._run_id += 1
+            bus.emit("voice_command", {"text": task, "heard": heard, "executing": True,
+                                      "run_id": self._run_id, "session_id": self.session.id})
+            return True
 
         def voice_hint(self, text, hint):
             hints[text] = hint
@@ -2239,8 +2261,10 @@ def test_voice_round4():
         def speak(self, t): said.append(t)
         def stop(self): pass
 
-    vc = VoiceController(Ctrl(), {"progress_after_s": 0.2})
-    vc.tts = Mute()
+    from unittest.mock import patch as _patch
+    Ctrl.session.save = lambda *args, **kwargs: None
+    with _patch("core.voice.tts.create_speaker", return_value=Mute()):
+        vc = VoiceController(Ctrl(), {"progress_after_s": 0.2})
     fake = lambda d: (lambda h, c, ctx, rec: d)
     vc.handle_text("coloca cem na b2", 0.9, understand_fn=fake({"kind": "command", "command": "colocar 100 na B2 do Excel",
                                                                   "target": "app:excel", "reply": "Colocando 100 na B2.",
@@ -2606,7 +2630,8 @@ def test_latency_round5():
     check("historico guarda o tempo de IA (total e por agente)",
           d["llm_ms"] == 2500 and d["by_agent"]["MAESTRO"]["ms"] == 2500)
     import inspect
-    src = inspect.getsource(Controller._run)
+    # _run prepara o cancelamento e o vigia; o corpo da execucao fica em _run_inner
+    src = inspect.getsource(getattr(Controller, "_run_inner", Controller._run))
     check("historico guarda o tempo por fase", all(f'lap("{p}")' in src for p in ("resolve", "maestro", "agent_plan", "steps")))
     check("resposta ao usuario sai antes de gravar no Obsidian",
           src.index("self._after_turn(said, task, turn, entry") < src.index("self._brain.finish("))
@@ -2803,7 +2828,7 @@ def test_round6_conversation_memory_vault():
     import inspect
     from desktop.controller import Controller
     check("falha registra o passo que falhou de verdade",
-          "Passo que falhou" in inspect.getsource(Controller._run))
+          "Passo que falhou" in inspect.getsource(Controller._run_inner))
     from agents.memory_agent import MemoryAgent
     m = MemoryAgent.__new__(MemoryAgent)
     check("memoria nao guarda prompt de teste/debug ('test', 'debug') mas guarda 'testes unitarios'",
@@ -2889,7 +2914,7 @@ def test_round7_fluid_conversation():
     check("uma chamada com o conteudo como DADO", ans == "Entraram R$ 5.000." and "DADO" in seen["sy"]
           and "<conteudo_do_arquivo>" in seen["us"])
     from desktop.controller import Controller
-    run_src = inspect.getsource(Controller._run)
+    run_src = inspect.getsource(Controller._run_inner)
     check("controller responde lendo o arquivo ANTES de planejar",
           run_src.index("artifact_qa.wants_answer") < run_src.index("continue_plan(")
           < run_src.index("self.maestro.analyze("))
@@ -3039,7 +3064,7 @@ def test_round8_spreadsheet_reader():
     src = inspect.getsource(Q._default_llm)
     check("limite de resposta folgado (o raciocinio nao come a resposta)", "max_tokens=4000" in src)
     from desktop.controller import Controller
-    run = inspect.getsource(Controller._run)
+    run = inspect.getsource(Controller._run_inner)
     blk = run[run.index("artifact_qa.wants_answer"):run.index("continue_plan(")]
     check("arquivo lido sem resposta: avisa e PARA (nao cai no piloto que le a tela)",
           "não consegui montar a resposta" in blk and blk.count("return") >= 2)
@@ -3182,7 +3207,7 @@ def test_round9_brain_speed_app():
         real = f.name
     check("anexo: so arquivo que existe entra na conversa",
           ctl.attach_files([real, "C:/nao/existe.xlsx"]) == [real] and ctl.session.files == [real])
-    run_src = inspect.getsource(Controller._run)
+    run_src = inspect.getsource(Controller._run_inner)
     check("revisao do plano: espera aprovacao so em pedido digitado, com tempo limite",
           'self._emit("plan_review"' in run_src and "not from_voice" in run_src
           and "self._plan_gate.wait(180)" in run_src)

@@ -23,7 +23,7 @@ class ExchangeTests(unittest.TestCase):
         v._on_assistant(reply)
         v._on_done({})
         v._on_assistant(reply)
-        v._say.assert_called_once_with(reply['text'],purpose='reply')
+        v._say.assert_called_once_with(reply['text'],show=False,purpose='reply')
         self.assertFalse(v._expect_reply)
 
     def test_finished_before_reply_does_not_lose_reply(self):

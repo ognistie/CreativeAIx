@@ -691,30 +691,29 @@ class ControllerTests(unittest.TestCase):
         v._conv_turn('pode abrir a rede aurora', self.understood('command', command='abrir o cofre Rede Aurora no Obsidian'))
         v._enqueue.assert_called_once_with('abrir o cofre Rede Aurora no Obsidian', 'pode abrir a rede aurora')
 
-    def test_cut_request_runs_when_model_also_took_it_as_a_request(self):
-        # Sessao real: "... Rede Aurora" -> o modelo disse "deixa comigo" e nada aconteceu
+    def test_cut_request_stays_unclear_even_when_model_delegates(self):
         v = self.voice()
         v._conv_delegated('item_5')
         v._conv_turn('Rede Aurora', self.understood('unclear', guess='abrir o cofre Rede Aurora no Obsidian'))
-        v._enqueue.assert_called_once_with('abrir o cofre Rede Aurora no Obsidian', 'Rede Aurora')
-        self.assertEqual(v._delegations['abrir o cofre Rede Aurora no Obsidian'], 'item_5')
+        v._enqueue.assert_not_called()
+        self.assertEqual(v._pending_guess, 'abrir o cofre Rede Aurora no Obsidian')
 
-    def test_delegation_arriving_after_the_doubt_runs_the_guess(self):
+    def test_late_delegation_cannot_confirm_the_users_guess(self):
         v = self.voice()
         v._conv_turn('Rede Aurora', self.understood('unclear', guess='abrir o cofre Rede Aurora no Obsidian'))
         v._enqueue.assert_not_called()
         v._conv_delegated('item_6')
-        v._enqueue.assert_called_once()
-        self.assertEqual(v._pending_guess, '')
+        v._enqueue.assert_not_called()
+        self.assertEqual(v._pending_guess, 'abrir o cofre Rede Aurora no Obsidian')
 
-    def test_model_promising_action_on_a_guess_runs_it(self):
+    def test_model_promising_action_cannot_authorize_a_guess(self):
         v = self.voice()
         v._say = Mock()
         with patch('desktop.voice.bus'):
             v._conv_turn('Rede Aurora', self.understood('unclear', guess='abrir o cofre Rede Aurora no Obsidian'))
             v._conv_agent_turn('Deixa comigo.', False)
-        v._enqueue.assert_called_once()
-        v._say.assert_not_called()               # nao ha o que corrigir: a tarefa foi pedida
+        v._enqueue.assert_not_called()
+        self.assertEqual(v._pending_guess, 'abrir o cofre Rede Aurora no Obsidian')
 
     def test_settings_guard_stays_closed_even_if_the_model_delegates(self):
         # A guarda nao deixa palpite: uma delegacao sozinha nao abre as Configuracoes

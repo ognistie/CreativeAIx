@@ -145,7 +145,7 @@ def validate_plan(task: str, plan: dict) -> Validation:
             from core.action_risk import KINDS, requested, _norm as _risk_norm
             said_effect = _risk_norm(sub.get("task", "") + (" enviar" if params.get("action_type") == "send_message" else ""))
             for kind, pattern in KINDS:
-                if kind in ("enviar", "publicar", "comprar", "pagar", "transferir") \
+                if kind in ("enviar", "publicar", "comprar", "pagar", "transferir", "ligar", "conta", "bloquear") \
                         and re.search(pattern, said_effect) and not requested(kind, task):
                     v.add("POL-009", f"o pedido nao manda {kind}; nao acrescente esse efeito "
                                      f"(faca so o que foi pedido e deixe {kind} para a pessoa)", i)

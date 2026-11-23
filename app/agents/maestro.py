@@ -93,7 +93,10 @@ PROMPT = (
     "3. text='' se usuario nao pediu para escrever\n"
     "4. Formato ENXUTO: analysis curto (ate 6 palavras); em cada subtask so agent, task, params e\n"
     "   depends_on; skills no fim. Nada alem disso (cada token atrasa a resposta).\n"
-    "5. PROIBIDO acoplar CODE + DESKTOP notepad/word com o codigo gerado.\n"
+    "5. ESCREVER numa conversa ou campo NAO e ENVIAR: 'escreve oi na conversa' → action_type='write_text'\n"
+    "   (digita e para). Use action_type='send_message' e o verbo enviar na task SO quando o pedido\n"
+    "   disser enviar/mandar/responder. Enviar e decisao da pessoa (politica POL-009).\n"
+    "6. PROIBIDO acoplar CODE + DESKTOP notepad/word com o codigo gerado.\n"
     "   Se voce roteou para CODE, o CODE ja cria os arquivos e abre o\n"
     "   VS Code. NUNCA crie uma subtask DESKTOP escrevendo o HTML/python\n"
     "   no notepad/word como 'visualizacao'. Isso confunde o usuario.\n\n"
@@ -303,6 +306,62 @@ def fast_open_plan(task: str, continue_in: str = "", *, lexicon=None) -> Optiona
             "subtasks": [sub], "skills": [], "fast_path": "abrir"}
 
 
+# ── Atalhos sem IA: pasta, Configuracoes e pesquisa num site citado ─────
+# O DesktopAgent ja abre pastas e paginas das Configuracoes sem modelo, e o WebAgent ja monta a pesquisa: so o
+# roteamento passava pelo Maestro (uma chamada por pedido). Pedido composto ("... e ...") continua no Maestro.
+_JUST_OPEN = re.compile(r"^(?:abr[aei]|abrir|abre ai|entr[ae] (?:na|nas|no)|vai (?:na|nas|no|pra|para)|acess[ae])\b")
+_SEARCH_ON = re.compile(r"^(?:pesquis|procur|busc)\w*(?:\s+(?:por|sobre))?\s+(?P<q>.{2,120}?)\s+"
+                        r"(?:no|na)\s+(?P<site>google|youtube)$")
+
+
+def _compound(t: str) -> bool:
+    return bool(re.search(r"\s(?:e|depois|entao|tambem)\s", t) or "," in t)
+
+
+def fast_system_plan(task: str, continue_in: str = "") -> Optional[dict]:
+    """'abre a pasta downloads' / 'abre as configuracoes de bluetooth' -> DESKTOP, sem modelo."""
+    if continue_in:
+        return None
+    try:
+        from core.lexicon import norm
+        from core.paths import is_open_folder_request
+        from agents.desktop_agent import _SETTINGS, _SETTINGS_ACT
+        t = norm(task).strip(" .!?")
+        if not _JUST_OPEN.match(t) or _compound(t) or _SETTINGS_ACT.search(t.split(" ", 1)[-1]):
+            return None
+        if _SETTINGS.search(t):
+            what = "abrir as Configurações do Windows"
+        elif is_open_folder_request(task):
+            what = "abrir a pasta"
+        else:
+            return None
+    except Exception:
+        return None
+    return {"analysis": f"{what.capitalize()} (atalho, sem IA)", "skills": [], "fast_path": "abrir",
+            "subtasks": [{"agent": "DESKTOP", "task": task, "original_task": task,
+                          "params": {"action_type": "open"}}]}
+
+
+def fast_search_plan(task: str, continue_in: str = "") -> Optional[dict]:
+    """'pesquisa receita de bolo no google' -> WEB com o termo, sem modelo. Sem site citado o Maestro decide
+    (pode ser dentro do site aberto, numa loja, no Spotify...)."""
+    if continue_in:
+        return None
+    try:
+        from core.lexicon import norm
+        m = _SEARCH_ON.match(norm(task).strip(" .!?"))
+        if not m or _compound(m.group("q")):
+            return None
+        from core.learned_plans import _find_original
+        query = _find_original(task, m.group("q")) or m.group("q")
+    except Exception:
+        return None
+    site = "YouTube" if m.group("site") == "youtube" else "Google"
+    return {"analysis": f"Pesquisar no {site} (atalho, sem IA)", "skills": [], "fast_path": "pesquisar",
+            "subtasks": [{"agent": "WEB", "task": f"pesquisar {query} no {site}", "original_task": task,
+                          "params": {"query": query}}]}
+
+
 # ── Atalho sem IA: continuar no que esta aberto ───────────────────────
 # "clica em Area de Trabalho", "pausa o video", "volta para a tela anterior" com o app/aba
 # aberto: o alvo da conversa ja diz qual agente age. Criar/escrever conteudo, resumir ou
@@ -389,9 +448,10 @@ class Maestro:
                 "subtasks": [],
             }
 
-        # "abrir <app/site>": plano direto do dicionario, sem chamar o modelo.
-        # Passa pelas mesmas politicas de aceite que um plano do LLM.
-        fast = fast_open_plan(task, continue_in)
+        # "abrir <app/site>", "abre a pasta X", "abre as configuracoes de Y", "pesquisa X no Google": plano direto,
+        # sem chamar o modelo. Passa pelas mesmas politicas de aceite que um plano do LLM.
+        fast = fast_open_plan(task, continue_in) or fast_system_plan(task, continue_in) \
+            or fast_search_plan(task, continue_in)
         if fast:
             from core.plan_validator import validate_plan
             check = validate_plan(task, fast)
@@ -562,7 +622,8 @@ class Maestro:
             if has_code:
                 filtered = []
                 removed = 0
-                for s in subs:
+                index_map: dict = {}     # numero antigo (1..n) -> novo, para remapear depends_on
+                for old_n, s in enumerate(subs, start=1):
                     agent = (s.get("agent") or "").upper()
                     if agent == "DESKTOP":
                         p = s.get("params", {}) or {}
@@ -582,8 +643,14 @@ class Maestro:
                             removed += 1
                             continue
                     filtered.append(s)
+                    index_map[old_n] = len(filtered)
                 if removed:
                     print(f"[Maestro] Removido(s) {removed} subtask(s) DESKTOP redundante(s) acoplada(s) ao CODE")
+                    for s in filtered:
+                        dep = s.get("depends_on")
+                        if isinstance(dep, int) and not isinstance(dep, bool):
+                            # dependia de uma removida: fica sem dependencia (a removida so mostrava o codigo)
+                            s["depends_on"] = index_map.get(dep)
                     plan["subtasks"] = filtered
 
             print(f"[Maestro] {len(plan['subtasks'])} subtask(s)")

@@ -166,14 +166,14 @@ export function App() {
   useCoreEvent("sessionReset", refreshConversations);
   useCoreEvent("historyChanged", refreshSuggestions);
 
-  // Fala transcrita (modo Conversa, gravacao, atalho de voz) vira pedido, como se tivesse sido digitada. O nucleo
-  // so publica o voiceCommand; quem executa e a tela (era o onVoiceCommand do app anterior e tinha ficado de fora).
+  // A voz é executada pelo núcleo. A interface só acompanha a tarefa já aceita.
   const onVoiceCommand = useCallback((p: unknown) => {
-    const v = (p ?? {}) as { text?: string; heard?: string };
+    const v = (p ?? {}) as { text?: string; heard?: string; executing?: boolean };
     const text = (v.text ?? "").trim();
-    if (!text || taskStore.get().busy) return;
+    if (!text || (taskStore.get().busy && !v.executing)) return;
     setPage("task");
-    startTask(text, { dryRun: false, report: false }, v.heard || "");
+    if (v.executing) dispatchTask({ type: "start", text, heard: v.heard, dryRun: false, now: Date.now() });
+    else startTask(text, { dryRun: false, report: false }, v.heard || "");
   }, []);
   useCoreEvent("voiceCommand", onVoiceCommand);
   // Confirmacao de efeito (enviar, pagar, excluir): a conversa vem para a frente, mesmo minimizada

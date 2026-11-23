@@ -114,7 +114,10 @@ class ScreenQuestions(unittest.TestCase):
             c._run("você está vendo o YouTube?", False, False, 1)
         c.maestro.analyze.assert_not_called()
         c.engine.execute.assert_not_called()
-        self.assertIn(("answer", {"msg": "Sim, o YouTube está aberto."}), events)
+        observed = next(payload for name, payload in events if name == "answer")
+        self.assertEqual(observed["msg"], "Sim, o YouTube está aberto.")
+        self.assertTrue(observed["observation"]["ok"])
+        self.assertEqual(observed["observation"]["confidence"], 0.95)
 
 
 if __name__ == "__main__":

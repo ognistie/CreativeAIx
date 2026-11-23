@@ -42,8 +42,14 @@ NO_SCREENSHOT = {
 RETRY_ACTIONS = {"vision_click", "uia_click", "browser_click"}
 
 
+def should_retry(action: str, result: dict, dry_run: bool = False) -> bool:
+    """Repete um clique uma vez so quando o alvo nem foi achado ("❌"). Um clique que aconteceu e so nao mudou a
+    pagina ("⚠️ ... sem efeito") nao repete: Curtir/Seguir alternariam duas vezes."""
+    return (not result.get("success", True) and action in RETRY_ACTIONS and not dry_run
+            and str(result.get("result", "")).lstrip().startswith("❌"))
+
+
 MAX_TASK_LENGTH = 2000
-TASK_TIMEOUT_S = 120
 
 
 # Parametros do plano que carregam CONTEUDO do usuario (o que "a mesma mensagem" retoma)
@@ -171,30 +177,43 @@ class Controller:
     # ──────────────────────────────────────────────────────────────────
 
     def execute_task(self, task: str, dry_run: bool = False,
-                     generate_report: bool = True) -> None:
+                     generate_report: bool = True, *, source: str = "text", heard: str = "",
+                     session_id: Optional[str] = None) -> bool:
         """Dispara execucao em thread separada."""
         task = (task or "").strip()
         if not task:
             bus.emit("error", {"msg": "Tarefa vazia."})
-            return
+            return False
         if len(task) > MAX_TASK_LENGTH:
             bus.emit("error",
                      {"msg": f"Tarefa muito longa (max {MAX_TASK_LENGTH} chars)."})
-            return
+            return False
         with self._lock:
+            if session_id is not None and self.session.id != session_id:
+                return False
             if self.state["running"]:
-                bus.emit("error", {"msg": "Ja existe uma execucao em andamento."})
-                return
+                if source != "voice":
+                    stopping = self._cancel_event.is_set()
+                    bus.emit("error", {"msg": "Ainda estou parando a tarefa anterior. Tente de novo em alguns segundos."
+                                       if stopping else "Ja existe uma execucao em andamento."})
+                return False
             self.state["running"] = True
             self.state["task"] = task[:200]          # a tela Atividade mostra o que esta rodando
             self._cancel_event.clear()
             self._run_id += 1
             run_id = self._run_id
 
-        threading.Thread(
-            target=self._run, args=(task, dry_run, generate_report, run_id),
-            daemon=True,
-        ).start()
+        if source == "voice":
+            # A interface observa; a execução não depende de uma chamada de volta do React.
+            bus.emit("voice_command", {"text": task, "heard": heard, "executing": True,
+                                       "run_id": run_id, "session_id": self.session.id})
+
+        def run():
+            self._tls.voice = source == "voice"
+            self._run(task, dry_run, generate_report, run_id)
+
+        threading.Thread(target=run, daemon=True).start()
+        return True
 
     def voice_hint(self, text: str, hint: dict) -> None:
         """A voz avisa como o pedido foi entendido (kind/target) antes de envia-lo a tela."""
@@ -205,10 +224,10 @@ class Controller:
         with self._lock:
             if self.state["running"]:
                 return
-        with self._session_lock:
-            self.session.reset()
-            self.session.remember_active("")
-        bus.emit("session_reset", {"session": self.session.id})
+            with self._session_lock:
+                self.session.reset()
+                self.session.remember_active("")
+            bus.emit("session_reset", {"session": self.session.id})
 
     # ── conversas salvas ─────────────────────────────────────────────
     def list_conversations(self) -> list:
@@ -218,17 +237,17 @@ class Controller:
     def open_conversation(self, sid: str) -> Optional[dict]:
         """Retoma uma conversa salva: o historico volta para a tela e o contexto
         (pedidos, respostas, o que ainda estiver aberto) volta para o agente."""
-        with self._lock:
-            if self.state["running"]:
-                return None
         from core.session import Session
         data = Session.read_saved(sid)
         if not data:
             return None
-        with self._session_lock:
-            self.session.load(data)
-            self.session.remember_active(sid)
-        bus.emit("session_reset", {"session": self.session.id, "loaded": True})
+        with self._lock:
+            if self.state["running"]:
+                return None
+            with self._session_lock:
+                self.session.load(data)
+                self.session.remember_active(sid)
+            bus.emit("session_reset", {"session": self.session.id, "loaded": True})
         return data
 
     def _record_turn(self, said: str, task: str, turn: dict, entry: dict):
@@ -276,6 +295,13 @@ class Controller:
                             if self.session.id == reply_session_id else ""
                 elif err.startswith("limitation"):
                     reply = err.split(":", 1)[-1].strip()
+                elif turn.get("voice") and kind != "cancel":
+                    # O GPT-Live já conversa e formula a fala: recebe o resultado diretamente,
+                    # sem outra chamada ao modelo apenas para reescrever a mesma informação.
+                    reply = str(turn.get("say") or turn.get("summary") or err or "A execução não retornou detalhes.")
+                    bus.emit("assistant_message", {"said": said, "text": reply, "speak": True,
+                             "success": bool(entry.get("success")), "verified": bool(entry.get("verified")),
+                             "run_id": reply_run_id, "session_id": reply_session_id, "source": "executor"})
                 elif kind != "cancel" and turn.get("say"):
                     # O piloto ja escreveu a frase para o usuario no ultimo turno: sai na hora,
                     # sem mais uma chamada de IA (~1,5 s antes da resposta falada)
@@ -416,6 +442,7 @@ class Controller:
 
     def _emit(self, event: str, payload: Any = None) -> None:
         if self._is_current():
+            self._touch()                  # qualquer evento da tarefa conta como avanco para o vigia
             bus.emit(event, payload)
 
     def _log(self, level: str, agent: str, msg: str,
@@ -505,6 +532,59 @@ class Controller:
     def _run(self, task: str, dry_run: bool, gen_report: bool,
              run_id: int = 0) -> None:
         self._tls.run_id = run_id or self._run_id
+        # Parar (ou o vigia) interrompe tambem a chamada ao modelo em andamento nesta thread
+        from core.ai_client import bind_cancel
+        bind_cancel(lambda: not self._alive())
+        self._touch()
+        self._start_watchdog(self._tls.run_id)
+        try:
+            self._run_inner(task, dry_run, gen_report, run_id)
+        except Exception as error:
+            # Falha antes do try interno (registro, metricas): a tarefa termina com erro em vez de deixar o app
+            # "ocupado" para sempre
+            self._emit("error", {"msg": f"Falha ao iniciar a tarefa: {type(error).__name__}: {error}"})
+            self._emit("execution_finished", {"success": False, "status": "failed"})
+        finally:
+            bind_cancel(None)
+            with self._lock:
+                if self._is_current():
+                    self.state["running"] = False
+
+    # Tarefa sem nenhum avanco (passo, andamento do piloto, texto do modelo) por esse tempo e interrompida.
+    # Esperas pela pessoa (revisao do plano, confirmacao de efeito) nao contam.
+    IDLE_LIMIT_S = 300
+
+    def _touch(self) -> None:
+        self._last_activity = time.monotonic()
+
+    def _start_watchdog(self, run_id: int) -> None:
+        limit = float(self._config.get("execution.idle_limit_s", self.IDLE_LIMIT_S) or self.IDLE_LIMIT_S) \
+            if getattr(self, "_config", None) else self.IDLE_LIMIT_S
+
+        def watch():
+            while True:
+                time.sleep(2)
+                with self._lock:
+                    if not self.state.get("running") or self._run_id != run_id or self._cancel_event.is_set():
+                        return
+                    waiting_person = bool(getattr(self, "_plan_token", ""))
+                if waiting_person:
+                    self._touch()
+                    continue
+                idle = time.monotonic() - getattr(self, "_last_activity", time.monotonic())
+                if idle > limit:
+                    with self._lock:
+                        if self._run_id != run_id or not self.state.get("running"):
+                            return
+                        self._watchdog_fired = run_id
+                        self._cancel_event.set()
+                        self._plan_gate.set()
+                    bus.emit("cancelled", {"msg": f"Parei: a tarefa ficou {idle:.0f} s sem avançar."})
+                    return
+        threading.Thread(target=watch, daemon=True, name="task-watchdog").start()
+
+    def _run_inner(self, task: str, dry_run: bool, gen_report: bool,
+                   run_id: int = 0) -> None:
         all_success = True
         task_start = time.time()
         metrics_before = self._ai_client.metrics
@@ -513,12 +593,14 @@ class Controller:
         # So observa: falhar aqui nao muda o resultado da execucao.
         from core.task_ledger import get_ledger
         ledger, task_id = get_ledger(), entry["id"]
-        self._ledger_call(ledger.begin, task_id, task, source="voz" if task.strip() in self._voice_hints else "texto",
+        voice_source = getattr(self._tls, "voice", False) is True
+        self._ledger_call(ledger.begin, task_id, task, source="voz" if voice_source or task.strip() in self._voice_hints else "texto",
                           dry_run=dry_run, session_id=self.session.id)
         brain_plan = None
         all_records: list = []
         said = task
         turn = {"kind": "new", "agents": [], "summary": "", "recorded": False, "content": ""}
+        turn["voice"] = voice_source
         entry["session_id"] = self.session.id
         # Onde o tempo foi (ms por fase): base para medir latencia (scripts/latency_report.py)
         timing = {"resolve": 0, "maestro": 0, "agent_plan": 0, "steps": 0}
@@ -538,7 +620,8 @@ class Controller:
             # Conversa: "agora abra esse segundo video" vira um pedido
             # completo, apontando para o que ficou aberto antes.
             from core.followup import from_hint, resolve
-            from_voice = said.strip() in self._voice_hints
+            # So a origem real conta: um texto digitado igual a uma dica de voz recente pulava a revisao do plano
+            from_voice = voice_source
             res = from_hint(said, self.session, self._voice_hints.pop(said.strip(), None)) \
                 or resolve(said, self.session)
             self._emit_usage()
@@ -560,7 +643,8 @@ class Controller:
                 from core.screen_question import answer as look_answer
                 seen = look_answer(said, getattr(self.engine, "vision", None))
                 self._emit_usage()
-                self._emit("answer", {"msg": seen["answer"]})
+                self._emit("answer", {"msg": seen["answer"], "observation": seen,
+                                      "run_id": self._tls.run_id, "session_id": self.session.id})
                 entry["subtasks"] = [{"agent": "VISION", "task": "olhar a tela e responder"}]
                 turn["kind"] = "question"
                 turn["summary"] = seen["answer"]
@@ -652,10 +736,20 @@ class Controller:
                 self._log("INFO", "EXTCODE", ext_plan["note"])
                 route_task, ext_plan = ext_plan["reroute"], None
                 self._emit("resolved", {"said": said, "task": route_task, "kind": kind, "target": target or ""})
+            # Planos aprendidos: pedido novo, sem depender da conversa, cujo molde ja deu certo varias vezes com o
+            # mesmo plano -> executa o plano sem chamar o Maestro (core/learned_plans.py). Validado como um do modelo.
+            from core.learned_plans import get_learned
+            learnable = kind == "new" and res.get("via") != "pending" and not dry_run
             plan = vault_plan(route_task) or existing_plan(route_task, self.session) \
                 or ext_plan \
                 or continue_plan(route_task, kind, target, self.session) \
+                or (get_learned().plan_for(route_task) if learnable else None) \
                 or self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
+            if plan.get("learned_key"):
+                self._log("INFO", "MAESTRO", plan.get("analysis", "Plano aprendido"))
+            # Copia do plano como saiu do planejador (a execucao acrescenta alvos de continuacao aos params)
+            import copy as _copy
+            learn_source = _copy.deepcopy(plan) if learnable else None
             self._emit_usage()
             lap("maestro")
             maestro_skills = self._brain.last_skills.pop("MAESTRO", [])
@@ -908,9 +1002,9 @@ class Controller:
                     result = self.engine.execute(action, params, dry_run=dry_run)
 
                     # Retry para acoes visuais
-                    if (not result.get("success", True)
-                            and action in RETRY_ACTIONS and not dry_run
-                            and not str(result.get("result", "")).startswith("⛔")):
+                    # So repete quando o alvo nem foi achado ("❌"): um clique que aconteceu e so nao mudou a pagina
+                    # ("⚠️ ... sem efeito") clicaria de novo (Curtir/Seguir alternavam duas vezes)
+                    if should_retry(action, result, dry_run):
                         self._ledger_call(ledger.step_retry, task_id, step_n, action)
                         time.sleep(2)
                         result = self.engine.execute(action, params, dry_run=dry_run)
@@ -1032,6 +1126,20 @@ class Controller:
                 except Exception as mem_err:
                     self._log("WARN", "MEMORY", f"Falha ao registrar rota: {mem_err}")
 
+            # Auto-aperfeicoamento: o resultado ensina (ou desensina) o molde deste tipo de pedido. So planos do Maestro
+            # ou ja aprendidos; atalhos sem IA nao precisam. Passo pulado na revisao nao conta como sucesso do plano.
+            if learn_source is not None and all_records and not skipped_steps \
+                    and (learn_source.get("learned_key") or not learn_source.get("fast_path")):
+                try:
+                    status = get_learned().observe(task, learn_source, all_success)
+                    entry["learned"] = bool(learn_source.get("learned_key"))
+                    if status == "promoted" and not learn_source.get("learned_key"):
+                        self._log("INFO", "MEMORY", "Aprendi este tipo de pedido: das próximas vezes, sem chamar a IA")
+                    elif status in ("candidate", "blocked") and learn_source.get("learned_key"):
+                        self._log("WARN", "MEMORY", "O plano aprendido falhou; volto a planejar com a IA")
+                except Exception as learn_err:
+                    self._log("WARN", "MEMORY", f"Aprendizado não registrado: {type(learn_err).__name__}")
+
             # NB: o registro de execucoes vive em desktop/history_store.py
             # (gravado no finally desta funcao). Aprendizado de rotas vive
             # em memory/workflow_store v6.
@@ -1072,7 +1180,9 @@ class Controller:
         finally:
             try:
                 if self._cancel_event.is_set():
-                    entry.update(success=False, status="cancelled", error="cancelado pelo usuario")
+                    idle = getattr(self, "_watchdog_fired", None) == self._tls.run_id
+                    entry.update(success=False, status="cancelled",
+                                 error="parado: a tarefa ficou sem avançar" if idle else "cancelado pelo usuario")
                 entry["verified"] = bool(all_records) and entry.get("success") is True and all(
                     r.get("verified") is True for r in all_records)
                 # Conversa: este pedido vira contexto do proximo (mesmo se falhou) e ja fica gravado

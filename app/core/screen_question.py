@@ -19,6 +19,7 @@ A voz (core/voice/understand.py) nunca responde "de cabeca" a uma pergunta sobre
 from __future__ import annotations
 
 import re
+import time
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -43,14 +44,21 @@ _VAGUE = {"", "tela", "isso", "isto", "aquilo", "algo", "alguma coisa", "nada", 
 _VISUAL = re.compile(r"\b(?:botao|botoes|video|imagem|imagens|foto|fotos|icone|icones|cor|cores|grafico|erro|"
                      r"aviso|mensagem|popup|janela|menu|cursor|mouse|seta|logo|desenho|tocando|pausado|carregando)\b")
 _WORD_STOP = {"o", "a", "os", "as", "de", "do", "da", "dos", "das", "e", "no", "na", "um", "uma", "site", "app", "pagina"}
+_POINTING = re.compile(r"\bvendo\s+(?:(?:ai|ali|aqui)\b|(?:esse|essa|isso|este|esta)\b|(?:o\s+)?endereco\b)")
+_DETAIL = re.compile(r"\b(?:endereco|telefone|email|contato|preco|valor|numero|horario)\b")
+_READING = re.compile(r"^(?:e\s+)?(?:qual|quais|que|quanto|leia|le|me\s+(?:diga|diz|leia|mostra))\b")
+_ON_SCREEN = re.compile(r"\b(?:na\s+tela|nesse\s+resultado|nessa\s+pagina|ali|ai|aqui|visivel|aparecendo)\b")
 
 LOCAL = "local"
 
 
-def is_screen_question(text: str) -> bool:
+def is_screen_question(text: str, *, visual_context: bool = False) -> bool:
     """A fala pergunta sobre o que esta na tela (e nao manda fazer nada)."""
     n = norm(text or "")
-    return bool(_SCREEN.search(n)) and not _ACT.search(n.split("tela", 1)[-1] if "tela" in n else n)
+    looking = bool(_SCREEN.search(n) or _POINTING.search(n))
+    reading = bool(_READING.search(n) and _DETAIL.search(n) and (visual_context or _ON_SCREEN.search(n)))
+    which = bool(_WHICH.search(n) and re.search(r"\b(?:abert[oa]|frente|tela|agora)\b", n))
+    return (looking or reading or which) and not _ACT.search(n)
 
 
 def presence_target(question: str) -> str:
@@ -101,7 +109,7 @@ def local_answer(question: str, state: Optional[dict]) -> Optional[dict]:
             return _local(f"Sim, estou vendo {target}: na frente está {front}.", front, 0.95)
         if body and all(w in body for w in words):
             return _local(f"Sim, {target} aparece na janela da frente ({front}).", front, 0.85)
-        if _VISUAL.search(norm(target)):
+        if _VISUAL.search(norm(target)) or _DETAIL.search(norm(target)):
             return None            # "ta vendo esse botao?": so a imagem diz
         return _local(f"Não estou vendo {target}. Na frente está {front}.", front, 0.8)
     if _WHICH.search(n):
@@ -110,7 +118,8 @@ def local_answer(question: str, state: Optional[dict]) -> Optional[dict]:
 
 
 def _local(text: str, seen: str, confidence: float) -> dict:
-    return {"ok": True, "answer": text, "seen": seen, "confidence": confidence, "via": LOCAL}
+    return {"ok": True, "answer": text, "seen": seen, "confidence": confidence, "via": LOCAL,
+            "observed_at": time.time()}
 
 
 def answer(question: str, vision=None) -> dict:
@@ -134,6 +143,8 @@ def answer(question: str, vision=None) -> dict:
         if local is not None:
             return local
         result = vision.look(question, context=state) if state else vision.look(question)
+    except Exception:
+        return {"ok": False, "answer": "Não consegui consultar a tela agora. Pode tentar de novo?", "seen": ""}
     finally:
         try:
             vision.restore_browser()
@@ -150,6 +161,7 @@ def answer(question: str, vision=None) -> dict:
     except (TypeError, ValueError):
         confidence = None
     out = {"ok": True, "answer": text, "seen": seen, "via": str(result.get("model") or "vision")}
+    out.update(confidence=confidence, observed_at=time.time())
     out["answer"] = confident_answer(out, confidence)
     return out
 

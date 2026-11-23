@@ -151,10 +151,11 @@ class AppPilot:
                     "result": f"A janela \"{title[:50]}\" foi fechada."}
         last_sig, repeats = None, 0
         deadline = time.time() + MAX_SECONDS
+        self._paused = 0.0       # tempo esperando a confirmacao da pessoa: nao conta no prazo
         for turn in range(1, self.max_turns + 1):
             if self.should_stop():
                 return {"ok": False, "status": "cancelled", "turns": turn - 1, "trail": trail, "result": "Cancelado."}
-            if time.time() > deadline:
+            if time.time() - getattr(self, "_paused", 0.0) > deadline:
                 return {"ok": False, "status": "fail", "turns": turn - 1, "trail": trail,
                         "result": f"Passou de {MAX_SECONDS} s sem concluir; parei para não travar a conversa."}
             from core.automation import _bring_to_front, _is_front
@@ -170,6 +171,7 @@ class AppPilot:
             if _shell_surface(hwnd) or re.search(r'\b(cmd|powershell|terminal|command prompt)\b', snap.title, re.I):
                 return {'ok': False, 'status': 'ask_user', 'turns': turn - 1, 'trail': trail,
                         'result': 'Execucao por terminal exige controle manual.'}
+            self._window = snap.title
             page = snap.render().replace("PAGINA VISIVEL", "JANELA VISIVEL").replace("URL: \n", "")
             if not snap.elements:
                 page += "\n(o app quase não expõe elementos: use vision_click descrevendo o alvo)"
@@ -210,8 +212,11 @@ class AppPilot:
         if self.authorize_ui is None:
             return False
         from core.action_risk import ui_risk
-        kind = ui_risk(act, label, submit=submit, key=key)
+        # Titulo da janela (lido do sistema) e campo sem nome contam: Enter no Slack/Teams envia
+        kind = ui_risk(act, label, submit=submit, key=key, window=getattr(self, "_window", ""), app=True)
+        waited = time.time()
         message = self.authorize_ui(kind, act, label) if kind else ""
+        self._paused = getattr(self, "_paused", 0.0) + (time.time() - waited if kind else 0.0)
         if message:
             raise NeedsConfirmation(message)
         return bool(kind)
@@ -317,6 +322,9 @@ class AppPilot:
             key = str(d.get("key") or d.get("text") or "enter").lower().replace(" ", "")
             if key in ("enter", "return", "ctrl+enter"):
                 check_enter(key)
+            elif key in ("delete", "del", "shift+delete", "shift+del"):
+                focus = B.focused_state()
+                self._check("press", focus[1] if focus else "", key=key)
             keys = [k for k in key.split("+") if k]
             pyautogui.hotkey(*keys) if len(keys) > 1 else pyautogui.press(keys[0] if keys else "enter")
             return ("janela mudou" if _changed(win, before, 1.5) else "ok"), f"press {key}"

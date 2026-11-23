@@ -45,14 +45,18 @@ def _build_steps(app, params):
         add("wait", {"seconds": 2}, "Aguardar")
         add("vision_click", {"description": "campo 'Digite uma mensagem' na PARTE INFERIOR DENTRO do Teams"}, "Focar")
         add("wait", {"seconds": 0.5}, "Aguardar")
-        if action_type in ("send_message", "") and message:
+        if action_type in ("send_message", "write_text", "") and message:
             add("type_text", {"text": message}, "Digitar")
-            add("wait", {"seconds": 1}, "Aguardar")
-            add("hotkey", {"keys": ["enter"], "effect": "enviar"}, "Enviar")
+            # Escrever nao e enviar: com action_type=write_text ("escreve oi na conversa") nao ha Enter. O envio
+            # (send_message, ou o formato antigo sem action_type) ainda passa pela porta de efeito
+            if action_type != "write_text":
+                add("wait", {"seconds": 1}, "Aguardar")
+                add("hotkey", {"keys": ["enter"], "effect": "enviar"}, "Enviar")
+        # "chamada de audio/video" na descricao: a porta de efeito pede confirmacao antes de ligar para alguem
         elif action_type == "call":
-            add("vision_click", {"description": "icone de telefone DENTRO do Teams"}, "Ligar")
+            add("vision_click", {"description": "botao de chamada de audio (icone de telefone) DENTRO do Teams"}, "Ligar")
         elif action_type == "video_call":
-            add("vision_click", {"description": "icone de camera DENTRO do Teams"}, "Video")
+            add("vision_click", {"description": "botao de chamada de video (icone de camera) DENTRO do Teams"}, "Video")
         add("hotkey", {"keys": ["escape"]}, "Limpar")
         return steps
 
@@ -72,7 +76,8 @@ def _build_steps(app, params):
         add("vision_click", {"description": "campo 'Digite uma mensagem' DENTRO do WhatsApp"}, "Focar")
         if message:
             add("type_text", {"text": message}, "Digitar")
-            add("hotkey", {"keys": ["enter"], "effect": "enviar"}, "Enviar")
+            if action_type != "write_text":
+                add("hotkey", {"keys": ["enter"], "effect": "enviar"}, "Enviar")
         return steps
 
     if app in ("notepad", "bloco de notas"):

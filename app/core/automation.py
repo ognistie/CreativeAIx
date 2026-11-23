@@ -541,12 +541,8 @@ class AutomationEngine:
             print("  UIA + InteractionLayer ativados")
         except Exception as e: print(f"  InteractionLayer: {e}")
 
-        # Retry Engine
-        self.retry = None
-        try:
-            from core.retry_engine import RetryEngine
-            self.retry = RetryEngine(self.il)
-        except: pass
+        # Repeticao: so cliques, uma vez, no controller (RETRY_ACTIONS). O RetryEngine (core/retry_engine.py) nao
+        # e usado no caminho de execucao: trocar a acao (MUTATE) poderia mudar o efeito pedido.
 
     def execute(self, action, params, dry_run=False):
         self.dry_run = dry_run
@@ -675,31 +671,22 @@ class AutomationEngine:
         title = p.get("title", "")
         timeout = p.get("timeout", 15)
         if self.dry_run: return f"[SIM] Aguardar: {title}"
-        try:
-            from core.wait_engine import wait_for_window
-            result = wait_for_window(title, timeout)
-            if result.get("success"):
-                return f"✅ {title} apareceu ({result.get('elapsed',0)}s)"
-            return f"❌ {result.get('error','Timeout')}"
-        except:
-            # Fallback: wait fixo
-            time.sleep(min(timeout, 5))
-            return f"⏳ Wait fixo {min(timeout,5)}s (wait_engine indisponivel)"
+        from core.wait_engine import wait_for_window
+        result = wait_for_window(title, timeout, should_stop=getattr(self, "should_stop", None))
+        if result.get("success"):
+            return f"✅ {title} apareceu ({result.get('elapsed',0)}s)"
+        return f"❌ {result.get('error','Timeout')}"
 
     def _wait_for_element(self, p):
         app_name = p.get("app_name", "")
         element = p.get("element", "")
         timeout = p.get("timeout", 10)
         if self.dry_run: return f"[SIM] Aguardar elemento: {element}"
-        try:
-            from core.wait_engine import wait_for_element
-            result = wait_for_element(app_name, element, timeout)
-            if result.get("success"):
-                return f"✅ {element} visivel ({result.get('elapsed',0)}s)"
-            return f"❌ {result.get('error','Timeout')}"
-        except:
-            time.sleep(min(timeout, 3))
-            return f"⏳ Wait fixo"
+        from core.wait_engine import wait_for_element
+        result = wait_for_element(app_name, element, timeout, should_stop=getattr(self, "should_stop", None))
+        if result.get("success"):
+            return f"✅ {element} visivel ({result.get('elapsed',0)}s)"
+        return f"❌ {result.get('error','Timeout')}"
 
     # === RUN PYTHON — o coração universal ===
     def _create_project(self, p):

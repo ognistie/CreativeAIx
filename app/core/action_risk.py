@@ -35,12 +35,20 @@ KINDS = (
     ("transferir", r"\b(?:transferir|transfere|transferencia|pix|enviar dinheiro|send money)\b"),
     ("excluir", r"\b(?:exclu(?:ir|a|i)|apag(?:ar|a|ue)|delet(?:ar|a|e)|delete|remov(?:er|a|e)|remove|descartar|"
                 r"discard|esvaziar lixeira|desinstal(?:ar|a|e)|uninstall|formatar)\b"),
-    ("publicar", r"\b(?:public(?:ar|a|que)|post(?:ar|a|e)|post|publish|tweetar|tweet|compartilhar publicamente|share)\b"),
+    # Seguir/curtir/compartilhar tambem aparecem para outras pessoas: contam como publicar
+    ("publicar", r"\b(?:public(?:ar|a|que)|post(?:ar|a|e)|post|publish|tweetar|tweet|compartilhar publicamente|share|"
+                 r"compartilh(?:ar|a|e)|repost(?:ar|a|e)?|retweet(?:ar)?|curt(?:ir|a|e)|like|reagir|follow)\b"),
     ("enviar", r"\b(?:envi(?:ar|a|e)|mand(?:ar|a|e)|send|responder a todos|reply all|encaminh(?:ar|a|e)|forward|"
-               r"submit|submeter)\b"),
+               r"submit|submeter|dispar(?:ar|a|e)|manda bala|joga (?:no|na|pro|pra) (?:grupo|chat|conversa))\b"),
+    # Chamada de voz/video para uma pessoa real
+    # "ligar o bluetooth" nao conta: so ligar PARA alguem (o botao "Ligar" sozinho e tratado em label_risk)
+    ("ligar", r"\b(?:(?:ligar|ligue|liga) (?:pro|pra|para)|ligacao|chamada(?: de (?:audio|video|voz))?|videochamada|"
+              r"video ?chamada|iniciar chamada|call|audio call|video call|start call|discar|dial)\b"),
+    ("conta", r"\b(?:sair da (?:sua )?conta|desconect(?:ar|e)|log ?out|sign out|encerrar (?:a )?sessao)\b"),
     # Inclui a tela de consentimento OAuth: "Permitir"/"Allow" entrega a conta a um app de terceiro
     ("aceitar", r"\b(?:aceito|aceitar|concordo|i agree|accept terms|aceitar os termos|assinar documento|sign|"
                 r"permitir|allow|autorizar|authorize|conceder acesso|grant access)\b"),
+    ("bloquear", r"\b(?:bloque(?:ar|ie|ia)|block|denunci(?:ar|e|a)|report)\b"),
 )
 # Campo onde Enter manda o texto para alguem
 _MESSAGE_FIELD = r"\b(?:mensagem|message|digite uma mensagem|type a message|comentario|comment|chat|resposta|reply|tweet|post)\b"
@@ -70,26 +78,40 @@ def label_risk(label: str) -> Optional[str]:
     for kind, pattern in KINDS:
         if re.search(pattern, text):
             return None if kind == "enviar" and re.search(_SEARCH_SUBMIT, text) else kind
+    # Botoes de uma palavra que, no pedido, seriam outra coisa ("ligar o bluetooth", "seguir as instrucoes")
+    if re.fullmatch(r"ligar(?: (?:agora|para .{1,40}|pra .{1,40}))?", text):
+        return "ligar"
+    if re.fullmatch(r"(?:seguir|siga)(?: (?:@?\S+|de volta|tambem))?", text):
+        return "publicar"
     return None
 
 
-def ui_risk(act: str, label: str = "", submit: bool = False, key: str = "", web: bool = False) -> Optional[str]:
+_DELETE_KEYS = ({"delete"}, {"del"}, {"shift", "delete"}, {"shift", "del"})
+
+
+def ui_risk(act: str, label: str = "", submit: bool = False, key: str = "", web: bool = False,
+            window: str = "", app: bool = False) -> Optional[str]:
     """Efeito de uma acao de piloto: clique, digitar com Enter, ou tecla.
 
     No navegador (web=True), digitar com Enter envia o formulario: conta como "enviar" em
     qualquer campo que nao seja busca ou endereco. O rotulo do campo nao e confiavel (o chat de
-    um webmail se chamava "Historico ativado" e o Enter mandou a mensagem sem passar por aqui)."""
+    um webmail se chamava "Historico ativado" e o Enter mandou a mensagem sem passar por aqui).
+    Num app (app=True), Enter envia numa janela de mensagem (pelo titulo, lido do sistema) e num campo
+    sem nome: apps Electron/WebView2 (Slack, Teams, Discord) nao dao nome ao campo de mensagem."""
     act = (act or "").lower()
     if act in ("click", "double_click", "vision_click"):
         return label_risk(label)
-    if act == "type" and submit and re.search(_MESSAGE_FIELD, _norm(label)):
+    pressed = set(norm_keys(key)) if key else set()
+    if act == "press" and pressed in _DELETE_KEYS:
+        return "excluir"
+    field = _norm(label)
+    messaging = bool(window) and bool(re.search(_MESSAGING_WINDOW, _norm(window)))
+    sends = (bool(re.search(_MESSAGE_FIELD, field)) or messaging or (app and not field.strip())
+             or (web and not _BROWSER_INPUT.fullmatch(field)))
+    if act == "type" and submit and sends:
         return "enviar"
-    if act == "type" and submit and web and not _BROWSER_INPUT.fullmatch(_norm(label)):
-        return "enviar"
-    enter = re.sub(r"\s", "", (key or "").lower()) in ("enter", "ctrl+enter", "return")
-    if act == "press" and enter and re.search(_MESSAGE_FIELD, _norm(label)):
-        return "enviar"
-    if act == "press" and enter and web and not _BROWSER_INPUT.fullmatch(_norm(label)):
+    enter = pressed in ({"enter"}, {"ctrl", "enter"})
+    if act == "press" and enter and sends:
         return "enviar"
     return None
 
@@ -117,6 +139,10 @@ def hotkey_risk(keys, window_title: str = "", effect: str = "") -> Optional[str]
     """Tecla que envia: Enter, Ctrl+Enter ou Alt+S num app de mensagem, ou um passo que a rotina
     marcou como envio (effect='enviar'). A marca so ACRESCENTA a porta; nunca a dispensa."""
     pressed = set(norm_keys(keys))
+    # Delete manda para a lixeira e Shift+Delete apaga de vez no Explorer: o titulo da janela nao diz se e o
+    # Explorer (no Win11 e so o nome da pasta), entao vale em qualquer janela
+    if pressed in _DELETE_KEYS:
+        return "excluir"
     if pressed not in ({"enter"}, {"ctrl", "enter"}, {"alt", "s"}):
         return None
     if effect == "enviar" or re.search(_MESSAGING_WINDOW, _norm(window_title)):
@@ -140,9 +166,9 @@ def step_risk(action: str, params: dict, window_title: str = "") -> Optional[str
 _CONFIRM_VERB = {"enviar": "enviar", "mandar": "enviar", "envia": "enviar", "manda": "enviar",
                  "comprar": "comprar", "compra": "comprar", "pagar": "pagar", "paga": "pagar",
                  "publicar": "publicar", "postar": "publicar", "excluir": "excluir", "apagar": "excluir",
-                 "transferir": "transferir"}
+                 "transferir": "transferir", "ligar": "ligar", "liga": "ligar"}
 _CONFIRM_SPECIFIC = r"\b(?:pode |sim,? (?:pode )?)(enviar|mandar|envia|manda|comprar|compra|pagar|paga|publicar|postar|" \
-                    r"excluir|apagar|transferir)\b"
+                    r"excluir|apagar|transferir|ligar|liga)\b"
 # "confirmo", "autorizo": genericas, so valem para o efeito que o proprio pedido cita
 _CONFIRM_GENERIC = r"\b(?:confirmo|confirmado|tenho certeza|sim,? pode|autorizo)\b"
 
@@ -206,6 +232,7 @@ def authorize(kind: Optional[str], *, task: str, agent: str, action: str, label:
 CONFIRM_MARK = "preciso da sua confirmação"
 _VERBS = {"pagar": "pagar", "comprar": "comprar", "transferir": "transferir", "excluir": "excluir",
           "publicar": "publicar", "enviar": "enviar", "aceitar": "aceitar",
+          "ligar": "fazer a chamada", "conta": "sair da conta", "bloquear": "bloquear ou denunciar",
           "navegar": "abrir o site"}
 
 
@@ -249,8 +276,15 @@ def effect_reply(text: str) -> Optional[bool]:
     return None
 
 
+_DIGIT_WORDS = {"zero": "0", "um": "1", "uma": "1", "dois": "2", "duas": "2", "tres": "3", "quatro": "4",
+                "cinco": "5", "seis": "6", "meia": "6", "sete": "7", "oito": "8", "nove": "9"}
+
+
 def spoken_effect_code(text: str) -> str:
-    match = re.fullmatch(r"confirmo ([0-9](?:[ .]?[0-9]){3,9})", _norm(text).rstrip("."))
+    """"confirmo 1001", "confirmo 1 0 0 1" ou "confirmo um zero zero um" -> "1001"."""
+    words = re.sub(r"[,;]", " ", _norm(text).rstrip(".")).split()
+    norm_text = " ".join(_DIGIT_WORDS.get(w, w) for w in words)
+    match = re.fullmatch(r"confirmo ([0-9](?:[ .]?[0-9]){3,9})", norm_text)
     return re.sub(r"[ .]", "", match[1]) if match else ""
 
 

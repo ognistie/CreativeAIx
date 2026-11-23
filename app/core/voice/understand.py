@@ -67,6 +67,8 @@ PERGUNTA PENDENTE (estado da conversa)
   fala como foi dita (o sistema junta com o pedido original). NUNCA transforme a resposta num pedido novo
   ("imagens" respondendo "clicar em qual aba?" não é "abrir a pasta Imagens").
 - Só é pedido novo se a pessoa disser claramente outra coisa completa ("na verdade, abre o Excel", "esquece").
+- Fala sem relação com a pergunta (comentário, "tá calor", conversa com outra pessoa, TV) NÃO é resposta:
+  noise no modo conversa ao vivo, chat fora dele. Pergunta da pessoa também não é resposta.
 
 EMBASAMENTO
 - Execute só o que a pessoa PEDIU. Uma palavra ou nome solto sem verbo ("imagens", "o segundo", "notícias")
@@ -350,7 +352,8 @@ _REQUEST_VERB = re.compile(r"^(?:abr\w*|abre|fech\w*|pesquis\w*|procur\w*|busc\w
                            r"respond\w*|marc\w*|agend\w*|lembr\w*|organiz\w*|mov\w*|renome\w*|instal\w*|execut\w*|rod\w*)\b")
 
 
-def _pending_answer(heard: str, fixed: str, session, persona, recent: list, confidence: float) -> Optional[dict]:
+def _pending_answer(heard: str, fixed: str, session, persona, recent: list, confidence: float,
+                    mode: str = "record") -> Optional[dict]:
     """Ha uma pergunta do assistente esperando resposta: a fala E a resposta, literal, para o controller juntar
     com o pedido original (core/followup.resolve, via "pending"). Sem modelo no meio: antes ele reescrevia
     "imagens" (resposta a "clicar em qual aba?") como "abrir a pasta Imagens" e o app abria a pasta errada."""
@@ -369,6 +372,19 @@ def _pending_answer(heard: str, fixed: str, session, persona, recent: list, conf
     if not n or _PENDING_ESCAPE.match(n):
         return None
     words = n.split()
+    # Pergunta, papo ou pedido de andamento nunca sao a resposta: o fluxo normal decide (antes "como esta o
+    # site?" e "obrigado" viravam resposta e o pedido original era refeito)
+    from core.followup import _ASKS, _CHAT, plausible_answer
+    from core.task_status import is_status_question
+    if _ASKS.search(norm(fixed)) or _CHAT.match(n) or is_status_question(fixed):
+        return None
+    # Sem cara de resposta ("to cansado hoje"): o modelo decide com a pergunta no contexto
+    if not plausible_answer(fixed, pending):
+        return None
+    # Conversa ao vivo: o microfone pega TV e conversa de fundo. So uma resposta curta ("imagens", "o segundo")
+    # pula o modelo; o resto passa pelo modelo, com a pergunta no contexto e a regra de ruido
+    if mode == "live" and len(words) > 2:
+        return None
     # Pedido novo e completo (verbo + varias palavras citando app/site): deixa o fluxo normal decidir
     if _REQUEST_VERB.match(n) and len(words) >= 4:
         try:
@@ -405,13 +421,14 @@ def understand(heard: str, stt_confidence: float = 1.0, context: str = "",
         say = persona.pick("what_open", recent) if re.match(r"^(?:abr|entr|vai|acess)", bare) \
             else persona.pick("not_heard", recent)
         return _result("unclear", fixed, "local", reply=say, guess="", confidence=stt_confidence)
-    answer = _pending_answer(heard, fixed, session, persona, recent, stt_confidence)
+    answer = _pending_answer(heard, fixed, session, persona, recent, stt_confidence, mode)
     if answer:
         return answer
     # Pergunta sobre a tela nunca e respondida "de cabeca" (o modelo de voz nao ve a tela): vira pedido e o
     # Vision olha (core/screen_question.py). Antes a voz podia dizer "sim, estou vendo" sem ter visto nada.
     from core.screen_question import is_screen_question
-    if is_screen_question(heard) or is_screen_question(fixed):
+    visual_context = bool(session.targets()) if session is not None else False
+    if is_screen_question(heard, visual_context=visual_context) or is_screen_question(fixed, visual_context=visual_context):
         return _result("command", fixed, "tela", command=fixed, reply=persona.pick("ack", recent),
                        confidence=stt_confidence)
     for fast in (_fast_vault(heard, fixed, stt_confidence, persona, recent),

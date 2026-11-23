@@ -25,7 +25,7 @@ from typing import Callable, Optional
 
 from core.session import Session
 
-KINDS = {"new", "continue", "question", "clarify", "undo", "cancel", "look"}
+KINDS = {"new", "continue", "question", "clarify", "undo", "cancel", "look", "chat"}
 
 _CANCEL = re.compile(r"^(?:para|pare|parar|cancela|cancelar|chega|esquece|stop)\b[\s.!]*$")
 _UNDO = re.compile(r"\b(?:desfa(?:z|ca|zer)|desfaz\w*|reverte\w*|volta(?:r)?\s+(?:como|ao\s+que)\s+(?:estava|era))\b")
@@ -45,11 +45,21 @@ _FOLLOW = re.compile(
     r"nao,|na verdade|quer dizer|qual era|quanto era|o que era|o que voce|"
     r"sim|pode|pode ser|manda|claro|quero)\b")
 
+# Elogio ou comentario sobre o resultado ("legal, ficou bom"): conversa, nunca pedido
+_PRAISE = (r"legal|bacana|maravilha|maravilhoso|sensacional|incrivel|adorei|amei|gostei|curti|uau|nossa|"
+           r"show de bola|muito bom|muito boa|ficou (?:bom|boa|otimo|otima|lindo|linda|show|perfeito|legal|top|massa|demais)|"
+           r"que (?:legal|lindo|linda|bom|otimo|massa|show|bacana|maravilha)")
 _CHAT = re.compile(r"^(?:valeu|vlw|obrigad[oa]|brigad[oa]|tmj|tamo junto|oi|ola|e ai|eai|opa|salve|bom dia|"
-                   r"boa tarde|boa noite|era isso|so isso|e isso|beleza|show|top|perfeito|massa|otimo)\b"
-                   r"(?:[\s,!.]*(?:mano|cara|era isso|so isso|valeu|obrigad[oa]|por enquanto|ai|ta|demais|mesmo))*[\s!.]*$")
+                   r"boa tarde|boa noite|era isso|so isso|e isso|beleza|show|top|perfeito|massa|otimo|" + _PRAISE + r")\b"
+                   r"(?:[\s,!.]*(?:mano|cara|era isso|so isso|valeu|obrigad[oa]|por enquanto|ai|ta|demais|mesmo|"
+                   + _PRAISE + r"))*[\s!.]*$")
 _QUESTION = re.compile(r"\?|^(?:qual|quais|quanto|quantos|quantas|o que|oque|que|como|quando|onde|"
                        r"por que|porque|pq|quem|cade|voce sabe|sabe|deu certo|funcionou)\b")
+# Pergunta clara: "?" ou palavra interrogativa seguida de mais duas palavras ("qual a previsao amanha")
+_ASKS = re.compile(r"\?|^(?:qual|quais|quanto|quantos|quantas|o que|como|quando|onde|por que|quem|cade)(?:\s+\S+){2,}")
+# Verbos que comecam um pedido completo e independente: nunca sao a resposta que faltava
+_SELF_CONTAINED = re.compile(r"^(?:pesquis[ae]|procur[ae]|busc[ae]|abr[ae]|entr[ae]|acess[ae]|toc[ae]|"
+                             r"mand[ae]|envi[ae]|apag[ae])\b(?:\s+\S+){2,}")
 
 PENDING_TTL_S = 180
 # Ir a algum lugar ou mexer em janela: nunca e o detalhe que faltava para o pedido anterior
@@ -63,10 +73,10 @@ SYSTEM = """Você resolve referências numa conversa com um agente que opera o P
 
 Recebe: a CONVERSA (pedidos anteriores e resultados), o que está ABERTO AGORA (alvos) e a FALA NOVA.
 Devolva SÓ JSON:
-{"kind": "new|continue|question|clarify|undo",
+{"kind": "new|continue|question|clarify|undo|chat",
  "task": "pedido COMPLETO e autossuficiente, em português, para o Maestro executar",
  "target": "web | app:<chave> | code | folder | none",
- "answer": "só para kind=question",
+ "answer": "só para kind=question ou chat",
  "question": "só para kind=clarify"}
 
 kind:
@@ -80,6 +90,8 @@ kind:
 - clarify: a fala manda MUDAR algo mas não diz o quê, e errar custa caro (ex.: "troque algumas coisas"
   num projeto de código). Faça UMA pergunta curta com 2-3 opções concretas em question.
 - undo: desfazer a última alteração.
+- chat: comentário, elogio, desabafo ou papo que NÃO pede nada ("legal, ficou bom", "gostei do azul",
+  "tô cansado"). answer = resposta curta e natural. Nada é executado; na dúvida entre chat e comando, chat.
 
 Regras:
 - "esse/essa/aquele/aquela/agora/o segundo/de baixo" apontam para o alvo em FOCO, salvo se a fala citar outro.
@@ -102,6 +114,9 @@ Regras:
 - Pedir para ABRIR um app que já está aberto ("abre o Excel" com o Excel aberto) → continue nele, task
   "trazer o Excel (já aberto) para a frente"; só é pedido novo se disser "outro", "novo", "nova janela".
 - Comandos nunca são question. question é só para perguntas ("qual era...?", "deu certo?").
+- Só é comando o que a pessoa PEDE com um verbo de ação. Nunca transforme um comentário em tarefa.
+- Com PERGUNTA PENDENTE no contexto: se a fala responde a ela, task = o pedido original completado com a
+  resposta (kind continue/new); se é comentário sem relação ("tô cansado hoje"), kind = chat.
 - Se a última fala do assistente OFERECEU algo ("Quer que eu toque o primeiro?") e o usuário aceitou
   ("pode", "sim", "manda", "quero") → continue com o que foi oferecido, no mesmo alvo."""
 
@@ -123,6 +138,58 @@ def _parse(raw: str) -> dict:
             except Exception:
                 pass
     return {}
+
+
+def _asks_action(n: str) -> bool:
+    """A fala (normalizada) comeca com um verbo de pedido ("abre", "fecha", "troca a cor")?"""
+    from core.voice.understand import _REQUEST_VERB
+    return bool(_REQUEST_VERB.match(re.sub(r"^(?:(?:agora|entao|e|ai|por favor|tipo)[\s,]+)+", "", n)))
+
+
+_ANSWER_START = re.compile(
+    r"^(?:sim|nao|pode|quero|prefiro|tanto faz|qualquer|o|a|os|as|um|uma|no|na|nos|nas|em|com|de|do|da|pra|para|"
+    r"por|so|esse|essa|este|esta|aquele|aquela|primeir\w*|segund\w*|terceir\w*|ultim\w*|"
+    r"faz\w*|faca|cri\w*|coloc\w*|poe|bot\w*|us[ae]|deix\w*|mud\w*|troc\w*|escolh\w*|escrev\w*|digit\w*|"
+    r"clic\w*|cliqu\w*|seleciona\w*)\b")
+
+
+def plausible_answer(text: str, pending: Optional[dict]) -> bool:
+    """A fala pode ser a resposta a pergunta pendente? Curta, com cara de resposta ("o da pasta X",
+    "faz redondo"), com numero, ou repetindo uma palavra da pergunta/pedido. "to cansado hoje" nao e."""
+    n = _norm(text).strip(" .!?")
+    words = n.split()
+    if not words:
+        return False
+    if len(words) <= 2 or re.search(r"\d", n) or _ANSWER_START.match(n):
+        return True
+    asked = _norm(f"{(pending or {}).get('question', '')} {(pending or {}).get('task', '')}")
+    keys = {w for w in re.findall(r"[a-z0-9]{4,}", asked)}
+    return bool(keys & set(re.findall(r"[a-z0-9]{4,}", n)))
+
+
+_ORPHAN = re.compile(r"\b(?:aquilo|aquele|aquela|isso|isto|de novo|outra vez|o mesmo|a mesma|do mesmo jeito|"
+                     r"igual (?:antes|a antes)|como antes)\b")
+
+
+def _orphan_reference(said: str, n: str) -> bool:
+    """A fala so aponta para algo anterior (sem nomear app, site, texto ou caminho)?"""
+    if not _ORPHAN.search(n) or re.search(r"[\"“”':]", said):
+        return False
+    try:
+        from core.lexicon import get_lexicon
+        if get_lexicon().apps_in(said):
+            return False
+        from core.learned_plans import extract
+        if extract(said)[1]:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def _chat_reply(n: str) -> str:
+    from core.voice.persona import get_persona
+    return get_persona().pick("thanks" if re.search(_PRAISE + r"|valeu|obrigad", n) else "ack")
 
 
 def _default_llm(system: str, user: str) -> str:
@@ -177,7 +244,7 @@ def resolve(said: str, session: Session,
 
     # Pergunta sobre a tela ("voce esta vendo o YouTube?"): o Vision olha e responde; nada e executado
     from core.screen_question import is_screen_question
-    if is_screen_question(said):
+    if is_screen_question(said, visual_context=bool(session.targets())):
         return {**base, "kind": "look", "via": "tela"}
 
     # Pendências salvas por versões antigas não carregam uma ação executável.
@@ -192,11 +259,32 @@ def resolve(said: str, session: Session,
     if _CHAT.match(n) and len(n.split()) <= 6:
         # Papo ("valeu", "oi", "era isso"): responde como numa conversa, sem executar nada
         from core.voice.persona import get_persona
-        mood = "thanks" if re.search(r"valeu|obrigad|brigad|tmj|era isso|so isso", n) else "hello"
+        greeting = re.match(r"(?:oi|ola|e ai|eai|opa|salve|bom dia|boa tarde|boa noite)\b", n)
+        mood = "hello" if greeting and not re.search(r"valeu|obrigad|brigad|tmj|era isso|so isso", n) else "thanks"
         return {**base, "kind": "question", "answer": get_persona().pick(mood), "via": "papo"}
 
     if _UNDO.search(n) and session.code and len(n.split()) <= 8:
         return {**base, "kind": "undo", "target": "code"}
+
+    answering, ask_model = bool(session.pending), False
+    # Pedido obvio (verbo de acao) ou pergunta: dispensa o modelo quando nada depende da conversa.
+    # O resto ("to cansado hoje", "previsao de amanha") passa pelo modelo, que pode responder como conversa
+    obvious = _asks_action(n) or bool(_QUESTION.search(n))
+    if answering:
+        # Pergunta de andamento ("como esta o site?") nunca e resposta: o controller responde com o registro
+        # de tarefas e a pergunta continua esperando
+        from core.task_status import is_status_question
+        if is_status_question(said):
+            return {**base, "via": "status"}
+        # Outra pergunta ("qual a previsao amanha?") tambem nao: segue o fluxo normal, a pendencia fica
+        if _ASKS.search(n):
+            answering = False
+        # Pedido completo e independente ("pesquisa receita de bolo"): pedido novo, a pendencia cai
+        elif _SELF_CONTAINED.match(n):
+            session.clear_pending()
+        # Nao parece resposta ("to cansado hoje"): o modelo decide com a pergunta no contexto (pode ser papo)
+        elif not plausible_answer(said, session.pending):
+            answering, ask_model = False, True
 
     # Comando de navegacao ("abre o VS", "trazer o VS Code para frente", "fecha isso") nao e
     # resposta a pergunta: antes ficava preso a ela e virava "abrir o site ... resposta a pergunta"
@@ -214,14 +302,18 @@ def resolve(said: str, session: Session,
             names_app = False
         if names_app or n.startswith(("na verdade", "esquece")):
             session.clear_pending()
-    if session.pending:
+    if session.pending and answering:
         p = session.pending
         target = p.get("target") if session.target(p.get("target")) else None
         return {**base, "kind": "continue" if target else "new", "target": target,
                 "task": f"{p['task']} — resposta à pergunta \"{p['question']}\": {said}",
                 "via": "pending"}
 
-    if session.empty:
+    if session.empty and _orphan_reference(said, n):
+        # "faz aquilo de novo" sem nada antes nesta conversa: pergunta em vez de o Maestro adivinhar
+        return {**base, "kind": "clarify",
+                "question": "Ainda não fizemos nada nesta conversa. O que você quer que eu faça?"}
+    if session.empty and obvious:
         return base
 
     # Cita um app/site que NAO esta aberto na conversa -> pedido novo. Ex.: com o
@@ -237,13 +329,17 @@ def resolve(said: str, session: Session,
     # Com algo ABERTO na conversa, o modelo decide se a fala continua nele. Antes so
     # frases com "agora/esse/o segundo..." chegavam aqui e "clica em sistema" com as
     # Configuracoes abertas virava pedido novo (que reabria outra pagina).
-    if not session.targets() and not _FOLLOW.search(n):
+    if not session.targets() and not _FOLLOW.search(n) and obvious and not ask_model:
         return base
 
     user = f"{session.context_block()}\n\nFALA NOVA: \"{said}\"\nJSON puro."
     try:
         d = _parse((llm or _default_llm)(SYSTEM, user))
     except Exception as e:
+        if not obvious:
+            # Sem o modelo, uma fala que nao pede nada nao vira tarefa
+            return {**base, "kind": "question", "via": f"erro: {e}",
+                    "answer": "Não consegui entender agora. O que você quer que eu faça?"}
         return {**base, "via": f"erro: {e}"}
 
     kind = str(d.get("kind", "new")).lower()
@@ -265,6 +361,12 @@ def resolve(said: str, session: Session,
         out["target"] = None
     if kind == "undo" and not session.code:
         out["kind"], out["task"] = "new", said
+    if kind == "chat" or (kind == "question" and (not out["answer"] or not _QUESTION.search(n))
+                          and not _asks_action(n)):
+        # Comentario ("legal, ficou bom") nunca vira tarefa: responde e nao executa nada. Antes um "question"
+        # sem "?" virava "continue" com a tarefa reescrita pelo modelo e o projeto era editado sem pedido.
+        return {**base, "kind": "question", "via": "chat",
+                "answer": out["answer"] or _chat_reply(n)}
     if kind == "question" and (not out["answer"] or not _QUESTION.search(n)):
         # comando ("abrir o Excel") nunca vira resposta falada ("ja esta aberto"): age
         out["kind"] = "continue" if target else "new"
@@ -272,4 +374,6 @@ def resolve(said: str, session: Session,
         out["kind"] = "new"
     if kind == "clarify" and not target and session.focus and session.target(session.focus):
         out["target"] = session.focus     # a resposta vai continuar no que esta em foco
+    if ask_model and out["kind"] in ("new", "continue"):
+        session.clear_pending()           # o modelo ja juntou a resposta ao pedido (ou e outro pedido)
     return out

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import os
+import threading
 import time
 import logging
 from contextlib import contextmanager
@@ -127,6 +128,27 @@ def get_client() -> "AIClient":
     return _instance
 
 
+class LLMCancelled(RuntimeError):
+    """A tarefa que pediu a chamada foi cancelada, ou a chamada passou do prazo total."""
+
+
+# Cancelamento por thread: so a thread da tarefa e interrompida; a voz e a resposta final (outras threads) nao
+_scope = threading.local()
+
+
+def bind_cancel(should_stop) -> None:
+    """A thread atual passa a abortar chamadas ao modelo quando should_stop() for verdadeiro (None desliga)."""
+    _scope.should_stop = should_stop
+
+
+def call_limit_s() -> float:
+    try:
+        from core.config import get_config
+        return max(30.0, float(get_config().get("limits.llm_call_s", 300)))
+    except Exception:
+        return 300.0
+
+
 class AIClient:
     """Cliente centralizado para a API Anthropic."""
 
@@ -223,7 +245,9 @@ class AIClient:
                 if budget is not None:
                     for _ in stream:
                         budget.time_left()
-                elif self.on_progress:
+                elif self.on_progress or callable(getattr(_scope, "should_stop", None)):
+                    # Consome o stream aqui: entre um pedaco e outro confere o cancelamento da tarefa desta
+                    # thread e o prazo total (antes o Parar so valia depois da resposta inteira)
                     self._relay_progress(stream, agent, start)
                 resp = stream.get_final_message()
         except APIError as e:
@@ -264,8 +288,14 @@ class AIClient:
         """Repassa o andamento do streaming (no maximo ~1x/s, so em respostas
         que passam de 1,5 s). Erro no callback nunca afeta a resposta."""
         chars, thinking, last = 0, False, 0.0
+        stop = getattr(_scope, "should_stop", None)
+        limit = call_limit_s()
         for event in stream:
-            if getattr(event, "type", "") != "content_block_delta":
+            if callable(stop) and stop():
+                raise LLMCancelled("Chamada ao modelo interrompida: a tarefa foi cancelada.")
+            if time.time() - start > limit:
+                raise LLMCancelled(f"O modelo passou de {limit:.0f} s sem terminar; parei para não travar.")
+            if not self.on_progress or getattr(event, "type", "") != "content_block_delta":
                 continue
             kind = getattr(event.delta, "type", "")
             if kind == "thinking_delta":

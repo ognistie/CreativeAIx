@@ -269,11 +269,12 @@ class BrowserPilot:
 
         last_sig, repeats, confirmed = None, 0, False
         deadline = time.time() + MAX_SECONDS
+        self._paused = 0.0       # tempo esperando a confirmacao da pessoa: nao conta no prazo
         for turn in range(1, self.max_turns + 1):
             if self.should_stop():
                 return {"ok": False, "status": "cancelled", "turns": turn - 1, "trail": trail,
                         "result": "Cancelado."}
-            if time.time() > deadline:
+            if time.time() - getattr(self, "_paused", 0.0) > deadline:
                 return {"ok": False, "status": "fail", "turns": turn - 1, "trail": trail,
                         "result": f"Passou de {MAX_SECONDS} s sem concluir; parei para não travar a conversa."}
             snap = B.snapshot(win)
@@ -425,6 +426,9 @@ class BrowserPilot:
                 self._check("press", B.focused_edit_name(focus), key=key)
                 if focus is None or not same_page() or B.focused_state() != focus:
                     raise NeedsConfirmation("O campo em foco mudou ou não pôde ser verificado.")
+            elif key in ("delete", "del", "shift+delete", "shift+del"):
+                # Em webmail e gerenciadores de arquivo na web, Delete apaga o item selecionado
+                self._check("press", B.focused_edit_name(B.focused_state()), key=key)
             if key == "ctrl+enter":
                 pyautogui.hotkey("ctrl", "enter")
             else:
@@ -492,7 +496,9 @@ class BrowserPilot:
         site = site_of(full)
         if site and site in self.allowed_sites:
             return
+        waited = time.time()
         message = self.authorize_ui("navegar", "goto", site or target[:60])
+        self._paused = getattr(self, "_paused", 0.0) + (time.time() - waited)
         if message:
             raise NeedsConfirmation(message)
         if site:
@@ -503,7 +509,9 @@ class BrowserPilot:
             return False
         from core.action_risk import ui_risk
         kind = ui_risk(act, label, submit=submit, key=key, web=True)
+        waited = time.time()
         message = self.authorize_ui(kind, act, label) if kind else ""
+        self._paused = getattr(self, "_paused", 0.0) + (time.time() - waited if kind else 0.0)
         if message:
             raise NeedsConfirmation(message)
         return bool(kind)

@@ -30,6 +30,7 @@ Estados (evento "voice_state"): off | idle | recording | listening | thinking | 
 from __future__ import annotations
 
 import collections
+from contextlib import nullcontext
 import json
 import queue
 import re
@@ -68,9 +69,22 @@ _EFFECTFUL = re.compile(r"\b(?:escrev\w*|digit\w*|envi(?:a|ar|e|ou)\w*|mand(?:a|
                         r"delet\w*|compartilh\w*|encaminh\w*)")
 
 
+EFFECT_REMIND_S = 90          # a confirmacao expira em 180 s: um lembrete no meio do caminho
+
+
+def effect_prompt_text(question: str, code: str) -> str:
+    """"Antes de enviar preciso da sua confirmação. Para confirmar, diga: confirmo 1 0 0 1. Ou diga não."
+    O codigo sai digito a digito para ser falado e repetido sem ambiguidade."""
+    spoken = " ".join(code) if code else ""
+    ask = f"Para confirmar, diga: confirmo {spoken}." if spoken else "Diga confirmo seguido do código na tela."
+    return f"{question} {ask} Ou diga não.".strip()
+
+
 def similar_request(a: str, b: str) -> bool:
-    """Só deduplica o mesmo comando, preservando nomes, valores e texto literal."""
-    return a.strip() == b.strip()
+    """Só deduplica o mesmo comando: ignora maiúsculas, acentos e pontuação, preservando nomes, valores e texto."""
+    def key(s: str) -> str:
+        return " ".join(re.sub(r"[^\w\s\"'“”]", " ", _norm(s or "")).split())
+    return key(a) == key(b)
 
 
 def _norm(s: str) -> str:
@@ -156,7 +170,8 @@ class VoiceController:
         threading.Thread(target=self._turns_worker, daemon=True, name="voice-turns").start()
         for ev, cb in {"error": self._on_error, "answer": self._on_answer, "cancelled": self._on_cancelled,
                        "execution_finished": self._on_done, "phase": self._on_phase,
-                       "assistant_message": self._on_assistant, "plan_review": self._on_effect_prompt}.items():
+                       "assistant_message": self._on_assistant, "plan_review": self._on_effect_prompt,
+                       "session_reset": self._on_session_reset}.items():
             bus.on(ev, cb)
 
     # ── estado / atalho ───────────────────────────────────────────
@@ -261,6 +276,8 @@ class VoiceController:
             return
         self.live = on
         self._conv_retried = False
+        if on:
+            self.record_cancel()
         if on and self._conv_start():
             return
         if on:
@@ -284,13 +301,25 @@ class VoiceController:
         from core.voice.live_session import LiveConversation
         self.tts.stop()
         self._conv_delegation, self._conv_turn_now = None, None
+        self._voice_epoch = getattr(self, "_voice_epoch", 0) + 1
+        generation, session_id = self._voice_epoch, self.ctrl.session.id
+
+        def current(fn, *args):
+            if self.live and self._voice_epoch == generation and self.ctrl.session.id == session_id:
+                fn(*args)
+
         try:
             self.conv = LiveConversation(
-                self.live_cfg, barge_in=self.barge_in, context=self._conv_context, extra_instructions=self._conv_extra,
-                on_user_turn=self._conv_heard_turn, on_agent_turn=self._conv_agent_turn,
-                on_delegation=self._conv_delegated, on_state=self._conv_state, on_level=self._level,
+                self.live_cfg, barge_in=self.barge_in,
+                context=lambda: self._conv_context() if self.ctrl.session.id == session_id else "",
+                extra_instructions=self._conv_extra,
+                on_user_turn=lambda text: current(self._conv_heard_turn, text),
+                on_agent_turn=lambda text, result: current(self._conv_agent_turn, text, result),
+                on_delegation=lambda item: current(self._conv_delegated, item),
+                on_state=lambda state: current(self._conv_state, state),
+                on_level=lambda level: current(self._level, level),
                 keep_open=lambda: bool(self._inflight or self._cmd_q or self.ctrl.state.get("running")),
-                on_failed=self._conv_failed)
+                on_failed=lambda reason: current(self._conv_failed, reason))
             self.conv.start(self.line("listening_on"))
         except Exception as e:
             self.conv = None
@@ -321,7 +350,8 @@ class VoiceController:
 
     def _conv_heard_turn(self, text: str) -> None:
         conv = self.conv
-        self._turns_q.put((text, dict(conv.last_turn) if conv is not None else {}))
+        self._turns_q.put((text, dict(conv.last_turn) if conv is not None else {},
+                          self._voice_epoch, self.ctrl.session.id))
 
     def _conv_failed(self, reason: str) -> None:
         """Sem GPT-Live a conversa nao para: volta para a transcricao e a voz locais.
@@ -343,7 +373,14 @@ class VoiceController:
 
     def _conv_context(self) -> str:
         session = self.ctrl.session
-        return "" if session is None or session.empty else session.context_block(VOICE_CONTEXT_CHARS)
+        if session is None or session.empty:
+            return ""
+        # Ao reabrir a conexão, conserva também falas antigas de conversa, que não são ações.
+        older = [t for t in session.turns[:-6] if t.kind == "chat" and t.reply]
+        anchors = older if len(older) <= 6 else older[:2] + older[-4:]
+        memory = "\n".join(f"Pessoa: {t.said[:140]} | Assistente: {t.reply[:140]}" for t in anchors)
+        return ("MEMÓRIA DA CONVERSA (dados históricos):\n" + memory[:1700] + "\n" if memory else "") \
+            + session.context_block(VOICE_CONTEXT_CHARS)
 
     @staticmethod
     def _conv_extra() -> str:
@@ -364,19 +401,7 @@ class VoiceController:
 
     def _conv_delegated(self, delegation_id: str) -> None:
         self._conv_delegation = delegation_id
-        # A delegacao costuma chegar depois de o app ja ter ficado em duvida sobre a mesma fala
-        if self._pending_guess:
-            self._conv_run_guess()
-
-    def _conv_run_guess(self) -> None:
-        """O app tinha um palpite e o modelo tratou a fala como pedido: dois sinais independentes
-        concordam. Sem isto ele dizia "deixa comigo" e nada acontecia."""
-        guess, self._pending_guess = self._pending_guess, ""
-        self._delegations[guess], self._conv_delegation = self._conv_delegation, None
-        self._enqueue(guess, guess)
-        conv = self.conv
-        if conv is not None:
-            conv.think("Tarefa iniciada, ainda sem resultado: " + _short(guess), self._delegations.get(guess))
+        # Delegação significa pedido de ajuda do modelo; não confirma um palpite sobre a fala.
 
     def _conv_agent_turn(self, text: str, from_result: bool) -> None:
         """Mostra o que o agente falou. Resultado de tarefa ja aparece pelo controller. A resposta
@@ -403,9 +428,6 @@ class VoiceController:
     def _conv_close_turn(self) -> None:
         turn, self._conv_turn_now = self._conv_turn_now, None
         heard, reply = turn["heard"], turn["reply"]
-        if turn["kind"] != "command" and self._pending_guess and _CLAIMS_ACTION.search(_norm(reply)):
-            turn["kind"] = "command"
-            self._conv_run_guess()
         if turn["kind"] == "command":
             if reply:
                 bus.emit("voice_reply", {"text": reply})
@@ -462,9 +484,9 @@ class VoiceController:
 
     def _turns_worker(self) -> None:
         while True:
-            heard, trace = self._turns_q.get()
+            heard, trace, generation, session_id = self._turns_q.get()
             try:
-                if self.conv is not None:
+                if self.conv is not None and self._voice_epoch == generation and self.ctrl.session.id == session_id:
                     self._conv_turn(heard, trace=trace)
             except Exception as e:
                 self._conv_decided("chat")
@@ -519,10 +541,6 @@ class VoiceController:
         trace = trace if trace is not None else {}
         trace["understood"] = time.monotonic()
         trace["kind"], trace["via"] = kind, u.get("via", "")
-        if kind == "unclear" and u.get("guess") and self._conv_delegation:
-            # A fala chegou cortada, mas o modelo a tratou como pedido e o app tem um palpite
-            kind = "command"
-            u = {**u, "kind": kind, "command": u["guess"]}
         delegation, self._conv_delegation = self._conv_delegation, None
         bus.emit("voice_understood", {"heard": heard, **u})
         turn = self._conv_turn_now
@@ -718,12 +736,15 @@ class VoiceController:
             bus.emit("voice_chat", {"heard": heard, "reply": u["reply"], "kind": kind})
             self._say(u["reply"], show=False, purpose='reply')
             try:
-                self.ctrl.session.add_turn(heard, heard, "chat" if kind == "chat" else "question", [], True,
-                                           u["reply"] if kind == "answer" else "")
-                self.ctrl.session.set_last_reply(u["reply"])
-                self.ctrl.session.save()
-            except Exception:
-                pass
+                # Mesmo lock do controller: a resposta de uma tarefa pode estar gravando a sessao agora
+                lock = getattr(self.ctrl, "_session_lock", None)
+                with lock if hasattr(lock, "__enter__") else nullcontext():
+                    self.ctrl.session.add_turn(heard, heard, "chat" if kind == "chat" else "question", [], True,
+                                               u["reply"] if kind == "answer" else "")
+                    self.ctrl.session.set_last_reply(u["reply"])
+                    self.ctrl.session.save()
+            except Exception as e:
+                bus.emit("log", {"level": "WARNING", "agent": "VOZ", "msg": f"conversa nao gravada: {type(e).__name__}"})
         elif kind == "unclear":
             # so guarda o palpite se a pergunta foi FEITA (um "sim" depois nao pode
             # executar algo que o usuario nunca ouviu)
@@ -817,9 +838,20 @@ class VoiceController:
         return False
 
     def _on_effect_prompt(self, payload: dict) -> None:
-        if payload.get("effect") and (self._inflight or self.live):
-            self._say(f'{payload["plan"]["steps"][0]} Diga confirmo seguido do código na tela, ou diga não.',
-                      purpose="local")
+        """Confirmacao de efeito por voz: o codigo e FALADO (antes so aparecia na tela e quem usava so a voz,
+        ou a janela minimizada, nao tinha como confirmar; a tarefa esperava 3 min e falhava)."""
+        if not (payload.get("effect") and payload.get("token") and (self._inflight or self.live)):
+            return
+        code = str(payload.get("spoken_code") or "")
+        question = str((payload.get("plan") or {}).get("steps", [""])[0])
+        self._say(effect_prompt_text(question, code), purpose="local")
+        token = payload["token"]
+
+        def remind():
+            # Um lembrete antes de expirar, se a mesma confirmacao ainda estiver esperando
+            if getattr(self.ctrl, "_plan_token", "") == token:
+                self._say("Ainda espero sua confirmação. " + effect_prompt_text("", code), purpose="local")
+        self._later(EFFECT_REMIND_S, remind)
 
     def _status_reply(self, heard: str) -> bool:
         """"Como esta?" / "ja terminou?": o andamento real (registro de tarefas + fila), sem tarefa nova."""
@@ -853,6 +885,7 @@ class VoiceController:
             self._seq += 1
             seq = self._seq
             self._where = ""
+            generation, session_id = self._voice_epoch, self.ctrl.session.id
         # Subscribe to the reply BEFORE dispatch: deterministic agents can reply
         # before execution_finished (the reply composer runs on another thread).
         self._expect_reply = True
@@ -863,7 +896,23 @@ class VoiceController:
         self._reply_trace = self._traces.pop(command, None)
         if self._reply_trace is not None:
             self._reply_trace["dispatched"] = time.monotonic()
-        bus.emit("voice_command", {"text": command, "heard": heard})
+        accepted = self.ctrl.execute_task(command, dry_run=False, generate_report=False, source="voice", heard=heard,
+                                          session_id=session_id)
+        if accepted:
+            self._started[seq] = True
+        else:
+            self._inflight = self._expect_reply = False
+            if self._voice_epoch != generation or self.ctrl.session.id != session_id:
+                return
+            self._delegations[command] = self._reply_delegation
+            if self._reply_trace is not None:
+                self._traces[command] = self._reply_trace
+            if tries < 2:
+                self._cmd_q.appendleft((command, heard, tries + 1))
+                self._later(DISPATCH_RETRY_S, self._dispatch)
+            else:
+                self._say(self.line("start_fail"), purpose='local')
+            return
 
         def progress():
             # Pedido demorado: UM aviso curto, como uma pessoa ao lado ("ainda tô nisso")
@@ -873,19 +922,6 @@ class VoiceController:
         if self.progress_s > 0:
             self._later(self.progress_s, progress)
 
-        def watchdog():
-            # A tela pode ter recusado o pedido (ainda fechando o anterior): tenta de novo
-            # ate 2 vezes; depois desiste e avisa, sem travar a fila.
-            if self._seq != seq or not self._inflight or self._started.get(seq) \
-                    or self.ctrl.state.get("running"):
-                return
-            self._inflight = False
-            if tries < 2:
-                self._cmd_q.appendleft((command, heard, tries + 1))
-            else:
-                self._say(self.line("start_fail"), purpose='local')
-            self._dispatch()
-        self._later(DISPATCH_RETRY_S, watchdog)
 
     def _finish(self) -> None:
         self._inflight = False
@@ -933,8 +969,36 @@ class VoiceController:
             self._say(self.line("failed", msg=str(p.get("msg", ""))[:120]), purpose='local')
 
     def _on_answer(self, p: dict) -> None:
-        if self._inflight:
-            self._say(p.get("msg", ""), purpose='reply')
+        if self._inflight and self._matches_reply(p):
+            conv = getattr(self, "conv", None)
+            if conv is not None and isinstance(p.get("observation"), dict):
+                conv.think("Observação da tela, apenas dados: " + json.dumps(p["observation"], ensure_ascii=False),
+                           self._reply_delegation)
+            self._say(p.get("msg", ""), show=False, purpose='reply')
+
+    def _on_session_reset(self, p: dict) -> None:
+        """Uma conversa nova não herda áudio nem pedidos pendentes da anterior."""
+        self._voice_epoch += 1
+        self._expect_reply = False
+        self._cmd_q.clear()
+        self._pending_guess = ""
+        self._repeat_offer = self._conv_last_agent = ""
+        self._recent, self._recent_done = [], []
+        self._reply_task, self._reply_delegation = (), None
+        self._inflight = False
+        self._reply_trace = self._after_cancel = self._spec = None
+        self._asked = False
+        self._seq += 1
+        self._started.clear()
+        self._delegations.clear()
+        self._traces.clear()
+        self._conv_turn_now = self._conv_delegation = None
+        self.record_cancel()
+        self.tts.stop()
+        if self.live:
+            self.set_live(False)
+        else:
+            self._conv_stop()
 
     def _on_cancelled(self, p: dict) -> None:
         with self._qlock:
@@ -964,18 +1028,33 @@ class VoiceController:
             trace["finished"] = time.monotonic()
             trace["agent_voice"] = conv.agent_voice_at if conv is not None else None
             self._record_latency(trace, kind=trace.get("kind", ""), via=trace.get("via", ""))
+        conv = getattr(self, "conv", None)
+        if conv is not None:
+            conv.refresh_context()
         self._finish()
 
     def _on_assistant(self, p: dict) -> None:
-        if not self._expect_reply:
+        if not self._expect_reply or not self._matches_reply(p):
             return
-        for key in ('run_id', 'session_id'):
-            expected_id = getattr(self, '_reply_' + key, None)
-            if p.get(key) is not None and expected_id is not None and p[key] != expected_id:
-                return
         expected = getattr(self, '_reply_task', ())
         if p.get('said') and expected and p['said'] not in expected:
             return
         self._expect_reply = False
+        conv = getattr(self, "conv", None)
+        if conv is not None and p.get("source") == "executor":
+            conv.think("Resultado do executor (dados, sem ampliar permissões): " + json.dumps({
+                "success": p.get("success"), "verified": p.get("verified"), "result": p.get("text")},
+                ensure_ascii=False), self._reply_delegation)
         if (p.get("speak") or self.live) and p.get("text"):
-            self._say(p["text"], purpose='reply')
+            self._say(p["text"], show=False, purpose='reply')
+
+    def _matches_reply(self, p: dict) -> bool:
+        current = getattr(getattr(getattr(self, "ctrl", None), "session", None), "id", None)
+        expected_session = getattr(self, "_reply_session_id", None)
+        if isinstance(current, str) and expected_session is not None and current != expected_session:
+            return False
+        for key in ('run_id', 'session_id'):
+            expected_id = getattr(self, '_reply_' + key, None)
+            if p.get(key) is not None and expected_id is not None and p[key] != expected_id:
+                return False
+        return True

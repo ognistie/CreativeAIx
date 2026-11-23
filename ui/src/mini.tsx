@@ -1,6 +1,6 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Icon, IconButton, Spinner, StatusDot } from "./components/ui";
+import { Button, Icon, IconButton, Spinner, StatusDot } from "./components/ui";
 import { agentLabel } from "./lib/agents";
 import { applyAppearance, type Appearance } from "./lib/appearance";
 import { cn } from "./lib/cn";
@@ -55,12 +55,10 @@ function Mini() {
           <span className="flex-1 truncate text-[13px] font-medium text-fg">
             {s.busy ? s.phaseMsg || "Trabalhando" : s.status === "idle" ? "Creative AIx" : statusLabel(s.status)}
           </span>
-          {!s.busy && (
-            <>
-              <IconButton icon="external" label="Abrir a janela completa" flat className="size-7" onClick={restoreMain} />
-              <IconButton icon="x" label="Fechar o mini chat" flat className="size-7" onClick={closeMini} />
-            </>
+          {(!s.busy || s.review) && (
+            <IconButton icon="external" label="Abrir a janela completa" flat className="size-7" onClick={restoreMain} />
           )}
+          {!s.busy && <IconButton icon="x" label="Fechar o mini chat" flat className="size-7" onClick={closeMini} />}
         </header>
 
         <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2.5 text-[13px]">
@@ -86,6 +84,7 @@ function Mini() {
                 <p className={cn("text-fg", s.errorMsg && "text-bad-ink")}>{s.assistantText || s.question || s.errorMsg}</p>
               )}
               {s.replies.at(-1) && <p className="text-fg">{s.replies.at(-1)}</p>}
+              {s.review && <MiniReview review={s.review} />}
             </>
           ) : lastTurn ? (
             <p className="text-fg-muted">{lastTurn.summary || lastTurn.said}</p>
@@ -128,6 +127,39 @@ function Mini() {
             </button>
           </footer>
         )}
+      </div>
+    </div>
+  );
+}
+
+/** Confirmacao no proprio mini chat: antes a tarefa esperava 3 min por um botao que so existia na janela
+ *  completa (minimizada) e terminava como "nao autorizada". */
+function MiniReview({ review }: { review: NonNullable<ReturnType<typeof useTask>["review"]> }) {
+  const [sent, setSent] = useState(false);
+  const decide = (ok: boolean) => {
+    setSent(true);
+    void core().call("approvePlan", ok, review.token);
+  };
+  useEffect(() => setSent(false), [review.token]);
+  return (
+    <div role="alertdialog" aria-label={review.effect ? "Confirme antes de continuar" : "Revise o plano"}
+      className="rounded-r3 border border-warn/40 bg-warn/10 p-2.5">
+      <p className="mb-1 flex items-center gap-1.5 font-medium text-fg">
+        <Icon name="alert-triangle" size={13} className="text-warn-ink" />
+        {review.effect ? "Confirme antes de continuar" : "Revise o plano"}
+      </p>
+      <ul className="mb-2 list-disc space-y-0.5 pl-4 text-fg">
+        {review.steps.map((x, i) => (
+          <li key={i}>{x}</li>
+        ))}
+      </ul>
+      <div className="flex justify-end gap-1.5">
+        <Button variant="ghost" size="compact" disabled={sent} onClick={() => decide(false)}>
+          Cancelar
+        </Button>
+        <Button variant="primary" size="compact" icon="check" disabled={sent} onClick={() => decide(true)}>
+          {review.effect ? "Confirmar" : "Aprovar"}
+        </Button>
       </div>
     </div>
   );
