@@ -75,19 +75,15 @@ export function GenerativeCanvas({ art, look, className, live = false, deferred 
       timer = window.setTimeout(draw, 160);
     });
     observer.observe(canvas);
-    // a barra lateral abre/fecha sem mudar o tamanho do fundo: observa a area principal tambem
+    // a barra lateral abre/fecha sem mudar o tamanho do fundo: observa a area principal tambem.
+    // Trocar de pagina NAO redesenha: as zonas (measureSafe) so dependem do tamanho da barra e da area principal.
+    // Antes cada troca de pagina refazia o canvas inteiro (ate 2560 px) e o reenviava a GPU; no QtWebEngine essa
+    // carga fazia a barra lateral sumir por alguns quadros logo depois do clique.
     const main = live ? document.querySelector("main") : null;
     if (main) observer.observe(main);
-    // trocar de pagina muda o que esta na frente do fundo: mede de novo (so repinta; a cena fica no cache)
-    const pages = new MutationObserver(() => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(draw, 220);
-    });
-    if (main) pages.observe(main, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
       intersection?.disconnect();
-      pages.disconnect();
       window.clearTimeout(timer);
       cancelAnimationFrame(frame);
       abort?.abort();
@@ -172,9 +168,9 @@ export function GenerativeCanvas({ art, look, className, live = false, deferred 
   );
 }
 
-/** Zonas da interface sobre o fundo, em fracoes do canvas: a barra lateral e os blocos marcados com
- *  data-wallpaper-safe (titulo da conversa, caixa de pedido). Sem blocos marcados, a coluna do meio da area
- *  principal (titulo das outras paginas). */
+/** Zonas da interface sobre o fundo, em fracoes do canvas: a barra lateral, a coluna do meio da area principal
+ *  (titulos e o comeco da conversa) e a faixa de baixo dessa coluna (caixa de pedido). Dependem so da geometria
+ *  da janela, nunca do conteudo da pagina: trocar de tela nao redesenha o fundo. */
 export function measureSafe(canvas: Element): SafeRect[] {
   const box = canvas.getBoundingClientRect();
   if (!box.width || !box.height) return [];
@@ -185,13 +181,12 @@ export function measureSafe(canvas: Element): SafeRect[] {
   const out: SafeRect[] = [];
   const side = document.querySelector(".sidebar-panel");
   if (side) out.push(frac(side.getBoundingClientRect(), 0.55, 6));
-  const marked = [...document.querySelectorAll("main [data-wallpaper-safe]")].map((el) => el.getBoundingClientRect())
-    .filter((r) => r.width > 0 && r.height > 0 && r.bottom > box.top && r.top < box.bottom);
-  for (const r of marked) out.push(frac(r, 0.5, 28));
   const main = document.querySelector("main")?.getBoundingClientRect();
-  if (main && !marked.length) {
+  if (main && main.width && main.height) {
     const colW = Math.min(780, main.width * 0.62), left = main.left + (main.width - colW) / 2;
     out.push(frac(new DOMRect(left, main.top + main.height * 0.12, colW, main.height * 0.3), 0.42));
+    const band = Math.min(190, main.height * 0.24);
+    out.push(frac(new DOMRect(left, main.bottom - band - 12, colW, band), 0.5));
   }
   return out;
 }
