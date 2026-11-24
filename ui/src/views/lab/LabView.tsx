@@ -11,14 +11,15 @@ import { AgentSpec } from "./AgentSpec";
 import { AgentErrors, AgentRoute, AgentSkills } from "./AgentWork";
 import { Experiments } from "./Experiments";
 import { AgentList, LabHub, type LabArea } from "./LabHub";
-import { MemoryTree } from "./MemoryTree";
+import { AgentKnowledge } from "./AgentKnowledge";
+import { MemorySpine, MemorySpineLoading, useAgentKnowledge } from "./MemorySpine";
 import { AGENTS, AGENT_LOOK, call, type Memory, type Spec } from "./types";
 
 // AI Research Lab: tres areas na entrada, cada uma SO com o que e dela (antes a ficha do agente misturava edicao,
 // experimentos e evidencias numa barra so, e um clique num lado trocava o estado do outro).
 //   Agentes      -> lista + ficha do agente (editar: visao, instrucoes, memoria, contexto, rota, skills, erros, codigo)
 //   Experimentos -> testes de um agente (comparar versoes; evidencias das comparacoes)
-//   Memoria      -> arvore panoramica do Cerebro com os agentes + editor de memoria e contexto do agente escolhido
+//   Memoria      -> o sistema nervoso dos agentes (Maestro = cerebro) + navegacao e edicao das notas de cada agente
 // Nada aqui amplia permissao: ferramentas e politicas continuam no codigo do executor.
 
 type Area = "hub" | "agents" | "agent" | LabArea;
@@ -39,10 +40,10 @@ const INTRO: Record<Area, string> = {
   agents: "Escolha um agente para ajustar como ele trabalha, ou crie um novo.",
   agent: "",
   experiments: "Só testes: crie versões de um agente, rode os mesmos casos e compare com a versão ativa.",
-  memory: "Só memória e contexto: a árvore do Cérebro com cada agente e o que eles usam em comum.",
+  memory: "O Maestro é o cérebro e cada agente sai da medula com o seu nervo. Navegue pelo conhecimento de cada um, abra e edite as notas.",
 };
 
-type Move = { area?: Area; agent?: string; tab?: Tab };
+type Move = { area?: Area; agent?: string; tab?: Tab; note?: string };
 
 export function LabView() {
   const [area, setArea] = useState<Area>("hub");
@@ -56,6 +57,9 @@ export function LabView() {
   const [error, setError] = useState("");
   const [dirty, setDirty] = useState(false);
   const [pending, setPending] = useState<Move | null>(null);
+  const [note, setNote] = useState("");
+  const [memTab, setMemTab] = useState<"conhecimento" | "memoria">("conhecimento");
+  const { knowledge, error: knowledgeError, reload: reloadKnowledge } = useAgentKnowledge();
   const tabsRef = useRef<HTMLDivElement>(null);
 
   // A ficha so carrega quando esta aberta (e recarrega ao trocar de agente)
@@ -75,6 +79,8 @@ export function LabView() {
 
   const apply = (m: Move) => {
     if (m.agent) setAgent(m.agent);
+    if (m.note !== undefined) setNote(m.note);
+    else if (m.agent) setNote("");
     if (m.tab) setTab(m.tab);
     if (m.area) setArea(m.area);
   };
@@ -113,15 +119,24 @@ export function LabView() {
           {area === "agents" && <AgentList onOpen={(id) => go({ agent: id, tab: "visao", area: "agent" })} />}
           {area === "memory" && (
             <div className="lab-memory">
-              <MemoryTree selected={agent} onSelect={(id) => id !== agent && go({ agent: id })} />
-              <section className="lab-memory-editor" aria-label={`Memória de ${look.name}`}>
+              {knowledge ? (
+                <MemorySpine knowledge={knowledge} selected={agent} note={note}
+                  onSelect={(id) => id !== agent && go({ agent: id })}
+                  onNote={(id, rel) => go({ agent: id, note: rel })} />
+              ) : <MemorySpineLoading error={knowledgeError} />}
+              <section className="lab-memory-editor" aria-label={`Conhecimento de ${look.name}`}>
                 <header>
                   <span className="lab-editor-emblem" style={{ "--agent-color": look.color } as React.CSSProperties}><Icon name={look.icon} size={18} /></span>
-                  <h2 className="text-lg font-semibold text-fg">Memória e contexto de {look.name}</h2>
+                  <h2 className="text-lg font-semibold text-fg">{look.name}</h2>
+                  <Segmented label="Parte da memória" value={memTab} onValueChange={(v) => !dirty ? setMemTab(v as typeof memTab) : undefined}
+                    options={[{ value: "conhecimento", label: "Conhecimento" }, { value: "memoria", label: "Memória e contexto" }]} />
                   <span className="flex-1" />
                   {agentPicker}
                 </header>
-                <AgentMemoryEditor key={agent} agent={agent} onDirty={setDirty} />
+                {memTab === "memoria" ? <AgentMemoryEditor key={agent} agent={agent} onDirty={setDirty} />
+                  : knowledge ? <AgentKnowledge key={agent} agent={agent} knowledge={knowledge} rel={note}
+                    onRel={(rel) => rel !== note && go({ note: rel })} onDirty={setDirty} onChanged={reloadKnowledge} />
+                  : <MemorySpineLoading error={knowledgeError} />}
               </section>
             </div>
           )}

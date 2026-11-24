@@ -223,6 +223,13 @@ body.mini {
   --bg-glass-hi: rgb(255 255 255 / calc(0.64 + var(--glass-boost)));
   --edge: rgb(255 255 255 / 0.5);
 }
+/* Sem desfoque o texto nao tem mais o vidro fosco para separa-lo do fundo: os paineis ficam quase opacos.
+   (O app desktop sempre usa este modo: ver lib/appearance.ts > LIVE_BLUR.) */
+:root[data-blur="off"] {
+  --bg-sidebar: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  --bg-glass: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  --bg-glass-hi: color-mix(in srgb, var(--bg-surface) 95%, transparent);
+}
 
 /* ── Biblioteca ──────────────────────────────────────────────────────────────────────────────── */
 :root,

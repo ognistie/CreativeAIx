@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Icon, Segmented } from "../components/ui";
 import { GenerativeCanvas } from "../components/GenerativeCanvas";
-import type { Appearance } from "../lib/appearance";
+import { LIVE_BLUR, type Appearance } from "../lib/appearance";
 import { GENERATIVE_LABEL, GENERATIVE_NOTE, GENERATIVE_STYLES, generativeOf, wallpaperOf, type Generative } from "../lib/generative";
 import { SCENES } from "../lib/scenes";
 import { readPrefs, type ArtPrefs } from "../lib/wallpaper/art";
@@ -267,8 +267,10 @@ export function AppearancePanel({ harness, writable, onPreview, onSaved }: {
       <Section title="Vidro e movimento">
         <div className="look-toggles">
           <div className="look-toggle">
-            <span><strong>Desfoque</strong><small>Barra lateral, painéis e a caixa de conversa viram vidro fosco sobre o fundo.</small></span>
-            <Switch label="Vidro com desfoque" checked={look.blur !== false} onChange={(v) => change({ blur: v })} />
+            <span><strong>Desfoque</strong><small>{LIVE_BLUR
+              ? "Barra lateral, painéis e a caixa de conversa viram vidro fosco sobre o fundo."
+              : "Desligado no app: com o vidro fosco a barra lateral piscava ao trocar de seção. Os painéis ficam sólidos."}</small></span>
+            {LIVE_BLUR && <Switch label="Vidro com desfoque" checked={look.blur !== false} onChange={(v) => change({ blur: v })} />}
           </div>
           <div className="look-toggle">
             <span><strong>Movimento</strong><small>Transições e animações. Desligado, tudo muda sem animar.</small></span>

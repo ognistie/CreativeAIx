@@ -168,6 +168,8 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
       { rel: "10 Agentes/Web.md", title: "Web", folder: "10 Agentes", layer: "base" },
       { rel: "20 Politicas/Arquivos.md", title: "Arquivos", folder: "20 Politicas", layer: "base" },
       { rel: "60 Aprendizados/Excel abre devagar.md", title: "Excel abre devagar", folder: "60 Aprendizados", layer: "pessoal" },
+      // notas nas pastas dos agentes (Memória dos agentes no Lab)
+      ...AGENT_NOTES.map((rel) => ({ rel, title: rel.split("/").pop()!.replace(/\.md$/, ""), folder: rel.slice(0, rel.lastIndexOf("/")), layer: "base" })),
     ],
   }),
   brainRead: ([rel]) => ({
@@ -212,6 +214,11 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
       { from: "00 Maestro/Maestro.md", to: "10 Agentes/Web.md" },
       { from: "00 Maestro/Maestro.md", to: "20 Politicas/Arquivos.md" },
       { from: "10 Agentes/Dados.md", to: "60 Aprendizados/Excel abre devagar.md" },
+      { from: "10 Agentes/Data/Planilhas com grafico.md", to: "60 Aprendizados/Excel abre devagar.md" },
+      { from: "10 Agentes/Desktop/Rotinas de apps.md", to: "60 Aprendizados/Excel abre devagar.md" },
+      { from: "10 Agentes/File/Organizar por tipo.md", to: "20 Politicas/Arquivos.md" },
+      { from: "10 Agentes/Desktop/Bloco de Notas.md", to: "20 Politicas/Arquivos.md" },
+      { from: "00 Maestro/Como delegar.md", to: "20 Politicas/Arquivos.md" },
       { from: "60 Aprendizados/Excel abre devagar.md", to: "00 Maestro/Maestro.md" },
     ],
   }),
@@ -255,6 +262,16 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
 };
 
 /** Socket falso: autentica, responde metodos e simula uma tarefa em executeTask. */
+// Notas das pastas dos agentes no Cérebro de demonstração
+const AGENT_NOTES = [
+  "00 Maestro/Como delegar.md", "00 Maestro/Rotas que funcionaram.md",
+  "10 Agentes/Web/Navegar com o piloto.md", "10 Agentes/Web/Sites permitidos.md", "10 Agentes/Web/Pesquisa no Google.md",
+  "10 Agentes/Desktop/Rotinas de apps.md", "10 Agentes/Desktop/Bloco de Notas.md",
+  "10 Agentes/Code/Projetos estaticos.md", "10 Agentes/Code/Validar antes de abrir.md",
+  "10 Agentes/Data/Planilhas com grafico.md", "10 Agentes/File/Organizar por tipo.md",
+  "10 Agentes/ExtCode/Pasta escolhida.md",
+];
+
 export function mockSocket(): SocketLike {
   const sock: SocketLike = {
     readyState: 0,
