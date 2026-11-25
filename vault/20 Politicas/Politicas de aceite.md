@@ -21,6 +21,7 @@ O [[Maestro]] valida todo plano antes de executar. Violação → replanejamento
 | [[POL-007]] | Toda ação pedida está no plano | bloqueia |
 | [[POL-009]] | Plano sem efeito não pedido (enviar, publicar, comprar...) | bloqueia + replaneja |
 | [[POL-010]] | Agente externo (Claude Code/Codex) só na pasta escolhida; nunca na pasta do app | bloqueia |
+| [[POL-011]] | Claude Code/Codex só quando a pessoa os cita no pedido (ou escolhe no composer) | bloqueia |
 | [[SEC-001]] | Segredos e dados pessoais | aplicada no código |
 | [[AGT-001]] | Ações destrutivas e externas | orientação + FileAgent em simulação |
 | [[AGT-002]] | Conteúdo não confiável | orientação |

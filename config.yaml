@@ -20,6 +20,7 @@ agent_models:
   file: fast
   memory: fast
   resolver: fast
+  chat: strong        # conversa (troque por um modelo em models: para outra qualidade/custo)
 
 # Esforco de raciocinio (output_config.effort) por agente. Sonnet 5 usa
 # adaptive thinking por padrao; effort e a principal alavanca de custo.
@@ -36,6 +37,7 @@ agent_effort:
   file: medium
   json_repair: low
   resolver: low
+  chat: medium        # conversa com ferramentas de leitura (low = mais rapida, high = analises mais fundas)
 
 # Raciocinio por agente (Sonnet 5): "off" = resposta direta, sem pensar antes.
 # Medido (scripts/eval_routing.py, 24 pedidos reais x2): Maestro 3,12 s -> 1,69 s com o mesmo
@@ -140,6 +142,17 @@ voice:
     daily_max_s: 1800       # quota local de segundos/dia UTC (30 min ~ US$ 1,50); nao e teto de fatura
   start_on_launch: true    # atalho global ativo desde a abertura do app
   preload_on_launch: true  # carrega o reconhecimento de fala logo apos abrir (1a fala sem esperar o modelo)
+
+# Conversa (agents/chat_agent.py): pedidos digitados que nao sao atalho passam primeiro por ela.
+# Responde com o historico da conversa e ferramentas SO DE LEITURA (pastas, arquivos, Cerebro, tarefas);
+# para agir no computador, devolve o pedido ao Maestro (mesmas politicas e confirmacoes). Simular segue o
+# fluxo antigo. Le so a pasta do usuario e pastas que voce citar; AppData, .env, chaves: nunca.
+chat:
+  enabled: true
+  voice: true              # pedidos falados tambem (resposta curta, para ser lida em voz alta)
+  web_search: true         # busca na web da Anthropic para fatos atuais, com fontes (US$ 0,01 por busca, max 5)
+  max_tool_rounds: 12      # consultas (listar/ler/buscar) por resposta antes de parar e avisar
+  max_tokens: 32000        # tamanho maximo de uma resposta (analises longas)
 
 # Execucao das tarefas
 execution:

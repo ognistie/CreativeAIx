@@ -62,8 +62,9 @@ PROMPT = (
     "6. Se pede APENAS ABRIR um app vazio (sem criar conteudo nem apontar pasta) → DESKTOP\n"
     "7. Se pede interagir com app desktop (Teams, WhatsApp, Notepad, Paint) → DESKTOP\n"
     "8. Se pede organizar/mover/copiar arquivos → FILE\n"
-    "9. Se pede que o CLAUDE CODE ou o CODEX trabalhe num projeto → EXTCODE\n"
-    "   (params: tool='claude'|'codex', folder=<pasta citada>, prompt=<o que fazer>; sem pasta, pergunte)\n\n"
+    "9. SO se o pedido CITA o Claude Code ou o Codex pelo nome → EXTCODE\n"
+    "   (params: tool='claude'|'codex', folder=<pasta citada>, prompt=<o que fazer>; sem pasta, pergunte)\n"
+    "   Sem o nome no pedido, NUNCA use EXTCODE (politica POL-011).\n\n"
 
     "EXEMPLOS DE ROTEAMENTO:\n"
     "- 'abra o vs code e crie um arquivo python' → CODE (criar arquivo = CODE)\n"
@@ -362,6 +363,24 @@ def fast_search_plan(task: str, continue_in: str = "") -> Optional[dict]:
                           "params": {"query": query}}]}
 
 
+def shortcut_open_plan(task: str, continue_in: str = "") -> Optional[dict]:
+    """Atalhos sem IA ("abrir <app/site>", "abre a pasta X", "abre as configuracoes de Y", "pesquisa X no Google")
+    ja validados pelas politicas de aceite, como o Maestro faria. None = sem atalho, ou pedido ambiguo (o Maestro
+    pergunta). O Controller chama antes da conversa: esses pedidos nao pagam modelo nenhum."""
+    if _detect_ambiguity(task):
+        return None
+    fast = fast_open_plan(task, continue_in) or fast_system_plan(task, continue_in) \
+        or fast_search_plan(task, continue_in)
+    if not fast:
+        return None
+    from core.plan_validator import validate_plan
+    if not validate_plan(task, fast).approved:
+        return None
+    fast["validation"] = {"approved": True, "violations": []}
+    print(f"[Maestro] Atalho: {fast['analysis']}")
+    return fast
+
+
 # ── Atalho sem IA: continuar no que esta aberto ───────────────────────
 # "clica em Area de Trabalho", "pausa o video", "volta para a tela anterior" com o app/aba
 # aberto: o alvo da conversa ja diz qual agente age. Criar/escrever conteudo, resumir ou
@@ -450,15 +469,9 @@ class Maestro:
 
         # "abrir <app/site>", "abre a pasta X", "abre as configuracoes de Y", "pesquisa X no Google": plano direto,
         # sem chamar o modelo. Passa pelas mesmas politicas de aceite que um plano do LLM.
-        fast = fast_open_plan(task, continue_in) or fast_system_plan(task, continue_in) \
-            or fast_search_plan(task, continue_in)
+        fast = shortcut_open_plan(task, continue_in)
         if fast:
-            from core.plan_validator import validate_plan
-            check = validate_plan(task, fast)
-            if check.approved:
-                print(f"[Maestro] Atalho: {fast['analysis']}")
-                fast["validation"] = {"approved": True, "violations": []}
-                return fast
+            return fast
 
         # Memoria de rotas — falha do lookup nunca bloqueia a tarefa.
         # Vai na mensagem do usuario (nao no system) para nao invalidar

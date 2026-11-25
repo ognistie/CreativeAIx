@@ -128,6 +128,10 @@ def from_execution(entry: dict, records: list, has_reference: bool, redact=lambd
         return None
     task = _clean(redact(entry["task"]), 160)
     agents = sorted({(s.get("agent") or "").upper() for s in entry.get("subtasks") or [] if s.get("agent")})
+    # Conversa, leitura de arquivo ou pedido que nem virou plano ("Sem subtasks"): nao ha agente que aprenda uma
+    # licao nem caminho a repetir. Antes "qual modelo estou usando?" virava sugestao no Cerebro.
+    if not set(agents) - {"CHAT", "READER", "VISION"}:
+        return None
     words = " ".join(sorted(set(re.findall(r"[a-z0-9]{4,}", task.lower())))[:12])
     if not entry.get("success"):
         error = _clean(redact(str(entry.get("error") or "")), 220)

@@ -74,12 +74,20 @@ def _cell(value):
         raise ValueError('Celula invalida ou longa demais.')
     if value.startswith('='):
         # Deliberately small formula grammar: no external reference, DDE or dynamic functions.
-        if not re.fullmatch(r'[=A-Za-z0-9$():,+*/.<>!" _\-]+', value):
+        # Text literals ("Alimentação", "Atenção!") are data: they are blanked before checking the grammar.
+        # Before, accents inside a literal rejected =SUMIF(B:B,"Alimentação",D:D) and every pt-BR spreadsheet
+        # with totals per category failed after two attempts.
+        if value.count('"') % 2:
+            raise ValueError('Formula com aspas desbalanceadas.')
+        body = re.sub(r'"(?:[^"]|"")*"', '""', value)
+        if not re.fullmatch(r'[=A-Za-z0-9$():,+*/.<>&%^" _\-]+', body):
             raise ValueError('Formula contem recurso nao permitido.')
-        functions = {m.upper() for m in re.findall(r'([A-Za-z_][A-Za-z_0-9]*)\s*\(', value)}
+        if body.count('(') != body.count(')'):
+            raise ValueError('Formula com parenteses desbalanceados.')   # o Excel abriria em modo de reparo
+        functions = {m.upper() for m in re.findall(r'([A-Za-z_][A-Za-z_0-9]*)\s*\(', body)}
         if functions - FORMULAS:
             raise ValueError('Funcao de formula nao permitida.')
-        if '!' in value or len(value) > 1000:
+        if '!' in body or len(value) > 1000:
             raise ValueError('Formula deve usar apenas referencias da propria aba.')
     elif value.startswith(('+', '-', '@')):
         raise ValueError('Texto que pode ser interpretado como formula deve ser reformulado.')

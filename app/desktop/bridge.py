@@ -38,6 +38,7 @@ class Bridge(QObject, BridgeCore):
     # Conversa: como a fala foi entendida, resposta sem acao, nova conversa
     resolved           = Signal(str)
     answerReady        = Signal(str)
+    answerDelta        = Signal(str)   # conversa: texto da resposta enquanto o modelo escreve ({run_id, text})
     sessionReset       = Signal(str)
     # Modo voz
     voiceState         = Signal(str)

@@ -22,7 +22,13 @@ python.exe (Qt / PySide6)
 1. **Interface** (`ui/src`) chama `executeTask` pelo WebSocket para pedidos digitados. A voz chama o Controller
    diretamente; o evento `voiceCommand` apresenta a execução já aceita, sem uma segunda chamada da interface.
 2. **Controller** resolve a conversa (`core/followup.py`: continuação, resposta a pergunta pendente, pedido novo),
-   tenta atalhos sem modelo (`existing_targets`, `extcode_agent`, `vault_plan`, `continue_plan`) e só então o Maestro.
+   tenta atalhos sem modelo (`existing_targets`, `extcode_agent`, `vault_plan`, `continue_plan`), plano aprendido
+   (`learned_plans`) e abrir/pesquisar do dicionário (`shortcut_open_plan`). Sem nada disso, o pedido vai à
+   **Conversa** (`agents/chat_agent.py`): histórico da conversa, ferramentas só de leitura (`core/chat_tools.py`:
+   pastas, arquivos, Cérebro, tarefas), busca na web com fontes e resposta em streaming (`answerDelta`). Ela responde
+   direto, abre um arquivo/pasta pelo caminho exato (`abrir_no_computador`) ou devolve um pedido de ação
+   (`executar_no_computador`) ao Maestro. Só pedido novo pode virar ação: pergunta e comentário recebem resposta, sem
+   ferramentas de ação. Voz usa a Conversa com resposta curta (`chat.voice`); Simular segue direto ao Maestro.
 3. **Políticas em código** validam o plano antes de qualquer ação (`core/plan_validator.py`, `action_policy.py`,
    `action_risk.py`). Efeitos sensíveis (enviar, pagar, apagar, publicar) pedem confirmação.
 4. **Agentes** geram passos; o motor (`core/automation.py`) executa: rotina determinística, depois UI Automation, e
@@ -38,6 +44,7 @@ Cada pedido, falado ou digitado, passa pelos mesmos papéis, e cada papel só fa
 | --- | --- | --- | --- |
 | Voz | `desktop/voice.py`, `core/voice/understand.py` | ouve, entende se é pedido, conversa ou pergunta | responder sobre a tela sem olhar |
 | Intérprete | `core/followup.py` | completa a fala com a conversa (continuação, resposta pendente, "olhar a tela") | executar |
+| Conversa | `agents/chat_agent.py`, `core/chat_tools.py` | conversa com histórico, lê pastas/arquivos liberados e responde | alterar algo no computador (ação vai ao Maestro) |
 | Maestro | `agents/maestro.py` | divide o pedido e delega aos agentes | agir no computador |
 | Agentes | `agents/*_agent.py` | montam passos declarativos | burlar `plan_validator` / `action_policy` |
 | Vision | `core/vision.py`, `core/screen_question.py` | **só olha**: acha o elemento (coordenada) ou responde o que vê | clicar, digitar, salvar, gravar |
@@ -70,7 +77,8 @@ A integração entre conversa, visão, resultados e seus limites está em [voice
 ## Contrato da interface
 
 - Métodos: `desktop/server.py` `RPC_METHODS` (os do BridgeCore) + `HOST_METHODS` (diálogos e janela, só no host Qt).
-- Eventos: os Signals do Bridge, congelados em `app/tests/fixtures/bridge_contract.txt`.
+- Eventos: os Signals do Bridge, congelados em `app/tests/fixtures/bridge_contract.txt` (2026-11-24: `answerDelta`,
+  texto da conversa enquanto o modelo escreve). Eventos de uma execução levam `run_id`; a tela ignora os de outra.
 - `ui/src/lib/contract.gen.ts` é gerado por `app/scripts/export_ui_contract.py` (CI confere com `--check`).
 - O servidor só aceita a origem `app://ui` (e o Vite com `--dev`), exige o token no primeiro frame e só manda o
   `hello` quando o núcleo terminou de carregar.

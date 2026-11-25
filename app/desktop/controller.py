@@ -529,6 +529,70 @@ class Controller:
         self._emit("task_done", {"msg": "Concluido.", "steps": 1, "dry_run": dry_run})
         return bool(r.get("success"))
 
+    def _chat_enabled(self, dry_run: bool, from_voice: bool = False) -> bool:
+        """Conversa para pedidos de verdade, digitados ou falados (a fala recebe resposta curta, para ser lida
+        em voz alta). Simular nao le nada: nenhum handler roda em simulacao. chat.voice: false devolve a voz ao
+        fluxo antigo."""
+        if dry_run:
+            return False
+        config = getattr(self, "_config", None)
+        if config is None or not config.get("chat.enabled", True):
+            return False
+        return bool(config.get("chat.voice", True)) if from_voice else True
+
+    def _run_chat(self, said: str, task: str, entry: dict, spoken: bool = False, allow_actions: bool = True):
+        """Uma volta da conversa (agents/chat_agent.py) com texto em streaming e cada leitura como passo na tela.
+        Falha do modelo nunca derruba o pedido: devolve None e o pedido segue pelo Maestro."""
+        from agents.chat_agent import ChatAgent
+        run_id = self._tls.run_id
+        self._emit("phase", {"phase": "agent", "msg": "Pensando na resposta...", "run_id": run_id})
+        buffer: list = []
+        last = [0.0]
+        steps = {"n": 0, "open": {}}
+
+        def on_text(piece: str) -> None:
+            buffer.append(piece)
+            now = time.monotonic()
+            if now - last[0] >= 0.06:                 # ~16 quadros/s: fluido sem inundar o socket
+                last[0] = now
+                self._emit("answer_delta", {"run_id": run_id, "text": "".join(buffer)})
+
+        def on_tool(name: str, label: str, ok, result: str) -> None:
+            if ok is None:
+                steps["n"] += 1
+                steps["open"][name] = steps["n"]
+                self._emit("step_start", {"step": steps["n"], "total": steps["n"], "desc": f"[CHAT] {label}",
+                                          "action": name, "progress": 0})
+                return
+            n = steps["open"].pop(name, steps["n"])
+            self._emit("step_done", {"step": n, "total": steps["n"], "ok": bool(ok), "result": result,
+                                     "desc": f"[CHAT] {label}", "action": name, "progress": 0})
+            self._log("INFO" if ok else "WARN", "CHAT", f"{label}: {'ok' if ok else result}")
+
+        from agents.chat_agent import ChatResult
+        from core.ai_client import LLMCancelled
+        agent = getattr(self, "chat", None)
+        try:
+            if agent is None:
+                agent = self.chat = ChatAgent(client=self._ai_client, config=self._config)
+            result = agent.respond(said, self.session, task=task, on_text=on_text, on_tool=on_tool,
+                                   should_stop=lambda: not self._alive(), spoken=spoken,
+                                   allow_actions=allow_actions)
+        except LLMCancelled as error:
+            # Prazo da chamada estourado: parar e avisar. Cair no Maestro seria uma segunda espera longa.
+            self._log("WARN", "CHAT", str(error))
+            return ChatResult("failed", str(error))
+        except Exception as error:
+            self._log("WARN", "CHAT", f"Conversa indisponível ({type(error).__name__}); seguindo sem ela.")
+            return None
+        finally:
+            self._emit_usage()
+        if buffer:
+            self._emit("answer_delta", {"run_id": run_id, "text": "".join(buffer)})
+        used = sorted(set(result.tools_used) - {"executar_no_computador", "abrir_no_computador"})
+        entry["subtasks"] = [{"agent": "CHAT", "task": "conversa" + (f" ({', '.join(used)})" if used else "")}]
+        return result
+
     def _run(self, task: str, dry_run: bool, gen_report: bool,
              run_id: int = 0) -> None:
         self._tls.run_id = run_id or self._run_id
@@ -546,6 +610,9 @@ class Controller:
             self._emit("execution_finished", {"success": False, "status": "failed"})
         finally:
             bind_cancel(None)
+            # O escopo de arquivos da conversa vale so para este pedido (a thread pode ser reaproveitada)
+            from core.file_contracts import CONVERSATION_ROOTS
+            CONVERSATION_ROOTS.set(())
             with self._lock:
                 if self._is_current():
                     self.state["running"] = False
@@ -589,6 +656,9 @@ class Controller:
         task_start = time.time()
         metrics_before = self._ai_client.metrics
         entry = history_store.new_execution(task, dry_run=dry_run)
+        # A tela casa eventos atrasados (resposta em segundo plano, historico) pela execucao, nao pelo texto:
+        # repetir o mesmo pedido fazia a resposta da execucao anterior cair na nova.
+        entry["run_id"] = self._tls.run_id
         # Registro duravel: esta tarefa sobrevive a uma queda do app (core/task_ledger.py).
         # So observa: falhar aqui nao muda o resultado da execucao.
         from core.task_ledger import get_ledger
@@ -614,7 +684,7 @@ class Controller:
             t_mark = now
 
         try:
-            self._emit("phase", {"phase": "maestro", "msg": "Entendendo o pedido..."})
+            self._emit("phase", {"phase": "maestro", "msg": "Entendendo o pedido...", "run_id": self._tls.run_id})
             self._log("INFO", "MAESTRO", f"Recebida tarefa: {task[:80]}")
 
             # Conversa: "agora abra esse segundo video" vira um pedido
@@ -636,6 +706,10 @@ class Controller:
                 self._log("INFO", "MAESTRO", f"Entendido ({kind}): {res['task'][:120]}")
             task = res["task"]
             entry["resolved"] = task
+            # Escopo de arquivos da conversa: "abra o relatorio" (sem caminho) pode usar a pasta que a pessoa
+            # citou antes ou o arquivo que o app criou nesta conversa. Vale so nesta thread, ate o fim do _run.
+            from core.file_contracts import CONVERSATION_ROOTS, conversation_roots
+            CONVERSATION_ROOTS.set(tuple(conversation_roots(self.session)))
 
             if kind == "look":
                 # Camada de harness: o Vision so olha a tela e responde; nenhuma acao no computador
@@ -657,8 +731,16 @@ class Controller:
                 entry["success"] = True
                 turn["recorded"] = True     # nao entra na conversa
                 return
-            if kind == "question":
-                self._emit("answer", {"msg": res["answer"]})
+            # Pergunta que o resolvedor respondeu so com o resumo da conversa: com a conversa ligada, quem
+            # responde e ela (historico inteiro + leitura de arquivos). Papo e confirmacao seguem sem modelo.
+            chat_on = self._chat_enabled(dry_run, from_voice)
+            # Comentario/papo ("legal, ficou bom", "valeu") digitado tambem vai para a conversa: resposta natural,
+            # com a conversa inteira, em vez de frase pronta. So responde (sem ferramentas de acao). Na voz, a
+            # resposta curta do entendimento fica (latencia).
+            chat_reply = chat_on and kind == "question" and (
+                res.get("via") == "llm" or (res.get("via") in ("chat", "papo") and not from_voice))
+            if kind == "question" and not chat_reply:
+                self._emit("answer", {"msg": res["answer"], "run_id": self._tls.run_id})
                 turn["summary"] = res["answer"]
                 entry["success"] = True
                 return
@@ -743,8 +825,58 @@ class Controller:
             plan = vault_plan(route_task) or existing_plan(route_task, self.session) \
                 or ext_plan \
                 or continue_plan(route_task, kind, target, self.session) \
-                or (get_learned().plan_for(route_task) if learnable else None) \
-                or self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
+                or (get_learned().plan_for(route_task) if learnable else None)
+            # Sem atalho nem plano aprendido: a conversa responde (pergunta, analise, leitura de pastas) ou devolve
+            # um pedido de acao para o Maestro. "continue" age no que esta aberto e segue direto para os agentes.
+            if not plan and chat_on and kind in ("new", "question"):
+                # "abre o bloco de notas", "abre a pasta X", "pesquisa X no Google": sem modelo nenhum
+                from agents.maestro import shortcut_open_plan
+                plan = shortcut_open_plan(route_task, target or "")
+            if not plan and chat_on and kind in ("new", "question"):
+                lap("resolve")
+                # So pedido novo pode virar acao; pergunta/comentario a conversa apenas responde
+                chat = self._run_chat(said, task, entry, spoken=from_voice, allow_actions=kind == "new")
+                lap("maestro")
+                if chat is not None and chat.kind == "cancelled":
+                    self._emit("cancelled", {"msg": "Cancelado."})
+                    turn["recorded"] = not chat.text
+                    turn["kind"], turn["summary"] = "question", chat.text
+                    return
+                if chat is not None and chat.kind == "failed":
+                    self._emit("error", {"msg": chat.text})
+                    entry["error"] = chat.text[:300]
+                    turn["kind"] = "question"
+                    return
+                if chat is None and kind == "question":
+                    # Conversa indisponivel numa pergunta/comentario: fica a resposta do resolvedor. Nunca cai no
+                    # Maestro, que poderia transformar "legal, ficou bom" em tarefa (regra da main).
+                    answer = res.get("answer") or "Não consegui responder agora. Pode tentar de novo?"
+                    self._emit("answer", {"msg": answer, "run_id": self._tls.run_id})
+                    turn["kind"], turn["summary"] = "question", answer
+                    entry["success"] = bool(res.get("answer"))
+                    return
+                if chat is not None and chat.kind == "answer":
+                    self._emit("answer", {"msg": chat.text, "run_id": self._tls.run_id})
+                    turn["kind"] = "question"
+                    turn["summary"] = chat.text
+                    entry["success"] = bool(chat.text)
+                    if not chat.text:
+                        entry["error"] = "conversa sem resposta"
+                    return
+                if chat is not None and chat.kind == "act":
+                    route_task = chat.task
+                    # O molde aprendido e da FALA da pessoa; o pedido reescrito pela conversa nao vira molde
+                    learnable = False
+                    self._log("INFO", "CHAT", f"Pedido de ação: {route_task[:160]}")
+                    self._emit("resolved", {"said": said, "task": route_task, "kind": kind, "target": target or ""})
+                    entry["resolved"] = route_task
+                    # Abrir arquivo/pasta pelo caminho exato: plano pronto, conferido pelo escopo de leitura
+                    plan = chat.plan or vault_plan(route_task) or existing_plan(route_task, self.session)
+                    from core.coding_agents import tool_in
+                    if not plan and tool_in(said):
+                        handed = extcode_plan(route_task, self.session)
+                        plan = handed if handed and not handed.get("reroute") else None
+            plan = plan or self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
             if plan.get("learned_key"):
                 self._log("INFO", "MAESTRO", plan.get("analysis", "Plano aprendido"))
             # Copia do plano como saiu do planejador (a execucao acrescenta alvos de continuacao aos params)
@@ -940,8 +1072,10 @@ class Controller:
                     # nao marcava falha e a tarefa ia para a memoria como
                     # "sucesso".
                     all_success = False
-                    self._log("ERROR", agent_name,
-                              f"Plano falhou: {agent_plan.get('error') or agent_plan.get('reason') or 'sem steps'}")
+                    why = agent_plan.get('error') or agent_plan.get('reason') or 'sem steps'
+                    self._log("ERROR", agent_name, f"Plano falhou: {why}")
+                    if not entry.get("error"):
+                        entry["error"] = f"O agente {agent_name} não montou o plano: {why}"[:300]
                     continue
 
                 agent_steps = agent_plan.get("steps", [])
@@ -960,6 +1094,9 @@ class Controller:
                     all_success = False
                     self._log("WARN", "MAESTRO",
                               f"Passos do agente {agent_name} reprovados: {step_check.summary()}")
+                    # O motivo real vai para a resposta: antes saia "nao veio detalhe do motivo"
+                    if not entry.get("error"):
+                        entry["error"] = f"Política recusou os passos ({agent_name}): {step_check.summary()}"[:300]
                     if hasattr(agent, "report_result") and not dry_run:
                         agent.report_result({"task": agent_task}, False)
                     continue

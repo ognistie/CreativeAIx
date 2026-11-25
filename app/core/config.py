@@ -88,6 +88,7 @@ DEFAULTS = {
         "memory": "fast",
         "resolver": "fast",
         "vision_look": "assist",
+        "chat": "strong",
     },
 
     # Agentes → esforco de raciocinio (output_config.effort)
@@ -104,6 +105,16 @@ DEFAULTS = {
         "json_repair": "low",
         "resolver": "low",
         "vision_look": "low",
+        "chat": "medium",
+    },
+
+    # Conversa (agents/chat_agent.py): resposta direta com ferramentas de leitura antes do Maestro
+    "chat": {
+        "enabled": True,
+        "voice": True,
+        "web_search": True,
+        "max_tool_rounds": 12,
+        "max_tokens": 32000,
     },
 
     # Segurança

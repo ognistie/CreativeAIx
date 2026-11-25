@@ -24,6 +24,10 @@ import uuid
 import re
 from pathlib import Path, PurePosixPath
 
+# Troca atomica com nova tentativa curta quando o Windows devolve "arquivo em uso" (antivirus/OneDrive segurando o
+# arquivo recem-gravado). Com os.replace puro, edicoes e "desfazer" falhavam de vez em quando sob carga.
+from core.atomic_io import replace_file
+
 _edit_lock = threading.RLock()
 
 VERSIONS_DIR = ".ai_versions"
@@ -178,7 +182,7 @@ def apply_edit(folder: str, files: list, expected_hashes=None) -> dict:
                     stream.write(entry['content'])
             (vdir / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
             for source, full, rel in staged:
-                os.replace(source, full)
+                replace_file(source, full)
                 published.append(rel)
             for entry in files:
                 if Path(safe_rel(folder, entry['path'])).read_bytes() != entry['content'].encode('utf-8'):
@@ -283,7 +287,7 @@ def revert_last(folder: str) -> dict:
                     with tempfile.NamedTemporaryFile(delete=False, dir=Path(dst).parent, prefix='.ai-farm-undo-') as stream:
                         staged.append(stream.name)
                         stream.write(previous)
-                    os.replace(stream.name, dst)
+                    replace_file(stream.name, dst)
                 else:
                     os.remove(dst)
                 published.append((dst, current))
@@ -300,7 +304,7 @@ def revert_last(folder: str) -> dict:
                     with tempfile.NamedTemporaryFile(delete=False, dir=Path(dst).parent, prefix='.ai-farm-undo-') as stream:
                         staged.append(stream.name)
                         stream.write(current)
-                    os.replace(stream.name, dst)
+                    replace_file(stream.name, dst)
                 except OSError as rollback:
                     rollback_errors.append(type(rollback).__name__)
             return {'ok': False, 'error': f'Desfazer recusado/falhou: {error}; rollback_errors={rollback_errors}'}

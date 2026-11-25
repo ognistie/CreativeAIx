@@ -130,9 +130,35 @@ def _folder_for(task: str, project: Optional[str]) -> tuple:
 
 
 def _project_folder(session) -> Optional[str]:
+    """Projeto da conversa: o que o app criou/abriu; senao o ultimo projeto que a PESSOA citou por caminho
+    ("analise C:\\x\\repo\\docs" -> a raiz do repositorio). Antes "abre o projeto no VS Code" logo depois de
+    conversar sobre um repositorio citado respondia "ainda nao ha um projeto nesta conversa"."""
     code = getattr(session, "code", None) if session is not None else None
     folder = (code or {}).get("folder") if isinstance(code, dict) else None
-    return folder if folder and os.path.isdir(folder) else None
+    if folder and os.path.isdir(folder):
+        return folder
+    return _cited_project(session)
+
+
+def _cited_project(session) -> Optional[str]:
+    from core.paths import existing_prefix, extract_path, is_network_path
+    turns = getattr(session, "turns", None)
+    for turn in reversed(turns if isinstance(turns, (list, tuple)) else []):
+        raw = extract_path(getattr(turn, "said", "") or "")
+        found = existing_prefix(raw) if raw and not is_network_path(raw) else None
+        if not found:
+            continue
+        folder = os.path.dirname(found) if os.path.isfile(found) else found
+        probe = folder
+        for _ in range(6):                       # sobe ate a raiz do repositorio, se houver
+            if os.path.isdir(os.path.join(probe, ".git")):
+                return probe
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            probe = parent
+        return folder if os.path.isdir(folder) else None
+    return None
 
 
 def _wants_editor(n: str, session) -> bool:

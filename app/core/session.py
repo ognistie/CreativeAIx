@@ -47,7 +47,10 @@ TARGET_AGENT = {"web": "WEB", "app": "DESKTOP", "code": "CODE", "folder": "FILE"
 
 
 CONTENT_MAX = 900     # conteudo literal guardado por pedido (mensagem, texto, busca)
-REPLY_MAX = 600       # resposta do assistente guardada por pedido
+# Resposta do assistente guardada por pedido. A conversa (agents/chat_agent.py) responde analises inteiras e
+# usa o historico como contexto do proximo turno; com 600 letras "e o segundo ponto?" perdia o segundo ponto.
+# context_block() continua cortando em 240 para o Maestro.
+REPLY_MAX = 8000
 
 
 def _write_json(path: Path, data: dict) -> None:
