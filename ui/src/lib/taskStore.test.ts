@@ -72,6 +72,42 @@ describe("taskReducer", () => {
     expect(s.task).toBe("x");
   });
 
+  it("a late reply of the previous run never lands on the same request repeated", () => {
+    // Bug: o casamento era pelo texto; "de novo" com o mesmo texto recebia a resposta da execucao anterior
+    let s = run([
+      { type: "start", text: "resume a pasta", dryRun: false, now: 0 },
+      ev("phaseChanged", { msg: "Entendendo", run_id: 1 }),
+      ev("historyChanged", { entry: { task: "resume a pasta", run_id: 1, success: true } }),
+      ev("executionFinished", {}),
+      { type: "start", text: "resume a pasta", dryRun: false, now: 5000 },
+    ]);
+    s = taskReducer(s, ev("assistantMessage", { said: "resume a pasta", text: "resposta velha", run_id: 1 }));
+    expect(s.assistantText).toBe("");                       // ainda sem fase da nova execucao: recusa
+    s = run([ev("phaseChanged", { msg: "Entendendo", run_id: 2 }),
+      ev("assistantMessage", { said: "resume a pasta", text: "resposta velha", run_id: 1 }),
+      ev("historyChanged", { entry: { task: "resume a pasta", run_id: 1, success: false, error: "x" } })], s);
+    expect(s.assistantText).toBe("");
+    expect(s.status).toBe("running");                       // historico da execucao 1 nao fecha a 2
+    s = taskReducer(s, ev("assistantMessage", { said: "resume a pasta", text: "resposta nova", run_id: 2 }));
+    expect(s.assistantText).toBe("resposta nova");
+    expect(s.turns[0]?.summary).toBe("");                   // o pedido anterior ficou sem a resposta velha
+  });
+
+  it("streams the chat answer and keeps it whole in the conversation", () => {
+    const long = "## Análise\n" + "- ponto\n".repeat(200);
+    let s = run([
+      { type: "start", text: "analise a pasta", dryRun: false, now: 0 },
+      ev("phaseChanged", { msg: "Entendendo", run_id: 7 }),
+      ev("answerDelta", { run_id: 7, text: "## Aná" }),
+      ev("answerDelta", { run_id: 6, text: "outra execução" }),
+    ]);
+    expect(s.streamText).toBe("## Aná");
+    s = run([ev("answerReady", { msg: long, run_id: 7 }), ev("executionFinished", {}),
+      { type: "start", text: "e o segundo ponto?", dryRun: false, now: 9000 }], s);
+    expect(s.streamText).toBe("");
+    expect(s.turns.at(-1)?.summary).toBe(long);              // antes: cortado em 400 letras
+  });
+
   it("reopens a saved conversation", () => {
     const s = taskReducer(initialTaskState, {
       type: "showConversation",

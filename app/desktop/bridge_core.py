@@ -928,6 +928,7 @@ class BridgeCore:
             "history_changed":    lambda p: self._emit("historyChanged", _to_json(p)),
             "resolved":           lambda p: self._emit("resolved", _to_json(p)),
             "answer":             self._on_answer,
+            "answer_delta":       lambda p: self._emit("answerDelta", _to_json(p)),
             "session_reset":      lambda p: self._emit("sessionReset", _to_json(p)),
             "voice_state":        lambda p: self._emit("voiceState", _to_json(p)),
             "voice_level":        lambda p: self._emit("voiceLevel", _to_json(p)),

@@ -62,6 +62,10 @@ export interface TaskState {
   replies: string[];
   turns: Turn[];
   review: Review | null;
+  /** Execucao do nucleo dona desta tela (chega no 1o phaseChanged). Eventos de outra execucao sao ignorados. */
+  runId: number | null;
+  /** Resposta da conversa enquanto o modelo escreve (answerDelta); a final chega em answerReady. */
+  streamText: string;
 }
 
 const ZERO: Usage = { calls: 0, tokens_est: 0, cost_usd: 0 };
@@ -90,7 +94,21 @@ export const initialTaskState: TaskState = {
   replies: [],
   turns: [],
   review: null,
+  runId: null,
+  streamText: "",
 };
+
+/** Respostas da conversa sao longas (analises); o que sai da tela vai inteiro para a conversa. */
+export const TURN_SUMMARY_MAX = 12000;
+
+const runOf = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** O evento e desta execucao? Com run_id, compara pelo id; sem ele (nucleo antigo), pelo texto do pedido. */
+function sameRun(s: TaskState, runId: unknown, said: unknown): boolean {
+  const id = runOf(runId);
+  if (id !== null) return s.runId === id;
+  return said === s.task;
+}
 
 export type TaskAction =
   | { type: "start"; text: string; heard?: string; dryRun: boolean; now: number }
@@ -112,7 +130,7 @@ export function parseAgent(desc: string): { agent: string; text: string } {
 function archive(s: TaskState): Turn[] {
   if (s.status === "idle" || !s.task) return s.turns;
   const lastReply = s.replies.at(-1) ?? "";
-  const summary = (s.assistantText || s.reportSummary || s.errorMsg || s.question || lastReply).slice(0, 400);
+  const summary = (s.assistantText || s.reportSummary || s.streamText || s.errorMsg || s.question || lastReply).slice(0, TURN_SUMMARY_MAX);
   return [...s.turns, { said: s.task, resolved: s.resolvedText, status: s.status, summary }];
 }
 
@@ -148,7 +166,7 @@ export function taskReducer(s: TaskState, a: TaskAction): TaskState {
         said: str(t.said),
         resolved: str(t.resolved),
         status: t.kind === "chat" ? "done" : t.success === false ? "failed" : "done",
-        summary: str(t.reply || t.summary).slice(0, 400),
+        summary: str(t.reply || t.summary).slice(0, TURN_SUMMARY_MAX),
       }));
       return cleared(s, turns);
     }
@@ -161,8 +179,14 @@ export function taskReducer(s: TaskState, a: TaskAction): TaskState {
 
 function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
   switch (name) {
-    case "phaseChanged":
-      return { ...s, busy: true, phaseMsg: str(p.msg) || s.phaseMsg };
+    case "phaseChanged": {
+      // A 1a fase de uma execucao traz o run_id: a partir dai a tela so aceita eventos atrasados dela
+      const id = runOf(p.run_id);
+      const runId = s.runId === null && s.status === "running" && id !== null ? id : s.runId;
+      return { ...s, busy: true, runId, phaseMsg: str(p.msg) || s.phaseMsg };
+    }
+    case "answerDelta":
+      return s.runId !== null && runOf(p.run_id) === s.runId ? { ...s, streamText: str(p.text) } : s;
     case "planReady": {
       const steps = (((p.plan as P | undefined)?.steps as P[] | undefined) ?? []).map((st) => {
         const a = parseAgent(str(st.description));
@@ -238,7 +262,8 @@ function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
       return t && s.status !== "idle" ? { ...s, replies: [...s.replies, t] } : s;
     }
     case "assistantMessage":
-      return p.said === s.task ? { ...s, assistantText: str(p.text) } : s;
+      // A resposta sai em segundo plano depois do fim: pedir o mesmo texto de novo nao pode receber a anterior
+      return sameRun(s, p.run_id, p.said) ? { ...s, assistantText: str(p.text) } : s;
     case "voiceChat": {
       // Papo por voz ("valeu", "oi"): mensagem propria, sem grudar no pedido anterior
       const heard = str(p.heard);
@@ -246,11 +271,14 @@ function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
       if (s.busy) return { ...s, replies: [...s.replies, reply] };
       return { ...cleared(s, archive(s)), turns: [...archive(s), { said: heard, resolved: "", status: "done", summary: reply }] };
     }
-    case "answerReady":
-      return { ...s, reportSummary: str(p.msg) };
+    case "answerReady": {
+      const id = runOf(p.run_id);
+      if (id !== null && s.runId !== null && id !== s.runId) return s;
+      return { ...s, reportSummary: str(p.msg), streamText: "" };
+    }
     case "historyChanged": {
       const entry = (p.entry as P | undefined) ?? {};
-      if (entry.task !== s.task) return s;
+      if (!sameRun(s, entry.run_id, entry.task)) return s;
       let status = s.status;
       if (status === "running") status = entry.success ? "done" : "failed";
       const errorMsg = status === "failed" && !s.errorMsg ? str(entry.error) || "Um ou mais passos não funcionaram." : s.errorMsg;
@@ -279,7 +307,7 @@ function mergeArtifacts(cur: Artifacts, p: P): Artifacts {
 export const TASK_EVENTS = [
   "phaseChanged", "planReady", "stepStart", "stepDone", "logEntry", "apiUsage", "contextExtracted", "taskDone",
   "executionFinished", "reportReady", "planReview", "cancelled", "errorRaised", "resolved", "voiceReply",
-  "assistantMessage", "voiceChat", "answerReady", "historyChanged",
+  "assistantMessage", "voiceChat", "answerReady", "answerDelta", "historyChanged",
 ] as const;
 
 // ── Formatacao (mesma da TaskView) ─────────────────────────────

@@ -139,7 +139,8 @@ class CodingAgentsTests(unittest.TestCase):
 
     def test_without_session_explains_how_to_login_and_does_nothing(self):
         (self.folder / ".logged_out").write_text("1")
-        for tool, hint in (("claude", "/login"), ("codex", "codex login")):
+        # A ajuda traz o comando real da CLI encontrada (quem so tem o app MSIX nao tem `claude`/`codex` no PATH)
+        for tool, hint in (("claude", 'fake_cli.py" auth login'), ("codex", 'fake_cli.py" login')):
             with self.subTest(tool=tool):
                 out = self._run(tool, "crie um arquivo ola")
                 self.assertEqual(out["status"], "needs_login", out)

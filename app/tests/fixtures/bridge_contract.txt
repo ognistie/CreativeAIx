@@ -1,6 +1,7 @@
 # Assinaturas Qt do Bridge (Signals e Slots) congeladas antes da extracao do BridgeCore.
 # Mudou de proposito? Atualize este arquivo no mesmo commit e registre em docs/architecture/overview.md.
 signal _quickEntryHotkey() -> void
+signal answerDelta(QString) -> void
 signal answerReady(QString) -> void
 signal apiUsage(QString) -> void
 signal assistantMessage(QString) -> void

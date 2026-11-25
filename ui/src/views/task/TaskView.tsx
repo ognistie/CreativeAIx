@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Button, GlassPanel, Icon, Spinner, StatusDot, type IconName, type Status } from "../../components/ui";
 import { agentLabel } from "../../lib/agents";
 import { cn } from "../../lib/cn";
 import { dispatchTask, useTask } from "../../lib/stores";
-import { core } from "../../lib/host";
+import { core, openExternal } from "../../lib/host";
+
+// Markdown (react-markdown + remark-gfm, ~170 KB) carrega sob demanda: a abertura do app nao paga por ele
+const Prose = lazy(() => import("../../components/Prose").then((m) => ({ default: m.Prose })));
 import { phaseIndex, usageLine, type Step, type TaskState, type Turn } from "../../lib/taskStore";
 import { ICONS } from "../../lib/icons.gen";
 import { Composer, type ComposerOptions } from "./Composer";
@@ -44,9 +47,10 @@ export function TaskView({ dev }: { dev?: DevMode } = {}) {
   const idle = s.status === "idle";
   const hasConversation = s.turns.length > 0;
 
+  // Acompanha a resposta enquanto ela e escrita (streamText cresce a cada trecho)
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" });
-  }, [s.turns.length, s.steps.length, s.plan.length, s.status, s.assistantText, s.review]);
+    bottom.current?.scrollIntoView({ block: "end", behavior: s.streamText ? "auto" : "smooth" });
+  }, [s.turns.length, s.steps.length, s.plan.length, s.status, s.assistantText, s.reportSummary, s.streamText, s.review]);
 
   if (idle && !hasConversation) {
     const devOn = !!dev?.enabled;
@@ -59,7 +63,7 @@ export function TaskView({ dev }: { dev?: DevMode } = {}) {
           <div className="chat-intro photo-ink mx-auto text-center" data-wallpaper-safe>
             <h1 className="text-fg">{(devOn && dev?.greeting) || "Você é o criador, eu apenas executo."}</h1>
             <p className="photo-ink-muted mx-auto mt-2.5 max-w-lg text-[15px] text-fg-muted">
-              {(devOn && dev?.hint) || "Descreva o que precisa. O Maestro organiza os próximos passos."}
+              {(devOn && dev?.hint) || "Pergunte qualquer coisa, peça para eu ler uma pasta ou descreva uma tarefa."}
             </p>
           </div>
           <div>
@@ -163,13 +167,22 @@ function BrandDot() {
   );
 }
 
+/** Resposta do assistente em Markdown (listas, codigo, tabelas); links abrem fora pelo host. */
+function Answer({ markdown }: { markdown: string }) {
+  return (
+    <Suspense fallback={<p className="select-text whitespace-pre-wrap">{markdown}</p>}>
+      <Prose markdown={markdown} className="prose-chat" onLink={(href) => void openExternal(href)} />
+    </Suspense>
+  );
+}
+
 function TurnView({ turn }: { turn: Turn }) {
   return (
     <div className="flex flex-col gap-3">
       <UserBubble text={turn.said} sub={turn.resolved ? `Entendi: ${turn.resolved}` : undefined} />
       {turn.summary && (
         <Assistant status={TURN_STATUS[turn.status] ?? "ok"}>
-          <p className="whitespace-pre-wrap">{turn.summary}</p>
+          <Answer markdown={turn.summary} />
         </Assistant>
       )}
     </div>
@@ -330,12 +343,12 @@ function Outcome({ s }: { s: TaskState }) {
     );
   }
   if (s.status === "cancelled") return <p className="text-md text-fg-muted">Execução interrompida.</p>;
-  const answer = s.assistantText || s.reportSummary;
+  const answer = s.assistantText || s.reportSummary || s.streamText;
   const files = s.artifacts.files;
   if (s.status !== "done" && !answer) return null;
   return (
     <div className="flex flex-col gap-2.5">
-      {answer && <p className="max-w-[85%] text-md text-fg">{answer}</p>}
+      {answer && <Answer markdown={answer} />}
       {(files.length > 0 || s.artifacts.url) && (
         <div className="flex flex-wrap gap-2">
           {files.slice(0, 6).map((f) => (

@@ -41,17 +41,29 @@ def observe_calls():
         _call_observation.reset(token)
 
 
-# Precos por modelo (USD por 1M tokens). Prefixo mais longo vence.
-# Fonte: tabela de modelos da Anthropic (2026).
+# Precos por modelo (USD por 1M tokens). Prefixo mais longo vence, entao cada versao nova precisa da
+# propria linha: sem "claude-sonnet-5-5", o Sonnet 5.5 caia no preco do "claude-sonnet-5".
+# "cache_read" (opcional) = preco proprio da leitura de cache, quando nao e 10% do input.
+# Fonte: tabela de modelos da Anthropic (cache de 2026-11-03).
 MODEL_PRICING: dict[str, dict[str, float]] = {
+    "claude-fable-5-2":  {"input": 8.00, "output": 40.00, "cache_read": 0.20},
+    "claude-fable-5":    {"input": 10.00, "output": 50.00},
+    "claude-sonnet-5-5": {"input": 2.00, "output": 10.00, "cache_read": 0.10},
     "claude-sonnet-5":   {"input": 2.00, "output": 10.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
     "claude-sonnet-4":   {"input": 3.00, "output": 15.00},
     "claude-haiku-5-5":  {"input": 0.10, "output": 0.50},
     "claude-haiku-4-5":  {"input": 1.00, "output": 5.00},
+    "claude-opus-5-5":   {"input": 4.00, "output": 20.00, "cache_read": 0.20},
     "claude-opus-5":     {"input": 5.00, "output": 25.00},
+    "claude-opus-4-8":   {"input": 5.00, "output": 25.00},
+    "claude-opus-4-7":   {"input": 5.00, "output": 25.00},
+    "claude-opus-4-6":   {"input": 5.00, "output": 25.00},
     "claude-opus-4":     {"input": 15.00, "output": 75.00},
 }
+
+# Busca na web do servidor (web_search): US$ 10 por 1.000 buscas, alem dos tokens dos resultados.
+WEB_SEARCH_USD = 0.01
 
 # Multiplicadores do prompt cache sobre o preco de input (TTL de 5 min).
 CACHE_WRITE_MULTIPLIER = 1.25
@@ -106,10 +118,11 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int,
                   cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> float:
     """Custo em USD de uma chamada, contando o prompt cache."""
     p = _pricing_for(model)
+    cache_read_price = p.get("cache_read", p["input"] * CACHE_READ_MULTIPLIER)
     return (
         input_tokens * p["input"]
         + cache_write_tokens * p["input"] * CACHE_WRITE_MULTIPLIER
-        + cache_read_tokens * p["input"] * CACHE_READ_MULTIPLIER
+        + cache_read_tokens * cache_read_price
         + output_tokens * p["output"]
     ) / 1_000_000
 
@@ -180,6 +193,9 @@ class AIClient:
             "errors": 0,
             "truncated": 0,
         }
+        # A tarefa, a resposta final (thread propria) e a voz chamam o modelo ao mesmo tempo: sem trava,
+        # dois `+=` simultaneos perdiam chamadas e custo no total mostrado na tela.
+        self._metrics_lock = threading.Lock()
         # Andamento de respostas longas (quem usa: a UI). Chamado com
         # (agente, "thinking"|"writing", caracteres de texto ja gerados).
         self.on_progress = None
@@ -190,7 +206,8 @@ class AIClient:
     @property
     def metrics(self) -> dict[str, Any]:
         """Copia profunda — quem guarda um snapshot nao ve alteracoes futuras."""
-        snapshot = copy.deepcopy(self._metrics)
+        with self._lock_for_metrics():
+            snapshot = copy.deepcopy(self._metrics)
         snapshot["total_cost_usd"] = round(snapshot["total_cost_usd"], 6)
         return snapshot
 
@@ -251,21 +268,21 @@ class AIClient:
                     self._relay_progress(stream, agent, start)
                 resp = stream.get_final_message()
         except APIError as e:
-            self._metrics["errors"] += 1
+            self._count("errors")
             logger.error(f"API erro ({agent or 'sem agente'}): {e}")
             raise
 
         duration_ms = round((time.time() - start) * 1000)
 
         if resp.stop_reason == "refusal":
-            self._metrics["errors"] += 1
+            self._count("errors")
             if budget is not None:
                 budget.settle(reserved, self._record_success(resp, model, duration_ms, agent))
             details = getattr(resp, "stop_details", None)
             category = getattr(details, "category", None) if details else None
             raise RuntimeError(f"Modelo recusou a tarefa (categoria: {category})")
         if resp.stop_reason == "max_tokens":
-            self._metrics["truncated"] += 1
+            self._count("truncated")
             logger.warning(f"Resposta truncada em max_tokens={max_tokens} "
                            f"({agent or model})")
 
@@ -282,7 +299,68 @@ class AIClient:
             })
         return meta
 
+    def converse(self, model: str, system: str, messages: list, tools: Optional[list] = None,
+                 max_tokens: int = 16000, effort: Optional[str] = None, agent: str = "",
+                 on_text=None, should_stop=None):
+        """Uma volta de conversa com historico e ferramentas (o laco de ferramentas fica com quem chama).
+
+        Diferente de `message`: recebe a lista de mensagens inteira (multi-turno) e devolve a Message
+        final da API (blocos text/tool_use), para o chamador executar as ferramentas e continuar.
+        on_text(trecho) recebe o texto conforme chega; should_stop() True interrompe o streaming (a
+        resposta parcial ainda volta, com stop_reason "cancelled").
+        Cache: system marcado e cache automatico no fim do historico (o prefixo cresce a cada volta)."""
+        params: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages,
+                                  "cache_control": {"type": "ephemeral"}}
+        if system:
+            params["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        if tools:
+            params["tools"] = tools
+        if effort and _supports_effort(model):
+            params["output_config"] = {"effort": effort}
+        start = time.time()
+        cancelled = False
+        # Mesmo cancelamento da thread da tarefa (bind_cancel) e o mesmo prazo total das outras chamadas
+        thread_stop = getattr(_scope, "should_stop", None)
+        limit = call_limit_s()
+        try:
+            with self._client.messages.stream(**params) as stream:
+                for event in stream:
+                    if (should_stop is not None and should_stop()) or (callable(thread_stop) and thread_stop()):
+                        cancelled = True
+                        break
+                    if time.time() - start > limit:
+                        raise LLMCancelled(f"O modelo passou de {limit:.0f} s sem terminar; parei para não travar.")
+                    if on_text is not None and getattr(event, "type", "") == "text":
+                        try:
+                            on_text(event.text)
+                        except Exception:
+                            pass                         # a tela nunca derruba a resposta
+                resp = None if cancelled else stream.get_final_message()
+        except APIError as e:
+            self._count("errors")
+            logger.error(f"API erro ({agent or 'sem agente'}): {e}")
+            raise
+        if resp is None:
+            return None
+        duration_ms = round((time.time() - start) * 1000)
+        if resp.stop_reason == "max_tokens":
+            self._count("truncated")
+        elif resp.stop_reason == "refusal":
+            self._count("errors")
+        self._record_success(resp, model, duration_ms, agent)
+        return resp
+
     # ─── Helpers internos ──────────────────────────────────────────
+
+    def _lock_for_metrics(self) -> threading.Lock:
+        lock = getattr(self, "_metrics_lock", None)
+        if lock is None:                      # testes montam o cliente com __new__
+            lock = self._metrics_lock = threading.Lock()
+        return lock
+
+    def _count(self, key: str) -> None:
+        with self._lock_for_metrics():
+            self._metrics[key] = self._metrics.get(key, 0) + 1
 
     def _relay_progress(self, stream, agent: str, start: float) -> None:
         """Repassa o andamento do streaming (no maximo ~1x/s, so em respostas
@@ -341,32 +419,38 @@ class AIClient:
 
         cost = estimate_cost(model, input_tokens, output_tokens,
                              cache_read, cache_write)
-
-        m = self._metrics
-        m["total_calls"] += 1
-        m["total_input_tokens"] += input_tokens
-        m["total_output_tokens"] += output_tokens
-        m["total_cache_read_tokens"] += cache_read
-        m["total_cache_write_tokens"] += cache_write
-        m["total_cost_usd"] += cost
-        m["total_llm_ms"] = m.get("total_llm_ms", 0) + duration_ms
+        # Busca na web (ferramenta do servidor, usada pela conversa): cobrada por busca, fora dos tokens
+        server_use = getattr(usage, "server_tool_use", None)
+        searches = getattr(server_use, "web_search_requests", 0) if server_use is not None else 0
+        if isinstance(searches, int) and searches > 0:
+            cost += searches * WEB_SEARCH_USD
 
         short = self._short_name(model)
-        per = m["calls_by_model"].setdefault(
-            short, {"calls": 0, "in_tokens": 0, "out_tokens": 0, "cost_usd": 0.0}
-        )
-        per["calls"] += 1
-        per["in_tokens"] += input_tokens
-        per["out_tokens"] += output_tokens
-        per["cost_usd"] = round(per["cost_usd"] + cost, 6)
+        with self._lock_for_metrics():
+            m = self._metrics
+            m["total_calls"] += 1
+            m["total_input_tokens"] += input_tokens
+            m["total_output_tokens"] += output_tokens
+            m["total_cache_read_tokens"] += cache_read
+            m["total_cache_write_tokens"] += cache_write
+            m["total_cost_usd"] += cost
+            m["total_llm_ms"] = m.get("total_llm_ms", 0) + duration_ms
 
-        if agent:
-            per_agent = m["calls_by_agent"].setdefault(
-                agent, {"calls": 0, "cost_usd": 0.0, "ms": 0}
+            per = m["calls_by_model"].setdefault(
+                short, {"calls": 0, "in_tokens": 0, "out_tokens": 0, "cost_usd": 0.0}
             )
-            per_agent["calls"] += 1
-            per_agent["ms"] = per_agent.get("ms", 0) + duration_ms
-            per_agent["cost_usd"] = round(per_agent["cost_usd"] + cost, 6)
+            per["calls"] += 1
+            per["in_tokens"] += input_tokens
+            per["out_tokens"] += output_tokens
+            per["cost_usd"] = round(per["cost_usd"] + cost, 6)
+
+            if agent:
+                per_agent = m["calls_by_agent"].setdefault(
+                    agent, {"calls": 0, "cost_usd": 0.0, "ms": 0}
+                )
+                per_agent["calls"] += 1
+                per_agent["ms"] = per_agent.get("ms", 0) + duration_ms
+                per_agent["cost_usd"] = round(per_agent["cost_usd"] + cost, 6)
 
         # Sonnet 5 devolve blocos `thinking` antes do texto — so o texto importa.
         text = "".join(

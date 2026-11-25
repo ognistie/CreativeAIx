@@ -272,6 +272,26 @@ body.mini {
   transform: rotate(0deg) scale(1.02);
 }
 
+/* Resposta da conversa: o mesmo Markdown da leitura longa, na escala do chat (titulos discretos, ritmo curto) */
+.prose.prose-chat {
+  font-size: 14.5px;
+  line-height: 1.65;
+}
+.prose.prose-chat > * + * {
+  margin-top: 0.7em;
+}
+.prose.prose-chat :is(h1, h2, h3, h4) {
+  margin-top: 1.2em;
+  font-family: inherit;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.prose.prose-chat :is(h1, h2, h3, h4):first-child {
+  margin-top: 0;
+}
+
 /* Leitura longa: medida ~70 caracteres, ritmo vertical e hierarquia clara */
 .prose {
   color: var(--text-primary);

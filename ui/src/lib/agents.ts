@@ -1,6 +1,7 @@
 // Nome amigavel do agente (Theme.agentLabel no app anterior): o nucleo usa CODE, DATA, ...
 const LABELS: Record<string, string> = {
   MAESTRO: "Maestro",
+  CHAT: "Conversa",
   CODE: "Código",
   DATA: "Dados",
   WEB: "Web",

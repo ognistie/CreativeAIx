@@ -20,6 +20,15 @@ alterados e removidos. Sem pasta no pedido nem na conversa, a resposta é uma pe
 
 ## Comandos usados (versões conferidas pelo `--help` instalado)
 
+- **Onde as CLIs ficam (2026-11-25):** os apps Claude e Codex para Windows passaram a ser pacotes MSIX. O Claude
+  Code embutido fica em `%LOCALAPPDATA%\Claude-Data\claude_<pacote>\claude-code\<versão>\<hash>\claude.exe` e a CLI do
+  Codex dentro do pacote (`PackageRootFolder\app\resources\codex.exe`, lido do registro do usuário). Os caminhos antigos
+  continuam na busca. O login do app Claude **não** vale para o Claude Code chamado por fora: é preciso entrar uma vez
+  com `& "<caminho do claude.exe>" auth login` (a tela e as mensagens mostram o comando exato desta máquina).
+- **Conector no app Claude:** `python app/scripts/claude_desktop_connector.py bundle` gera `Creative AIx.mcpb`
+  (extensão MCP com o servidor só de leitura: Cérebro, tarefas, projetos), instalada em Configurações › Extensões ›
+  Instalar extensão; `config` mostra a entrada clássica de `claude_desktop_config.json` (no app MSIX:
+  `%LOCALAPPDATA%\Claude-Data\claude_<pacote>\`) e `check` abre o servidor como o Claude abriria.
 - **Claude Code 2.1.321** (binário que o app Claude para Windows traz em `%APPDATA%\Claude\claude-code\<versão>\<hash>\claude.exe`, ou `claude` no PATH):
   `claude -p --output-format stream-json --verbose --permission-mode acceptEdits --max-budget-usd <teto> --restricted`,
   prompt pelo stdin. `--restricted` remove Bash/WebFetch e confina as ferramentas de arquivo à pasta de trabalho;

@@ -1,10 +1,37 @@
 """Declarative FILE plans. No shell, Python or executable-open tool in this domain."""
+import contextvars
 import os
 from pathlib import Path
 
 FIELDS = {'open_path': ('path',), 'list_files': ('path',), 'find_files': ('path', 'pattern'), 'read_file': ('path',),
           'create_folder': ('path',), 'copy_file': ('source', 'destination'),
           'move_file': ('source', 'destination'), 'delete_file': ('path',)}
+
+# Pastas que a conversa ja liberou (o Controller define por execucao, na thread dela). "abra o relatorio para
+# mim" nao cita caminho: sem isto o agente de Arquivos recusava ("nao vou inferir um escopo") o arquivo que o
+# proprio app tinha acabado de criar ou que estava na pasta que a pessoa citou duas falas antes.
+CONVERSATION_ROOTS: contextvars.ContextVar = contextvars.ContextVar("file_conversation_roots", default=())
+
+
+def conversation_roots(session) -> list:
+    """Escopo da conversa = pastas que a PESSOA citou nas falas + pastas que o app criou ou abriu nela
+    (projeto, pasta aberta, arquivos criados). Nunca o que um modelo descobriu lendo arquivos."""
+    from core.paths import existing_prefix, extract_path, is_network_path
+    found = []
+    turns = getattr(session, 'turns', None)
+    for turn in turns if isinstance(turns, (list, tuple)) else []:
+        cited = extract_path(getattr(turn, 'said', '') or '')
+        path = existing_prefix(cited) if cited else None
+        if path:
+            found.append(path if os.path.isdir(path) else os.path.dirname(path))
+    code = getattr(session, 'code', None) or {}
+    if isinstance(code, dict) and code.get('folder'):
+        found.append(code['folder'])
+    if isinstance(getattr(session, 'folder', None), str):
+        found.append(session.folder)
+    files = getattr(session, 'files', None)
+    found.extend(os.path.dirname(f) for f in (files if isinstance(files, (list, tuple)) else []) if isinstance(f, str) and f)
+    return sorted({os.path.realpath(p) for p in found if p and not is_network_path(p) and os.path.isdir(p)})
 
 
 def request_roots(task):
@@ -14,6 +41,7 @@ def request_roots(task):
     explicit = extract_path(task)
     if explicit:
         roots.append(explicit)
+    roots.extend(CONVERSATION_ROOTS.get())
     return sorted({os.path.realpath(p) for p in roots if p})
 
 

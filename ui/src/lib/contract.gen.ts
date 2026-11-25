@@ -130,6 +130,7 @@ export type MethodName = keyof Methods;
 
 /** Eventos do nucleo: mesmos nomes dos Signals do Bridge. Payload JSON ja decodificado. */
 export interface Events {
+  answerDelta: unknown;
   answerReady: unknown;
   apiUsage: unknown;
   assistantMessage: unknown;

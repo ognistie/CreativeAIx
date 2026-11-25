@@ -126,6 +126,16 @@ def validate_plan(task: str, plan: dict) -> Validation:
             v.add("POL-005", f"agente desconhecido '{agent}'", i)
             continue
 
+        # POL-011: Claude Code / Codex so entram quando a PESSOA os chama ("com o Claude", "/codex" no
+        # composer). Antes "analise o codigo desta pasta" caia no EXTCODE (unico agente que "trabalha num
+        # projeto") sem ninguem pedir, e falhava na pasta do proprio app.
+        if agent == "EXTCODE":
+            from core.coding_agents import tool_in
+            if not tool_in(task):
+                v.add("POL-011", "o pedido nao chama o Claude Code nem o Codex; use os agentes do app "
+                                 "(para so ler ou analisar arquivos, a conversa responde lendo as pastas)", i)
+                continue
+
         # POL-001 / POL-002: conteudo pedido precisa existir e nao pode ser eco do pedido
         app = (params.get("app") or "").lower()
         text = (params.get("text") or params.get("message") or "").strip()

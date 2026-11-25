@@ -60,22 +60,77 @@ def _version_key(path: str) -> tuple:
     return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)
 
 
+_PACKAGES_KEY = r"Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages"
+
+
+def _msix_roots(prefix: str) -> list:
+    """Pastas de instalacao dos pacotes MSIX (app da Microsoft Store / instalador novo) cujo nome comeca com
+    `prefix`, mais nova primeiro. C:\\Program Files\\WindowsApps nao pode ser listada por glob; o registro do
+    usuario guarda a pasta de cada pacote (PackageRootFolder)."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+    found = []
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _PACKAGES_KEY) as key:
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                name = winreg.EnumKey(key, i)
+                if not name.startswith(prefix):
+                    continue
+                try:
+                    with winreg.OpenKey(key, name) as pkg:
+                        root, _kind = winreg.QueryValueEx(pkg, "PackageRootFolder")
+                except OSError:
+                    continue
+                found.append((_version_key(name.replace("_", "/", 1)), str(root)))
+    except OSError:
+        return []
+    return [root for _v, root in sorted(found, reverse=True)]
+
+
 def _candidates(tool: str):
+    local = os.environ.get("LOCALAPPDATA", "")
     if tool == "claude":
         yield shutil.which("claude")
         yield shutil.which("claude.cmd")
+        if local:     # app Claude MSIX (2026-11+): o Claude Code fica nos dados do pacote, uma pasta por versao
+            found = glob.glob(os.path.join(local, "Claude-Data", "*", "claude-code", "*", "*", "claude.exe"))
+            yield from sorted(found, key=_version_key, reverse=True)
         appdata = os.environ.get("APPDATA", "")
-        if appdata:   # o app Claude para Windows traz o Claude Code aqui, uma pasta por versao
+        if appdata:   # app Claude antigo (instalador classico): mesma estrutura em %APPDATA%
             found = glob.glob(os.path.join(appdata, "Claude", "claude-code", "*", "*", "claude.exe"))
             yield from sorted(found, key=_version_key, reverse=True)
         yield os.path.join(os.path.expanduser("~"), ".local", "bin", "claude.exe")
     elif tool == "codex":
         yield shutil.which("codex")
         yield shutil.which("codex.cmd")
-        local = os.environ.get("LOCALAPPDATA", "")
-        if local:     # o app Codex para Windows traz a CLI aqui
+        for root in _msix_roots("OpenAI.Codex_"):   # app Codex MSIX: a CLI vem dentro do pacote
+            yield os.path.join(root, "app", "resources", "codex.exe")
+        if local:     # app Codex antigo
             found = glob.glob(os.path.join(local, "OpenAI", "Codex", "bin", "*", "codex.exe"))
             yield from sorted(found, key=lambda p: os.path.getmtime(p), reverse=True)
+
+
+def login_command(tool: str, exe: list) -> str:
+    """Comando exato para entrar na CLI encontrada (quem so tem o app MSIX nao tem `claude` nem `codex` no PATH,
+    entao "rode `claude`" nao funcionava). Vazio se a CLI nao foi encontrada."""
+    if not exe:
+        return ""
+    # PowerShell: caminho entre aspas so executa com o operador & na frente
+    head = "& " + " ".join(f'"{p}"' for p in exe)
+    return f"{head} auth login" if tool == "claude" else f"{head} login"
+
+
+def login_help(tool: str, exe: Optional[list] = None) -> str:
+    """Como entrar, com o comando real desta maquina quando a CLI foi encontrada."""
+    exe = exe if exe is not None else executable(tool, _config())
+    if not exe:
+        return LOGIN_HELP[tool]
+    extra = (" O app Claude usa a propria conta, mas o Claude Code chamado por fora precisa de um login proprio, "
+             "uma vez so." if tool == "claude" else "")
+    return (f"Entre no {NAMES[tool]} uma vez: abra o PowerShell e rode {login_command(tool, exe)} ."
+            f"{extra} O Creative AIx usa essa sessao e nunca pede sua chave.")
 
 
 def _argv_for(path: str) -> list:
@@ -343,7 +398,7 @@ def run(tool: str, prompt: str, folder: str, *, on_progress: Optional[Callable[[
         ok, detail = session_status(tool, exe, folder)
         if not ok:
             say(f"{name}: sem sessao ({detail or 'nao entrou'})")
-            return {**base, "status": "needs_login", "result": f"{name} ainda nao esta conectado. {LOGIN_HELP[tool]}"}
+            return {**base, "status": "needs_login", "result": f"{name} ainda nao esta conectado. {login_help(tool, exe)}"}
     full = _full_access_for(folder, cfg)
     if full:
         say(f"AVISO: acesso total ligado para esta pasta ({name} pode rodar comandos sem confirmar).")
@@ -405,7 +460,7 @@ def run(tool: str, prompt: str, folder: str, *, on_progress: Optional[Callable[[
         why = summary or "; ".join(errors) or stderr[-600:] or f"saida {res.get('exit_code')}"
         if re.search(r"not logged in|login|unauthori[sz]ed|authentication|api key", why, re.I):
             out["status"] = "needs_login"
-            why = f"{name} pediu login. {LOGIN_HELP[tool]}"
+            why = f"{name} pediu login. {login_help(tool, exe)}"
         out.update(success=False, result=f"{name} nao concluiu: {why[:800]}")
         return out
     # A CLI disse que gravou, mas o arquivo nao existe: falha (o resumo dela costuma admitir o erro, e antes
@@ -433,7 +488,8 @@ def status(cfg: Optional[dict] = None) -> dict:
     for tool in TOOLS:
         exe = executable(tool, cfg)
         item = {"tool": tool, "name": NAMES[tool], "installed": bool(exe), "version": "", "logged_in": False,
-                "detail": "", "login_help": LOGIN_HELP[tool], "install_help": INSTALL_HELP[tool]}
+                "detail": "", "login_help": login_help(tool, exe), "install_help": INSTALL_HELP[tool],
+                "exe": exe[-1] if exe else "", "login_command": login_command(tool, exe)}
         if exe:
             lines = []
             stream_process([*exe, "--version"], cwd=str(Path.home()), on_line=lines.append, timeout=30)

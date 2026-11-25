@@ -8,9 +8,9 @@ import { slug } from "../lib/slug";
 const text = (children: React.ReactNode): string =>
   Array.isArray(children) ? children.map(text).join("") : typeof children === "string" || typeof children === "number" ? String(children) : "";
 
-export function Prose({ markdown, onLink }: { markdown: string; onLink: (href: string) => void }) {
+export function Prose({ markdown, onLink, className }: { markdown: string; onLink: (href: string) => void; className?: string }) {
   return (
-    <div className="prose select-text">
+    <div className={className ? `prose select-text ${className}` : "prose select-text"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
