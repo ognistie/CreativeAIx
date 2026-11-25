@@ -22,10 +22,13 @@ python.exe (Qt / PySide6)
 1. **Interface** (`ui/src`) chama `executeTask` pelo WebSocket para pedidos digitados. A voz chama o Controller
    diretamente; o evento `voiceCommand` apresenta a execução já aceita, sem uma segunda chamada da interface.
 2. **Controller** resolve a conversa (`core/followup.py`: continuação, resposta a pergunta pendente, pedido novo),
-   tenta atalhos sem modelo (`existing_targets`, `extcode_agent`, `vault_plan`, `continue_plan`) e, sem atalho, passa
-   o pedido digitado à **Conversa** (`agents/chat_agent.py`): histórico da conversa + ferramentas só de leitura
-   (`core/chat_tools.py`: pastas, arquivos, Cérebro, tarefas), resposta em streaming (`answerDelta`). Ela responde
-   direto ou devolve um pedido de ação (`executar_no_computador`) ao Maestro. Voz e Simular seguem direto ao Maestro.
+   tenta atalhos sem modelo (`existing_targets`, `extcode_agent`, `vault_plan`, `continue_plan`), plano aprendido
+   (`learned_plans`) e abrir/pesquisar do dicionário (`shortcut_open_plan`). Sem nada disso, o pedido vai à
+   **Conversa** (`agents/chat_agent.py`): histórico da conversa, ferramentas só de leitura (`core/chat_tools.py`:
+   pastas, arquivos, Cérebro, tarefas), busca na web com fontes e resposta em streaming (`answerDelta`). Ela responde
+   direto, abre um arquivo/pasta pelo caminho exato (`abrir_no_computador`) ou devolve um pedido de ação
+   (`executar_no_computador`) ao Maestro. Só pedido novo pode virar ação: pergunta e comentário recebem resposta, sem
+   ferramentas de ação. Voz usa a Conversa com resposta curta (`chat.voice`); Simular segue direto ao Maestro.
 3. **Políticas em código** validam o plano antes de qualquer ação (`core/plan_validator.py`, `action_policy.py`,
    `action_risk.py`). Efeitos sensíveis (enviar, pagar, apagar, publicar) pedem confirmação.
 4. **Agentes** geram passos; o motor (`core/automation.py`) executa: rotina determinística, depois UI Automation, e

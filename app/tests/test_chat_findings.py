@@ -44,6 +44,21 @@ class OpenAndScopeTests(Tmp):
             with self.subTest(bad=bad.name, editor=editor), self.assertRaises(ToolError):
                 open_plan(str(bad), editor, scope)
 
+    def test_active_content_only_opens_in_folders_the_person_cited(self):
+        # Revisao: um .html plantado e lido pela conversa nao abre no navegador por instrucao injetada
+        from agents.chat_agent import open_plan
+        from core.chat_tools import ReadScope, ToolError
+        (self.root / "pagina.html").write_text("<script></script>", encoding="utf-8")
+        (self.root / "notas.pdf").write_bytes(b"%PDF")
+        home_only = ReadScope([self.root.resolve()])               # leitura liberada (pasta do usuario)
+        with self.assertRaises(ToolError):
+            open_plan(str(self.root / "pagina.html"), False, home_only, ReadScope([]))
+        self.assertEqual(open_plan(str(self.root / "pagina.html"), True, home_only, ReadScope([]))  # no editor: ok
+                         ["subtasks"][0]["params"]["existing"]["action"], "open_in_editor")
+        open_plan(str(self.root / "notas.pdf"), False, home_only, ReadScope([]))       # documento comum: ok
+        cited = ReadScope.for_conversation([f"abra o site em {self.root}"], include_home=False)
+        open_plan(str(self.root / "pagina.html"), False, home_only, cited)            # citada pela pessoa: ok
+
     def test_file_agent_scope_includes_what_the_conversation_already_released(self):
         # F4: "abra o relatorio para mim" nao cita caminho; a pasta veio duas falas antes ou foi criada pelo app
         from core.file_contracts import CONVERSATION_ROOTS, conversation_roots, request_roots, validate
@@ -79,6 +94,33 @@ class OpenAndScopeTests(Tmp):
         plan = existing_plan("abre o projeto no vs code", s)
         self.assertEqual(plan["subtasks"][0]["params"]["existing"],
                          {"action": "open_in_editor", "path": str(self.root)})
+
+
+class ProjectVersionsSharingViolationTests(Tmp):
+    def test_edit_and_undo_survive_a_file_briefly_in_use(self):
+        # Gate sob carga: antivirus/OneDrive segurando o arquivo recem-gravado (WinError 32) fazia a edicao cair no
+        # rollback e o "desfazer" falhar. A troca agora tenta de novo (core/atomic_io.replace_file).
+        import core.atomic_io as atomic
+        from core.project_versions import apply_edit, revert_last
+        (self.root / "index.html").write_text("<h1>Cafe</h1>", encoding="utf-8")
+        real = os.replace
+        busy = {"left": 2}
+
+        def flaky(src, dst):
+            if busy["left"]:
+                busy["left"] -= 1
+                err = PermissionError("arquivo em uso")
+                err.winerror = 32
+                raise err
+            return real(src, dst)
+
+        with patch.object(atomic.os, "replace", side_effect=flaky):
+            r1 = apply_edit(str(self.root), [{"path": "index.html", "content": "<h1>Novo</h1>"}])
+            busy["left"] = 1
+            r2 = revert_last(str(self.root))
+        self.assertTrue(r1["ok"], r1)
+        self.assertTrue(r2["ok"], r2)
+        self.assertEqual((self.root / "index.html").read_text(encoding="utf-8"), "<h1>Cafe</h1>")
 
 
 class BuilderAndSuggestionTests(unittest.TestCase):
@@ -149,6 +191,25 @@ class ChatPowerTests(unittest.TestCase):
         off.respond("oi", None)
         self.assertNotIn("web_search", calls[0]["tools"])
 
+    def test_retried_round_does_not_duplicate_streamed_text(self):
+        # Revisao: JSON de ferramenta ilegivel refaz a volta; o texto parcial dela nao pode aparecer duas vezes
+        from agents.chat_agent import ChatAgent
+        data = {"chat.max_tool_rounds": 3, "chat.web_search": False}
+        cfg = Mock(get=lambda k, d=None: data.get(k, d), get_model=lambda n: "m", get_effort=lambda n: None)
+        state = {"n": 0}
+
+        def converse(model, system, messages, tools, on_text=None, **kw):
+            state["n"] += 1
+            on_text("Resposta ")
+            if state["n"] == 1:
+                raise ValueError("JSON de ferramenta cortado")
+            on_text("final.")
+            return SimpleNamespace(content=[], stop_reason="end_turn")
+
+        agent = ChatAgent(client=Mock(converse=converse), config=cfg)
+        agent.system_prompt = lambda: "S"
+        self.assertEqual(agent.respond("oi", None).text, "Resposta final.")
+
     def test_without_actions_a_comment_never_becomes_a_task(self):
         use = SimpleNamespace(type="tool_use", id="t1", name="executar_no_computador", input={"pedido": "editar o site"})
         agent, calls = self.agent(SimpleNamespace(content=[use], stop_reason="tool_use"),
@@ -213,6 +274,24 @@ class ControllerFindingsTests(unittest.TestCase):
         with patch("agents.maestro.shortcut_open_plan", return_value={"subtasks": [], "skills": []}):
             self.run_task(c, "abre o bloco de notas")
         c.chat.respond.assert_not_called()
+
+    def test_chat_failure_on_a_comment_never_reaches_the_maestro(self):
+        # Revisao: com a conversa fora do ar, "legal, ficou bom" caia no Maestro (que podia virar tarefa)
+        c = self.controller()
+        c.chat = Mock(respond=Mock(side_effect=RuntimeError("api fora")))
+        entry = self.run_task(c, "valeu!")
+        c.maestro.analyze.assert_not_called()
+        self.assertTrue(entry["success"])                  # ficou a resposta do proprio resolvedor
+        from core.file_contracts import CONVERSATION_ROOTS
+        self.assertEqual(CONVERSATION_ROOTS.get(), ())     # escopo da conversa restaurado no fim do pedido
+
+    def test_llm_deadline_stops_instead_of_a_second_long_call(self):
+        from core.ai_client import LLMCancelled
+        c = self.controller()
+        c.chat = Mock(respond=Mock(side_effect=LLMCancelled("O modelo passou de 300 s sem terminar")))
+        entry = self.run_task(c, "crie uma analise completa do mercado de soja")
+        c.maestro.analyze.assert_not_called()
+        self.assertIn("300 s", entry["error"])
 
     def test_typed_small_talk_gets_a_real_answer_without_actions(self):
         # "valeu" digitado: antes frase pronta; agora a conversa responde, mas sem ferramentas de acao

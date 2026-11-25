@@ -17,7 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Read scope for the chat**: the user's home folder plus folders the person typed or attached; network paths, the Windows folder, `AppData`, key folders and secret files (`.env`, keys, credentials) are always refused, and literal secrets are masked in what is returned. An action request written by the model cannot carry an address the person never typed.
 - **POL-011**: Claude Code/Codex only when the request names them (or `/claude` `/codex` is chosen).
 - **Voice uses the chat too** (short spoken answers; `chat.voice: false` restores the old flow). "Open <app>" keeps its dictionary shortcut and never pays for the chat call.
-- **`abrir_no_computador`**: the chat opens a file or folder by its exact path (scope-checked; programs and scripts never open through the system).
+- **`abrir_no_computador`**: the chat opens a file or folder by its exact path (scope-checked; programs and scripts never open through the system; active content such as HTML, SVG or macro-enabled Office files opens only in folders the person cited or the app created).
+- **Web search** in the chat (Anthropic server tool, max 5 per answer, sources listed; `chat.web_search: false` turns it off). Comments and questions get answers without action tools; if the chat is unavailable they keep the resolver's answer and never fall back to the Maestro; a model-call deadline stops the request instead of starting a second long call.
 - **Claude Desktop connector** (`app/scripts/claude_desktop_connector.py`): builds `Creative AIx.mcpb` (MCP Bundle with the read-only server: Brain, tasks, projects), prints the classic `claude_desktop_config.json` entry and checks the server the way Claude starts it.
 
 ### Fixed
@@ -35,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The reply now states the real reason when a policy rejects an agent's steps or an agent cannot build its plan (it used to say "something went wrong").
 - "Open the project in VS Code" uses the folder the person cited (up to the repository root) when the app did not create the project.
 - "What model am I using?" is answered from the app context; conversation turns no longer become Brain suggestions.
+- **Project edit/undo failed intermittently under load**: `project_versions` swapped files with plain `os.replace`, which fails while antivirus or OneDrive briefly holds a freshly written file; it now uses the retrying `atomic_io.replace_file`.
 
 ### Removed
 - Unused `agents/vision_maestro.py` (per-action screenshot supervisor that failed open and proposed corrective steps) and the outdated `agents/app_routines.py` (superseded by `desktop_agent._build_steps`).

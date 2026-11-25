@@ -22,6 +22,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
 
 from core import chat_tools
@@ -118,7 +119,7 @@ _URL = re.compile(r"(?:https?://\S+|\b[\w-]+(?:\.[\w-]+)*\.(?:com|br|net|org|io|
 
 @dataclass
 class ChatResult:
-    kind: str                       # answer | act | cancelled
+    kind: str                       # answer | act | cancelled | failed (prazo estourado: text = motivo)
     text: str = ""                  # resposta (answer) ou o que ja foi dito antes de agir (act)
     task: str = ""                  # pedido de acao (act)
     tools_used: list = field(default_factory=list)
@@ -126,16 +127,29 @@ class ChatResult:
     plan: Optional[dict] = None     # act com plano pronto (abrir arquivo/pasta): nao passa pelo Maestro
 
 
-def open_plan(raw: str, editor: bool, scope: ReadScope) -> dict:
+# Abrir pelo sistema executa conteudo destes tipos (JavaScript no navegador, macros do Office). So abrem em pastas
+# que a PESSOA citou ou que o app criou: um arquivo plantado e lido pela conversa nao abre por instrucao injetada.
+ACTIVE_EXT = {".html", ".htm", ".xhtml", ".shtml", ".svg", ".mht", ".mhtml", ".xml", ".xsl",
+              ".xlsm", ".xltm", ".xlam", ".docm", ".dotm", ".pptm", ".potm", ".ppsm", ".ppam", ".sldm"}
+
+
+def open_plan(raw: str, editor: bool, scope: ReadScope, trusted: Optional[ReadScope] = None) -> dict:
     """abrir_no_computador -> plano deterministico de 'abrir o que ja existe' (o mesmo do existing_plan).
     O caminho passa pelo escopo de leitura; executaveis e scripts nunca abrem pelo sistema (o motor confere de
-    novo em existing_steps)."""
+    novo em existing_steps); conteudo ativo so abre dentro de `trusted` (pastas citadas pela pessoa ou criadas
+    pelo app). No editor (VS Code) nada e executado."""
     from core.existing_targets import _plan
     from core.paths import EXECUTABLE_EXT, OPEN_REFUSED_EXT
     path = scope.check(raw)
     ext = path.suffix.lower()
     if (editor and ext in EXECUTABLE_EXT) or (not editor and ext in OPEN_REFUSED_EXT):
         raise ToolError(f"{path.name} é um programa ou script; não abro pelo sistema (posso ler o conteúdo)")
+    if not editor and ext in ACTIVE_EXT:
+        try:
+            (trusted or ReadScope([])).check(str(path))
+        except ToolError:
+            raise ToolError(f"{path.name} tem conteúdo que roda ao abrir (página, macro); só abro arquivos assim em "
+                            "pastas que a pessoa citou. Peça para ela confirmar o caminho, ou abra no editor") from None
     action = "open_in_editor" if editor else "open_path"
     what = f"abrir {path.name or path}" + (" no VS Code" if editor else "")
     return _plan(what, {"action": action, "path": str(path)}, what)
@@ -334,7 +348,12 @@ class ChatAgent:
         turns = list(getattr(session, "turns", None) or [])
         # So o que a PESSOA digitou libera pastas e enderecos; o pedido reescrito pelo resolvedor (modelo) nao
         user_texts = [getattr(t, "said", "") for t in turns] + [said]
-        scope = ReadScope.for_conversation(user_texts, getattr(session, "files", None) or [])
+        files = getattr(session, "files", None) or []
+        scope = ReadScope.for_conversation(user_texts, files)
+        # Pastas citadas pela pessoa + as que o app criou/abriu: unico lugar onde conteudo ativo abre pelo sistema
+        from core.file_contracts import conversation_roots
+        trusted = ReadScope.for_conversation(user_texts, files, include_home=False)
+        trusted.roots.extend(Path(r) for r in conversation_roots(session))
         context = app_context(session, model=self.model, effort=self.effort or "")
         content = f"<contexto_do_app>\n{context}\n</contexto_do_app>\n\n{said}"
         if task and task.strip() != said.strip():
@@ -369,6 +388,8 @@ class ChatAgent:
                 json_retries = 0
             except ValueError:
                 # JSON de ferramenta que o SDK nao conseguiu ler: refaz a volta (limitado). Erros da API sobem.
+                # O texto parcial desta volta sai da resposta: a volta refeita o escreve de novo.
+                del shown[before:]
                 json_retries += 1
                 if json_retries > 2:
                     raise
@@ -411,7 +432,7 @@ class ChatAgent:
                 err = err or self._valid(act.name, act.input)
                 if not err and act.name == OPEN:
                     try:
-                        plan = open_plan(act.input["caminho"], bool(act.input.get("editor")), scope)
+                        plan = open_plan(act.input["caminho"], bool(act.input.get("editor")), scope, trusted)
                     except ToolError as exc:
                         err = str(exc)
                     else:

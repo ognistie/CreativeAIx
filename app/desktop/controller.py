@@ -569,6 +569,8 @@ class Controller:
                                      "desc": f"[CHAT] {label}", "action": name, "progress": 0})
             self._log("INFO" if ok else "WARN", "CHAT", f"{label}: {'ok' if ok else result}")
 
+        from agents.chat_agent import ChatResult
+        from core.ai_client import LLMCancelled
         agent = getattr(self, "chat", None)
         try:
             if agent is None:
@@ -576,8 +578,12 @@ class Controller:
             result = agent.respond(said, self.session, task=task, on_text=on_text, on_tool=on_tool,
                                    should_stop=lambda: not self._alive(), spoken=spoken,
                                    allow_actions=allow_actions)
+        except LLMCancelled as error:
+            # Prazo da chamada estourado: parar e avisar. Cair no Maestro seria uma segunda espera longa.
+            self._log("WARN", "CHAT", str(error))
+            return ChatResult("failed", str(error))
         except Exception as error:
-            self._log("WARN", "CHAT", f"Conversa indisponível ({type(error).__name__}); seguindo pelo Maestro.")
+            self._log("WARN", "CHAT", f"Conversa indisponível ({type(error).__name__}); seguindo sem ela.")
             return None
         finally:
             self._emit_usage()
@@ -604,6 +610,9 @@ class Controller:
             self._emit("execution_finished", {"success": False, "status": "failed"})
         finally:
             bind_cancel(None)
+            # O escopo de arquivos da conversa vale so para este pedido (a thread pode ser reaproveitada)
+            from core.file_contracts import CONVERSATION_ROOTS
+            CONVERSATION_ROOTS.set(())
             with self._lock:
                 if self._is_current():
                     self.state["running"] = False
@@ -832,6 +841,19 @@ class Controller:
                     self._emit("cancelled", {"msg": "Cancelado."})
                     turn["recorded"] = not chat.text
                     turn["kind"], turn["summary"] = "question", chat.text
+                    return
+                if chat is not None and chat.kind == "failed":
+                    self._emit("error", {"msg": chat.text})
+                    entry["error"] = chat.text[:300]
+                    turn["kind"] = "question"
+                    return
+                if chat is None and kind == "question":
+                    # Conversa indisponivel numa pergunta/comentario: fica a resposta do resolvedor. Nunca cai no
+                    # Maestro, que poderia transformar "legal, ficou bom" em tarefa (regra da main).
+                    answer = res.get("answer") or "Não consegui responder agora. Pode tentar de novo?"
+                    self._emit("answer", {"msg": answer, "run_id": self._tls.run_id})
+                    turn["kind"], turn["summary"] = "question", answer
+                    entry["success"] = bool(res.get("answer"))
                     return
                 if chat is not None and chat.kind == "answer":
                     self._emit("answer", {"msg": chat.text, "run_id": self._tls.run_id})

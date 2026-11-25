@@ -77,8 +77,9 @@ class ReadScope:
 
     @classmethod
     def for_conversation(cls, user_texts: Iterable[str] = (), attached: Iterable[str] = (),
-                         home: Optional[str] = None) -> "ReadScope":
-        """Raizes = pasta do usuario + pastas que a pessoa citou ou anexou (nunca as que o modelo inventa)."""
+                         home: Optional[str] = None, include_home: bool = True) -> "ReadScope":
+        """Raizes = pasta do usuario + pastas que a pessoa citou ou anexou (nunca as que o modelo inventa).
+        include_home=False: so o que a pessoa citou/anexou (escopo para abrir conteudo ativo)."""
         from core.paths import existing_prefix, extract_path, is_network_path
         roots: list[Path] = []
 
@@ -94,7 +95,8 @@ class ReadScope:
             if rp.is_dir() and not any(_inside(rp, r) for r in roots):
                 roots[:] = [r for r in roots if not _inside(r, rp)] + [rp]
 
-        add(home or os.path.expanduser("~"))
+        if include_home:
+            add(home or os.path.expanduser("~"))
         for text in user_texts:
             cited = extract_path(text or "")
             if cited:
