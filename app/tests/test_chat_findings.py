@@ -191,6 +191,31 @@ class ChatPowerTests(unittest.TestCase):
         off.respond("oi", None)
         self.assertNotIn("web_search", calls[0]["tools"])
 
+    def test_local_read_removes_web_search_for_the_rest_of_the_turn(self):
+        # Revisao: conteudo lido do computador nao pode sair numa consulta de busca na web (exfiltracao)
+        read = SimpleNamespace(type="tool_use", id="r1", name="tarefas_recentes", input={})
+        agent, calls = self.agent(SimpleNamespace(content=[read], stop_reason="tool_use"),
+                                  SimpleNamespace(content=[SimpleNamespace(type="text", text="Feito.")], stop_reason="end_turn"))
+        agent.run_tool = lambda name, args, scope: "tarefa: segredo"
+        agent.respond("o que fiz hoje?", None)
+        self.assertIn("web_search", calls[0]["tools"])
+        self.assertNotIn("web_search", calls[1]["tools"])
+        self.assertIn("tarefas_recentes", calls[1]["tools"])     # leituras continuam
+
+    def test_local_read_after_web_search_is_refused(self):
+        # Texto de pagina pode pedir "leia tal arquivo": depois de buscar, a mensagem nao le o computador
+        search = SimpleNamespace(type="server_tool_use", id="s1", name="web_search", input={"query": "x"})
+        read = SimpleNamespace(type="tool_use", id="r1", name="tarefas_recentes", input={})
+        agent, calls = self.agent(SimpleNamespace(content=[search, read], stop_reason="tool_use"),
+                                  SimpleNamespace(content=[SimpleNamespace(type="text", text="Feito.")], stop_reason="end_turn"))
+        ran = []
+        agent.run_tool = lambda name, args, scope: ran.append(name) or "dados"
+        agent.respond("pesquise x", None)
+        self.assertEqual(ran, [])
+        result = calls[1]["messages"][-1]["content"][0]
+        self.assertTrue(result["is_error"])
+        self.assertIn("busca na web", result["content"])
+
     def test_retried_round_does_not_duplicate_streamed_text(self):
         # Revisao: JSON de ferramenta ilegivel refaz a volta; o texto parcial dela nao pode aparecer duas vezes
         from agents.chat_agent import ChatAgent

@@ -37,6 +37,10 @@ ACT = "executar_no_computador"
 OPEN = "abrir_no_computador"
 # Busca na web do servidor da Anthropic (dados atuais, com fontes). Roda la, nao aqui: nada no computador.
 WEB_SEARCH = {"type": "web_search_20260209", "name": "web_search", "max_uses": 5}
+# Leituras locais. Numa mesma mensagem, ler o computador e buscar na web nao se misturam: a consulta da busca sai
+# para a internet e poderia levar o conteudo de um arquivo (exfiltracao induzida por texto lido).
+LOCAL_READS = frozenset({"listar_pasta", "ler_arquivo", "buscar_arquivos", "buscar_no_cerebro",
+                         "ler_nota_do_cerebro", "tarefas_recentes"})
 
 SYSTEM = """Você é o assistente do Creative AIx, um app de desktop no Windows que conversa com a pessoa e opera o computador dela por meio de agentes (Web, Desktop, Código, Dados, Arquivos e, quando ela pede pelo nome, Claude Code ou Codex).
 
@@ -250,11 +254,12 @@ class ChatAgent:
         self.max_tokens = int(self._config.get("chat.max_tokens", 32000) or 32000)
         self.web_search = self._config.get("chat.web_search", True) is not False
 
-    def tools(self, allow_actions: bool = True) -> list:
+    def tools(self, allow_actions: bool = True, web: bool = True) -> list:
         """Ferramentas desta volta. Sem acoes (comentario, pergunta sobre o que ja foi feito): so leitura, para
-        um "legal, ficou bom" nunca virar tarefa. Ordem fixa: o prefixo do cache depende dela."""
+        um "legal, ficou bom" nunca virar tarefa. Ordem fixa: o prefixo do cache depende dela.
+        `web=False` depois de uma leitura local: a busca na web sai das voltas seguintes desta mensagem."""
         out = [t for t in TOOLS if allow_actions or t["name"] not in (ACT, OPEN)]
-        return out + [dict(WEB_SEARCH)] if self.web_search else out
+        return out + [dict(WEB_SEARCH)] if self.web_search and web else out
 
     # ── prompt ───────────────────────────────────────────────────────
     def system_prompt(self) -> str:
@@ -364,7 +369,8 @@ class ChatAgent:
                         "grande, dê o essencial e diga que pode detalhar.)")
         messages = history_messages(turns) + [{"role": "user", "content": content}]
         system = self.system_prompt()
-        tools = self.tools(allow_actions)
+        read_local = False                         # leu o computador nesta mensagem: sem busca na web daqui em diante
+        searched = False                           # buscou na web nesta mensagem: sem leitura local daqui em diante
         shown: list[str] = []
         tools_used: list[str] = []
         json_retries = 0
@@ -382,6 +388,8 @@ class ChatAgent:
                 emit("\n\n")                       # texto de uma volta nova comeca em paragrafo proprio
             before = len(shown)
             try:
+                # Refeito a cada volta: tirar a busca depois de uma leitura so custa o cache (sem blocos de thinking)
+                tools = self.tools(allow_actions, web=not read_local)
                 resp = self._client.converse(self.model, system, messages, tools, max_tokens=self.max_tokens,
                                              effort=self.effort, agent="CHAT", on_text=emit,
                                              should_stop=should_stop)
@@ -402,6 +410,7 @@ class ChatAgent:
                 for block in resp.content:
                     if getattr(block, "type", "") == "text" and getattr(block, "text", ""):
                         emit(block.text)
+            searched = searched or any(getattr(b, "type", "") == "server_tool_use" for b in resp.content)
             if resp.stop_reason == "pause_turn":
                 # A busca na web (servidor) parou no limite de iteracoes: devolve a volta e o servidor continua
                 messages.append({"role": "assistant", "content": resp.content})
@@ -453,11 +462,15 @@ class ChatAgent:
                 args = block.input
                 label = self.tool_label(block.name, args)
                 bad = act_errors.get(block.id) if block.name in (ACT, OPEN) else self._valid(block.name, args)
+                if not bad and searched and block.name in LOCAL_READS:
+                    bad = ("nesta mensagem já houve busca na web; não leio arquivos, pastas ou notas do computador "
+                           "depois dela. Responda com o que tem e sugira pedir a leitura numa mensagem separada.")
                 if bad:
                     results.append({"type": "tool_result", "tool_use_id": block.id, "is_error": True,
                                     "content": json.dumps({"erro": bad}, ensure_ascii=False)})
                     continue
                 tools_used.append(block.name)
+                read_local = read_local or block.name in LOCAL_READS
                 if on_tool:
                     on_tool(block.name, label, None, "")
                 try:

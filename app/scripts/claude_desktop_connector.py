@@ -133,6 +133,7 @@ def config_entry() -> dict:
 
 def check(timeout: float = 60) -> dict:
     """Abre o servidor como o Claude abriria (pasta de trabalho qualquer) e faz initialize + tools/list."""
+    from core.process_runner import child_environment
     msgs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize",
              "params": {"protocolVersion": "2025-06-18", "capabilities": {},
                         "clientInfo": {"name": "claude-desktop-check", "version": "1"}}},
@@ -146,7 +147,7 @@ def check(timeout: float = 60) -> dict:
     try:
         p = subprocess.run([str(venv_python()), str(tmp)], input="".join(json.dumps(m) + "\n" for m in msgs),
                            capture_output=True, text=True, encoding="utf-8", timeout=timeout, cwd=str(Path.home()),
-                           env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                           env=child_environment(),       # sem chaves do app: o servidor so precisa do basico
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     finally:
         tmp.unlink(missing_ok=True)
