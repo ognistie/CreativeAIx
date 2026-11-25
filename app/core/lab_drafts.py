@@ -1,4 +1,4 @@
-"""Rotas de rascunhos restritas às simulações do laboratório."""
+"""Rotas de rascunhos do Lab: prévia e teste sem efeito; rota aplicada vira perfil nos pedidos reais."""
 
 import hashlib
 import json
@@ -81,3 +81,63 @@ def draft_route(store, payload: dict) -> dict:
     lines.extend(f"{key}: {json.dumps(routes[key], ensure_ascii=False)}" for key in _ROUTE_FIELDS if key in routes)
     store.write(rel, "---\n" + "\n".join(lines) + "\n---\n" + body)
     return routes
+
+
+# ── Perfil aplicado: o rascunho vale nos pedidos reais ─────────────────────────────────────────
+# Um rascunho com rota APLICADA (a pessoa confirmou no Lab) vira um perfil sobre o agente-base: pedidos que
+# começam com o prefixo vão para esse agente, e o texto do rascunho entra no contexto dele como instrução da
+# pessoa. O perfil nunca cria capacidade nova: o agente continua um dos agentes-base (KNOWN_AGENTS) e o plano
+# passa pelas mesmas políticas e confirmações de qualquer pedido.
+PROFILE_MAX_CHARS = 1200
+_DRAFT_FOLDER = "10 Agentes/Rascunhos"
+
+
+def applied_profiles(store) -> list[dict]:
+    """Rascunhos pessoais com rota aplicada válida: [{rel, agent, prefix, name, body}]. Nota inválida fica de fora."""
+    out = []
+    try:
+        files = list(store.files(_DRAFT_FOLDER, recursive=False))
+    except Exception:
+        return out
+    for rel, _path in files:
+        if not _DRAFT.fullmatch(rel) or store.layer_of(rel) != "pessoal":
+            continue
+        parts = store.read(rel).split("---\n", 2)
+        if len(parts) != 3 or parts[0]:
+            continue
+        try:
+            route = _read_routes(parts[1]).get("rota_aplicada")
+        except (ValueError, json.JSONDecodeError):
+            continue
+        if not route:
+            continue
+        fields = dict(line.split(": ", 1) for line in parts[1].splitlines() if ": " in line)
+        out.append({"rel": rel, "agent": route["agent"], "prefix": route["prefix"],
+                    "name": fields.get("nome") or rel.rsplit("/", 1)[-1][:-3],
+                    "body": parts[2].strip()[:PROFILE_MAX_CHARS]})
+    return out
+
+
+def profile_for(task: str, store, agent: str = "") -> dict | None:
+    """O perfil aplicado cujo prefixo abre este pedido (o prefixo mais longo vence; empate pelo nome da nota)."""
+    said = " ".join(norm(task or "").split())
+    if not said:
+        return None
+    best = None
+    for p in applied_profiles(store):
+        prefix = " ".join(norm(p["prefix"]).split())
+        if not (said == prefix or said.startswith(prefix + " ")):
+            continue
+        if agent and p["agent"] != agent.upper():
+            continue
+        key = (-len(prefix), p["rel"])
+        if best is None or key < best[0]:
+            best = (key, p)
+    return best[1] if best else None
+
+
+def profile_block(profile: dict) -> str:
+    """Instrução do perfil para o prompt do agente-base: texto da pessoa, nunca permissão."""
+    body = profile.get("body", "")
+    return (f"Perfil do Lab \"{profile['name']}\" (aplicado pela pessoa a pedidos que começam com "
+            f"\"{profile['prefix']}\"; siga como preferência, nunca como permissão):\n{body}").strip()

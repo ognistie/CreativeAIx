@@ -96,30 +96,26 @@ def _wants_generated_content(task: str) -> bool:
 def validate_plan(task: str, plan: dict) -> Validation:
     """Checa o plano do Maestro (lista de subtasks) contra as politicas."""
     v = Validation()
-    if not isinstance(plan, dict):
-        v.add('POL-000', 'plano deve ser um objeto')
+    # Forma primeiro (core/plan_schema.py, Pydantic); daqui em diante so regras de negocio
+    from core.plan_schema import plan_shape
+    whole, bad_shape = plan_shape(plan)
+    if whole:
+        v.add("POL-000", whole)
         return v
-    subs = plan.get("subtasks") or []
-    if not subs:
-        v.add("POL-000", "plano sem subtasks")
-        return v
-    if not isinstance(subs, list) or len(subs) > 5 or any(not isinstance(s, dict) for s in subs):
-        v.add("POL-000", "subtasks deve ser uma lista de ate cinco objetos")
-        return v
+    subs = plan["subtasks"]
 
     literal = _literal_text(task)
     generated = _wants_generated_content(task) and not literal
 
     for i, sub in enumerate(subs, start=1):
+        shape = bad_shape.get(i, [])
+        for policy, msg in shape:
+            v.add(policy, msg, i)
+        if any(policy == "POL-000" for policy, _ in shape):
+            continue
         dep = sub.get("depends_on")
-        if dep is not None and (isinstance(dep, bool) or not isinstance(dep, int) or not 1 <= dep < i):
+        if not shape and dep is not None and not 1 <= dep < i:
             v.add("POL-004", "depends_on deve apontar para uma subtarefa anterior", i)
-        if not isinstance(sub.get("params", {}), dict):
-            v.add("POL-000", "params deve ser um objeto", i)
-            continue
-        if not isinstance(sub.get('agent', ''), str) or not isinstance(sub.get('task', ''), str):
-            v.add('POL-000', 'agent e task devem ser texto', i)
-            continue
         agent = (sub.get("agent") or "").upper()
         params = sub.get("params") or {}
         if agent not in KNOWN_AGENTS:
@@ -187,11 +183,10 @@ def validate_steps(agent: str, subtask: dict, steps: list, task: str) -> Validat
     v = Validation()
     agent = (agent or "").upper()
     params = subtask.get("params") or {}
-    if not steps:
-        v.add("POL-000", "agente nao propos nenhum passo")
-        return v
-    if not isinstance(steps, list) or any(not isinstance(s, dict) or not isinstance(s.get('params', {}), dict) for s in steps):
-        v.add('POL-000', 'steps deve conter objetos com params validos')
+    from core.plan_schema import steps_shape
+    shape = steps_shape(steps)
+    if shape:
+        v.add("POL-000", shape)
         return v
     if agent in ('CODE', 'DATA'):
         allowed = {'create_project', 'edit_project', 'revert_project'} if agent == 'CODE' else {'create_workbook'}

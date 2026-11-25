@@ -2915,8 +2915,10 @@ def test_round7_fluid_conversation():
           and "<conteudo_do_arquivo>" in seen["us"])
     from desktop.controller import Controller
     run_src = inspect.getsource(Controller._run_inner)
+    answer_src = inspect.getsource(Controller._answer_without_running)
     check("controller responde lendo o arquivo ANTES de planejar",
-          run_src.index("artifact_qa.wants_answer") < run_src.index("continue_plan(")
+          "artifact_qa.wants_answer" in answer_src
+          and run_src.index("self._answer_without_running(") < run_src.index("continue_plan(")
           < run_src.index("self.maestro.analyze("))
     from core.observer import observe
     s2 = Session()
@@ -3064,8 +3066,10 @@ def test_round8_spreadsheet_reader():
     src = inspect.getsource(Q._default_llm)
     check("limite de resposta folgado (o raciocinio nao come a resposta)", "max_tokens=4000" in src)
     from desktop.controller import Controller
-    run = inspect.getsource(Controller._run_inner)
-    blk = run[run.index("artifact_qa.wants_answer"):run.index("continue_plan(")]
+    # O trecho mora em Controller._answer_without_running (extraido do _run_inner), que o _run_inner chama
+    # antes de planejar: "return True" encerra o pedido ali
+    run = inspect.getsource(Controller._answer_without_running)
+    blk = run[run.index("artifact_qa.wants_answer"):]
     check("arquivo lido sem resposta: avisa e PARA (nao cai no piloto que le a tela)",
           "não consegui montar a resposta" in blk and blk.count("return") >= 2)
     print(f"\n{passed}/{total} passou")

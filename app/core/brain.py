@@ -315,6 +315,11 @@ class Brain:
             linked, linked_used = linked_context(agent, self, cap=700 if compact else 1400)
             if linked:
                 blocks.append((linked, linked_used or ["Contexto ligado"]))
+            # Perfil aplicado no Lab (rascunho com rota aplicada) para este agente e este pedido
+            from core.lab_drafts import profile_block, profile_for
+            profile = profile_for(task, self.store, agent=agent)
+            if profile:
+                blocks.append((profile_block(profile), [profile["rel"].rsplit("/", 1)[-1][:-3]]))
             you, you_used = you_block(self.store, compact=compact)
             if you:
                 blocks.append((you, [f"Você/{n}" for n in you_used]))

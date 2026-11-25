@@ -12,7 +12,10 @@ python.exe (Qt / PySide6)
 ├─ desktop/bridge.py ── Bridge(QObject, BridgeCore): Signals Qt + métodos de janela ◄─────────────┘
 │     desktop/bridge_core.py ── a lógica dos métodos, sem Qt
 ├─ desktop/controller.py ── executa um pedido: resolve a conversa, planeja, valida, roda, observa
+│     controller_reply.py (conversa e resposta) · controller_gates.py (aprovação e confirmação de efeito)
+│     controller_telemetry.py (log, custo, andamento)
 │     agents/maestro.py → agents/*_agent.py → core/automation.py (motor de ações)
+│     automation_files.py (arquivos, projetos, código) · automation_web.py (navegador próprio, legado)
 ├─ desktop/voice.py ── voz: gravação, conversa ao vivo (GPT-Live), entendimento, fila de pedidos
 └─ desktop/window_mode.py + core/voice/hotkey.py ── mini chat e atalhos globais
 ```
@@ -49,6 +52,12 @@ Cada pedido, falado ou digitado, passa pelos mesmos papéis, e cada papel só fa
 | Agentes | `agents/*_agent.py` | montam passos declarativos | burlar `plan_validator` / `action_policy` |
 | Vision | `core/vision.py`, `core/screen_question.py` | **só olha**: acha o elemento (coordenada) ou responde o que vê | clicar, digitar, salvar, gravar |
 | Executor | `core/automation.py` | executa um passo por vez, com a porta de efeitos | executar o que a política reprovou |
+
+O formato do plano (Plan, Subtask, Step) é um contrato tipado em `core/plan_schema.py` (Pydantic, versão 1); as
+regras de negócio ficam em `core/plan_validator.py`. Um rascunho do AI Research Lab com rota **aplicada** vira um
+perfil sobre um agente-base (`core/lab_drafts.py`): escolhe o agente e acrescenta instruções da pessoa, sem criar
+capacidade nova. A qualidade real sai de `python app/scripts/quality_metrics.py` (registros locais, sem custo) e
+de `app/scripts/eval_agents_live.py` (modelo real, pago, com teto).
 
 Perguntas como "você está vendo o YouTube?" viram `kind="look"` e são respondidas sem nenhuma ação, do grátis ao pago:
 1. leitura local (`VisionEngine.read_local`): título da janela da frente, URL do navegador e textos da árvore de

@@ -61,10 +61,10 @@ export function DraftRoute({ note }: { note: string }) {
         <div className="flex flex-wrap gap-2">
           <Button size="compact" disabled={busy || !ready || !request.trim()} onClick={() => void act("test")}>Testar prévia</Button>
           <Button size="compact" disabled={busy || !ready || !dirty} onClick={() => void act("save")}>Salvar rota</Button>
-          <Button size="compact" disabled={busy || dirty || !saved.rota_salva} onClick={() => void act("apply")}>Aplicar rota aos testes</Button>
+          <Button size="compact" disabled={busy || dirty || !saved.rota_salva} onClick={() => void act("apply")}>Aplicar rota aos pedidos</Button>
           {saved.rota_aplicada && <Button size="compact" disabled={busy || !request.trim()} onClick={() => void act("test", true)}>Testar rota aplicada</Button>}
         </div>
-        {saved.rota_aplicada && <p className="text-xs text-fg-muted">Rota aplicada nos testes — {AGENT_LOOK[saved.rota_aplicada.agent]?.name} · {saved.rota_aplicada.prefix}</p>}
+        {saved.rota_aplicada && <p className="text-xs text-fg-muted">Rota aplicada aos pedidos reais — {AGENT_LOOK[saved.rota_aplicada.agent]?.name} · {saved.rota_aplicada.prefix}</p>}
       </>}
       {trial && <div role="status" className="rounded-r2 bg-surface p-3 text-sm">
         <p>{trial.matched

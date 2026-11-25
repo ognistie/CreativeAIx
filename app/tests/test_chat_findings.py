@@ -300,6 +300,20 @@ class ControllerFindingsTests(unittest.TestCase):
             self.run_task(c, "abre o bloco de notas")
         c.chat.respond.assert_not_called()
 
+    def test_lab_profile_routes_before_the_chat(self):
+        # Rota aplicada no Lab: o perfil decide o agente; a conversa (que reescreveria o pedido) nem e chamada
+        c = self.controller()
+        c.chat = Mock(respond=Mock())
+        profiled = {"subtasks": [{"agent": "DATA", "task": "conferir planilha de vendas", "params": {}}],
+                    "skills": [], "fast_path": "perfil", "validation": {"approved": True, "violations": []}}
+        new = {"kind": "new", "task": "conferir planilha de vendas", "target": None, "via": "local"}
+        with patch("agents.maestro.profile_plan", return_value=profiled) as chosen,                 patch("core.followup.resolve", return_value=new):
+            entry = self.run_task(c, "conferir planilha de vendas")
+        chosen.assert_called_once()
+        c.chat.respond.assert_not_called()
+        c.maestro.analyze.assert_not_called()
+        self.assertEqual(entry["subtasks"][0]["agent"], "DATA")
+
     def test_chat_failure_on_a_comment_never_reaches_the_maestro(self):
         # Revisao: com a conversa fora do ar, "legal, ficou bom" caia no Maestro (que podia virar tarefa)
         c = self.controller()

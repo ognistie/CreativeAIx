@@ -396,6 +396,38 @@ _NOT_SIMPLE = re.compile(r"\b(?:cri[ae]r?|ger[ae]r?|escrev\w*|redi[gj]\w*|compo\
                          r"analis\w*|explic\w*|planilha nova|novo arquivo|e depois|depois disso)\b", re.I)
 
 
+def profile_plan(task: str, store=None) -> Optional[dict]:
+    """Rota aplicada no AI Research Lab (core/lab_drafts.py): o pedido que comeca com o prefixo vai para o
+    agente-base do perfil, sem chamar o modelo para rotear. Passa pelas mesmas politicas de aceite; reprovado,
+    o Maestro planeja normalmente. None: nenhum perfil aplicado abre este pedido."""
+    try:
+        from core.lab_drafts import profile_for
+        if store is None:
+            from core.brain import get_brain
+            brain = get_brain()
+            if not brain.enabled:
+                return None
+            store = brain.store
+        found = profile_for(task, store)
+    except Exception as exc:                     # perfil quebrado nunca bloqueia o pedido
+        print(f"[Maestro] perfil do Lab indisponivel: {exc}")
+        return None
+    if not found:
+        return None
+    plan = {"analysis": f"Perfil do Lab \"{found['name']}\": pedidos que comecam com \"{found['prefix']}\" vao para "
+                        f"{found['agent']}", "skills": [], "fast_path": "perfil",
+            "profile": {"note": found["rel"], "agent": found["agent"], "prefix": found["prefix"]},
+            "subtasks": [{"agent": found["agent"], "task": task, "original_task": task, "params": {}}]}
+    from core.plan_validator import validate_plan
+    check = validate_plan(task, plan)
+    if not check.approved:
+        print(f"[Maestro] Perfil do Lab recusado pelas politicas: {check.summary()}")
+        return None
+    plan["validation"] = {"approved": True, "violations": []}
+    print(f"[Maestro] {plan['analysis']}")
+    return plan
+
+
 def vault_plan(task: str) -> Optional[dict]:
     """Abrir cofre do Obsidian: tem link direto e nao depende do que esta na tela, entao vem
     antes de continuar na janela aberta. None: o pedido nao e sobre cofre."""
@@ -472,6 +504,11 @@ class Maestro:
         fast = shortcut_open_plan(task, continue_in)
         if fast:
             return fast
+        # Rota aplicada pela pessoa no Lab (perfil sobre um agente-base): decide o agente sem o modelo
+        if not continue_in:
+            profiled = profile_plan(task)
+            if profiled:
+                return profiled
 
         # Memoria de rotas — falha do lookup nunca bloqueia a tarefa.
         # Vai na mensagem do usuario (nao no system) para nao invalidar

@@ -85,6 +85,19 @@ def _title_of(rel: str) -> str:
     return PurePosixPath(rel).stem
 
 
+def _replace(src, dst, tries: int = 6) -> None:
+    """os.replace com novas tentativas curtas: no Windows o antivirus, o indexador ou o Obsidian seguram a nota
+    por milissegundos logo depois de uma gravacao, e a troca falha com "Acesso negado" (WinError 5)."""
+    for attempt in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
 class BrainStore:
     def __init__(self, base: Path, personal: Optional[Path] = None) -> None:
         self.base = Path(base).resolve()
@@ -284,7 +297,7 @@ class BrainStore:
             p.parent.mkdir(parents=True, exist_ok=True)
             tmp = p.with_name(p.name + ".tmp")
             tmp.write_text(text or "", encoding="utf-8")
-            os.replace(tmp, p)
+            _replace(tmp, p)
             removed = set(self.removed())
             if rel in removed:
                 removed.discard(rel)

@@ -1,26 +1,31 @@
 """
-AutomationEngine v8 — Universal. run_python para código dinâmico.
-Workspace compartilhado entre passos. Auto-install de libs.
+AutomationEngine — executa um passo por vez (rotina deterministica, UI Automation, visao como ultimo recurso),
+sempre atras da porta de politica e de efeitos (execute -> action_policy.authorize, action_risk).
 
-v8: auto-installer usa AST em vez de regex multiline.
-    O regex pegava imports DENTRO de strings (ex: o creator script do
-    CodeAgent que tem `main_py = '''from database...'''` no meio do código),
-    o que fazia o pip tentar instalar `database`, `utils`, etc — modulos
-    locais do projeto que estavam sendo CRIADOS, nao deps externas.
+Os handlers moram por dominio: janelas, apps, visao e pilotos aqui; arquivos, projetos e codigo em
+core/automation_files.py; o navegador proprio (legado) em core/automation_web.py. Codigo dinamico nunca roda
+neste processo: run_python vai para o worker isolado (core/process_runner.py).
 """
 
-import os, glob, shutil, subprocess, time, getpass, random, json, sys, traceback, re, math, csv, base64
-import ast as _ast
-import collections, pathlib, string
+import os
+import random
+import re
+import shutil
+import subprocess
+import time
 from datetime import datetime
-import pyautogui, psutil
+
+import psutil
+import pyautogui
 import pygetwindow as gw
-from PIL import Image
+
+# Arquivos, projetos e codigo moram em core/automation_files.py (reexportados aqui para quem ja importa daqui)
+from core.automation_files import BASE, BLOCKED_CMDS, USERNAME, FileActions, expand, safe  # noqa: F401
+from core.automation_web import BrowserController, WebActions  # noqa: F401
 
 pyautogui.FAILSAFE = True
 pyautogui.PAUSE = 0.1
 
-BLOCKED_CMDS = ["rm -rf","rmdir /s","format c","del /f /s","shutdown","reg delete","diskpart","bcdedit"]
 # Prefixos que os handlers usam para sinalizar falha. Antes so "❌" contava:
 # "⚠️ Confiança muito baixa", "⛔ Bloqueado" e "Timeout" viravam sucesso e
 # a tarefa ia para a memoria como rota que funcionou.
@@ -39,8 +44,6 @@ def keyboard_fallback(text: str) -> str:
     pyautogui.write(text)
     return ""
 
-USERNAME = getpass.getuser()
-BASE = f"C:/Users/{USERNAME}"
 
 def _brain_hints(agent: str, goal: str) -> str:
     """Playbooks, licoes e termos do Obsidian para os pilotos (so referencia; falha nunca bloqueia)."""
@@ -50,19 +53,6 @@ def _brain_hints(agent: str, goal: str) -> str:
     except Exception:
         return ""
 
-
-def expand(p):
-    """So o "~" do INICIO e a pasta do usuario (como os.path.expanduser, que a validacao usa). Antes todo "~"
-    era trocado: o nome curto do Windows "ABCDEF~1" virava "ABCDEC:/Users/...1" e o caminho executado deixava
-    de ser o caminho validado pela politica."""
-    if not p: return p
-    if p == "~" or p.startswith(("~/", "~\\")):
-        p = BASE + p[1:]
-    p = p.replace("$HOME",BASE).replace("%USERPROFILE%",BASE)
-    return os.path.expandvars(p).replace("\\","/")
-
-def safe(cmd):
-    return not any(b in cmd.lower().strip() for b in BLOCKED_CMDS)
 
 def human_move(x, y):
     sw, sh = pyautogui.size()
@@ -298,85 +288,6 @@ def focus_away():
     return False
 
 
-class BrowserController:
-    def __init__(self):
-        self.pw=None; self.browser=None; self.page=None; self._started=False
-
-    def start(self):
-        if self._started: return True
-        try:
-            from playwright.sync_api import sync_playwright
-            self.pw = sync_playwright().start()
-            self.browser = self.pw.chromium.launch(headless=False, args=["--start-maximized"])
-            self.page = self.browser.new_context(no_viewport=True).new_page()
-            self._started = True; return True
-        except Exception as e: print(f"  ⚠️ Playwright: {e}"); return False
-
-    def ensure(self):
-        if not self._started: self.start()
-        return bool(self.page)
-
-    def goto(self, url):
-        if not self.ensure(): return "⚠️ Browser indisponível"
-        if not url.startswith("http"): url = "https://"+url
-        self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
-        time.sleep(1); return f"🌐 {self.page.title()}"
-
-    def click_el(self, text):
-        if not self.ensure(): return "⚠️"
-        for fn in [lambda:self.page.get_by_text(text,exact=False).first, lambda:self.page.get_by_role("link",name=text).first, lambda:self.page.get_by_role("button",name=text).first]:
-            try:
-                loc=fn()
-                if loc.is_visible(timeout=2000): loc.click(); return f"🌐 Clicou: '{text[:30]}'"
-            except: pass
-        try: self.page.click(text, timeout=3000); return f"🌐 Clicou"
-        except: return f"❌ '{text[:30]}'"
-
-    def type_in(self, field, text):
-        if not self.ensure(): return "⚠️"
-        # Tenta múltiplos seletores (field pode ter alternativas separadas por vírgula)
-        selectors = [s.strip() for s in field.split(",")]
-        for sel in selectors:
-            for fn in [
-                lambda: self.page.locator(sel).first,
-                lambda: self.page.get_by_placeholder(sel).first,
-                lambda: self.page.get_by_role("searchbox").first,
-                lambda: self.page.get_by_role("textbox").first,
-            ]:
-                try:
-                    loc = fn()
-                    if loc.is_visible(timeout=2000):
-                        loc.click(); time.sleep(0.3)
-                        loc.fill(text)
-                        return f"🌐 Digitou: '{text[:30]}'"
-                except: pass
-        # Fallback: tenta clicar na área de busca e digitar via teclado
-        try:
-            self.page.keyboard.press("Tab")
-            time.sleep(0.2)
-            self.page.keyboard.type(text, delay=50)
-            return f"🌐 Digitou (keyboard): '{text[:30]}'"
-        except: pass
-        return f"❌ '{field[:20]}'"
-
-    def press(self, key):
-        if not self.ensure(): return "⚠️"
-        self.page.keyboard.press(key); return f"🌐 {key}"
-
-    def shot(self, path):
-        if not self.ensure(): return None
-        self.page.screenshot(path=path, full_page=False); return path
-
-    def text(self): return self.page.inner_text("body")[:2000] if self.ensure() else ""
-    def title(self): return self.page.title() if self.ensure() else ""
-
-    def new_tab(self, url="about:blank"):
-        if not self.ensure(): return "⚠️"
-        self.page = self.browser.contexts[0].new_page()
-        if url != "about:blank": self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
-        return f"🌐 Nova aba"
-
-
 # ── Prontidao de janela (espera adaptativa) ───────────────────────────
 def _process_matches(hwnd, exe):
     try:
@@ -515,7 +426,7 @@ def _window_ready(hwnd: int) -> bool:
         return False
 
 
-class AutomationEngine:
+class AutomationEngine(FileActions, WebActions):
     def __init__(self):
         self.executed_steps = []
         self.dry_run = False
@@ -688,10 +599,6 @@ class AutomationEngine:
             return f"✅ {element} visivel ({result.get('elapsed',0)}s)"
         return f"❌ {result.get('error','Timeout')}"
 
-    # === RUN PYTHON — o coração universal ===
-    def _create_project(self, p):
-        from core.artifact_builder import build_project
-        return build_project(p.get('manifest'))
 
     def _open_url(self, p):
         from urllib.parse import urlsplit
@@ -709,60 +616,6 @@ class AutomationEngine:
         return {'success': bool(opened), 'verified': False, 'result': 'Abertura solicitada: ' + url,
                 'artifacts': {'url': url}}
 
-    def _create_workbook(self, p):
-        from core.artifact_builder import build_workbook
-        return build_workbook(p.get('manifest'))
-
-    def _run_python(self, p):
-        """Same-user managed worker; no code executes in the desktop process."""
-        if self.dry_run:
-            return "[SIM] Python"
-        code = p.get("code", "")
-        if not isinstance(code, str) or not code.strip():
-            return {"success": False, "status": "rejected", "result": "Codigo vazio.", "verified": False}
-        from core.process_runner import run_python
-        import uuid
-        directory = pathlib.Path(__file__).resolve().parent.parent / "memory" / "executions" / uuid.uuid4().hex
-        directory.mkdir(parents=True, exist_ok=False)
-        cwd = str(directory)
-        serializable = {}
-        for key, value in self.workspace.items():
-            try:
-                json.dumps(value, allow_nan=False)
-                serializable[key] = value
-            except (TypeError, ValueError):
-                continue
-        result = run_python(code.replace("{BASE}", BASE).replace("{USERNAME}", USERNAME),
-                            workspace=serializable, cwd=cwd,
-                            should_stop=getattr(self, "should_stop", None))
-        if result["success"]:
-            self.workspace.update(result.pop("workspace", {}))
-        result["result"] = f"🐍 {p.get('description', 'codigo')}\n" + result["result"]
-        return result
-
-    def _pip_install(self, p):
-        return {"success": False, "status": "rejected", "verified": False,
-                "result": "Instalacao durante tarefas desativada. Instale dependencias pelo ambiente do projeto."}
-
-    # === SMART ACTIONS ===
-    def _excel_write(self, p):
-        data = p.get("data", []); filepath = expand(p.get("filepath", "")); sheet = p.get("sheet_name", "Planilha1")
-        if self.dry_run: return f"[SIM] Excel: {len(data)} linhas"
-        if not data: return "❌ Dados vazios"
-        if not filepath: filepath = os.path.join(BASE, "Desktop", f"planilha_{datetime.now().strftime('%H%M%S')}.xlsx")
-        try:
-            import openpyxl
-            wb = openpyxl.Workbook(); ws = wb.active; ws.title = sheet
-            for row in data: ws.append([str(c) for c in row])
-            for col in ws.columns:
-                mx = max(len(str(c.value or "")) for c in col)
-                ws.column_dimensions[col[0].column_letter].width = max(mx+2, 10)
-            if os.path.dirname(filepath): os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            wb.save(filepath)
-            os.startfile(filepath); time.sleep(2)     # abre pelo app padrao, sem passar o caminho por um shell
-            return f"📊 {filepath} ({len(data)} linhas)"
-        except ImportError:
-            return "❌ openpyxl não instalado. Use pip_install primeiro."
 
     def _app_search(self, p):
         name = p.get("name","") or p.get("app_name","")
@@ -1051,6 +904,12 @@ class AutomationEngine:
             return {"success": False, "status": r["status"], "result": format_result(r)}
         return format_result(r)
 
+    def effects_done_in(self, scope) -> list:
+        """Efeitos confirmados e feitos na tarefa `scope` (vazio se a tarefa e outra)."""
+        if scope is None or getattr(self, "_effects_scope", object()) != scope:
+            return []
+        return list(getattr(self, "_effects_done", []))
+
     def _authorize_ui(self, kind, action, label=""):
         """Porta de efeito para passos e pilotos. '' segue; texto = pergunta de confirmacao."""
         if not kind:
@@ -1239,97 +1098,6 @@ class AutomationEngine:
         r = self.vision.verify_state(p.get("expected","")); self.vision.restore_browser()
         return f"{'✅' if r.get('verified') else '❌'} {r.get('actual_state','')}" if not r.get("error") else "❌"
 
-    # === FILES ===
-    def _list_files(self, p):
-        path = expand(p.get("path","."))
-        if not os.path.exists(path): return f"❌ {path}"
-        items = []
-        for i in os.listdir(path):
-            f = os.path.join(path,i); t = "📁" if os.path.isdir(f) else "📄"
-            try: s = self._fmt(os.path.getsize(f))
-            except: s = "?"
-            items.append(f"{t} {i} ({s})")
-        return "\n".join(items[:50]) if items else "Vazio"
-
-    def _move_file(self, p):
-        s,d = expand(p.get("source","")),expand(p.get("destination",""))
-        if not os.path.exists(s): return f"❌ {s}"
-        if os.path.lexists(d): return f"⛔ Destino ja existe: {d}"
-        if os.path.dirname(d): os.makedirs(os.path.dirname(d),exist_ok=True)
-        shutil.move(s,d)
-        ok = os.path.exists(d) and not os.path.exists(s)
-        return {"success": ok, "verified": ok, "result": f"→ {d}",
-                "evidence": {"verifier": "filesystem", "source_absent": not os.path.exists(s), "destination": d}}
-
-    def _copy_file(self, p):
-        s,d = expand(p.get("source","")),expand(p.get("destination",""))
-        if not os.path.exists(s): return f"❌ {s}"
-        if os.path.lexists(d): return f"⛔ Destino ja existe: {d}"
-        if os.path.dirname(d): os.makedirs(os.path.dirname(d),exist_ok=True)
-        shutil.copytree(s,d) if os.path.isdir(s) else shutil.copy2(s,d)
-        # Existence is observed, but content equality of a directory is not assumed.
-        return {"success": os.path.exists(d), "verified": False, "result": f"→ {d}",
-                "evidence": {"verifier": "filesystem", "destination": d}}
-
-    def _create_folder(self, p):
-        path = expand(p.get("path","")); os.makedirs(path,exist_ok=True)
-        return {"success": os.path.isdir(path), "verified": os.path.isdir(path), "result": f"📁 {path}",
-                "evidence": {"verifier": "filesystem", "directory": path}}
-
-    def _delete_file(self, p):
-        path = expand(p.get("path",""))
-        if not os.path.exists(path): return "❌"
-        from send2trash import send2trash
-        send2trash(path)
-        return {"success": not os.path.exists(path), "verified": not os.path.exists(path),
-                "result": "Enviado para a lixeira.", "evidence": {"verifier": "filesystem_absence", "path": path}}
-
-    def _read_file(self, p):
-        path = expand(p.get("path",""))
-        if not os.path.exists(path): return "❌"
-        try:
-            with open(path,"r",encoding="utf-8") as f: return f.read(5000)
-        except: return "❌ Binário"
-
-    def _write_file(self, p):
-        path, content = expand(p.get("path","")), p.get("content","")
-        if self.dry_run: return f"[SIM] Gravar {path} ({len(content)} chars)"
-        if os.path.dirname(path): os.makedirs(os.path.dirname(path),exist_ok=True)
-        with open(path,"w",encoding="utf-8") as f: f.write(content)
-        return f"✅ {path} ({len(content)} chars)"
-
-    # === PROJETO EXISTENTE (continuacao da conversa) ===
-    def _edit_project(self, p):
-        """Grava as alteracoes de um projeto guardando ANTES a versao anterior
-        (projeto/.ai_versions/<data>/), para 'desfaz' voltar."""
-        from core.project_versions import apply_edit
-        folder, files = p.get("folder", ""), p.get("files") or []
-        if self.dry_run:
-            return f"[SIM] Editaria {len(files)} arquivo(s) em {folder}: " + \
-                   ", ".join(f.get("path", "") for f in files)[:200]
-        r = apply_edit(folder, files, expected_hashes=p.get('expected_hashes'))
-        if not r["ok"]:
-            return f"❌ {r['error']}"
-        paths = [str(pathlib.Path(folder) / rel) for rel in r['changed']]
-        return {"success": True, "verified": r.get('verified', False),
-                "result": f"Projeto alterado e conteudo conferido. Versao anterior preservada.\nPasta: {folder}",
-                "artifacts": {"folder": folder, "files": paths},
-                "evidence": {"verifier": "filesystem", "scope": "artifact_content", "files": paths}}
-
-    def _revert_project(self, p):
-        from core.project_versions import revert_last
-        folder = p.get("folder", "")
-        if self.dry_run: return f"[SIM] Voltar a versão anterior de {folder}"
-        r = revert_last(folder)
-        if not r["ok"]:
-            return f"❌ {r['error']}"
-        return {"success": True, "verified": False,
-                "result": f"Versao anterior restaurada ({', '.join(r['restored'])})\nPasta: {folder}"}
-
-    def _find_files(self, p):
-        path, pat = expand(p.get("path",".")), p.get("pattern","*")
-        m = glob.glob(os.path.join(path,"**",pat),recursive=True)[:30]
-        return "\n".join(f"📄 {f}" for f in m) if m else "Nenhum"
 
     # === CONTROL ===
     def _close_app(self, p):
@@ -1344,12 +1112,6 @@ class AutomationEngine:
         pyautogui.hotkey('alt', 'f4')  # preserve native save/confirmation dialogs; never terminate processes
         return {'success': True, 'verified': False, 'result': 'Fechamento solicitado; confirme eventuais dialogos do aplicativo.'}
 
-    def _run_command(self, p):
-        command = p.get("command", "")
-        if not isinstance(command, str) or not command.strip() or not safe(command):
-            return {"success": False, "status": "rejected", "verified": False, "result": "Comando bloqueado ou vazio."}
-        from core.process_runner import run_command
-        return run_command(command, timeout=30, should_stop=getattr(self, "should_stop", None))
 
     def _type_text(self, p):
         text = p.get("text","")
@@ -1442,21 +1204,3 @@ class AutomationEngine:
             time.sleep(s); return f"⏳ {s}s"
         took, ready = self._await_ready(self._fg_before, s)
         return f"⏳ {took:.1f}s (pronto)" if ready else f"⏳ {s}s"
-
-    # === WEB ===
-    def _web_goto(self, p): return self.browser.goto(p.get("url",""))
-    def _web_click(self, p): return self.browser.click_el(p.get("target","") or p.get("description",""))
-    def _web_type(self, p): return self.browser.type_in(p.get("field","") or p.get("description",""), p.get("text",""))
-    def _web_key(self, p): return self.browser.press(p.get("key","Enter"))
-    def _web_screenshot(self, p):
-        fp = os.path.join("captures",f"web_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-        return f"📸 {fp}" if self.browser.shot(fp) else "❌"
-    def _web_read(self, p): return f"🌐 {self.browser.title()}\n{self.browser.text()[:500]}"
-    def _web_new_tab(self, p): return self.browser.new_tab(p.get("url","about:blank"))
-
-    @staticmethod
-    def _fmt(b):
-        for u in ["B","KB","MB","GB"]:
-            if b < 1024: return f"{b:.0f}{u}"
-            b /= 1024
-        return f"{b:.0f}TB"

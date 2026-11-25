@@ -153,7 +153,7 @@ def _offered(context: str) -> bool:
 
 def _infinitive(command: str) -> str:
     c = (command or "").strip().rstrip(".")
-    return c[:1].lower() + c[1:] if c else "faça isso"
+    return c[:1].lower() + c[1:] if c else "o pedido"
 
 
 def _guard(out: dict, heard: str, fixed: str, mode: str, context: str = "") -> dict:
@@ -182,7 +182,7 @@ def _guard(out: dict, heard: str, fixed: str, mode: str, context: str = "") -> d
         # "imagens", "o segundo", "noticias": nome solto nao e pedido. Antes o modelo completava sozinho
         # ("abrir a pasta Imagens") e o app agia sem a pessoa ter pedido nada.
         guess = out["command"]
-        out.update(kind="unclear", guess=guess, command="", target="", reply=f"Você quer que eu {_infinitive(guess)}?",
+        out.update(kind="unclear", guess=guess, command="", target="", reply=f"Confirma: {_infinitive(guess)}?",
                    via="guarda")
     elif mode == "live" and out["via"] == "llm" and out["confidence"] < LIVE_MIN_CONFIDENCE:
         reply = f"Foi pra {out['command'][:80]}?"

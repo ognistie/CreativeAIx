@@ -199,6 +199,19 @@ def mode() -> str:
     return value if value in MODES else "enforce"     # na duvida, protege
 
 
+_DONE_LABEL = {"conta": "sair da conta"}
+
+
+def effects_note(done: list) -> str:
+    """Aviso quando a tarefa falhou DEPOIS de um efeito confirmado: sem ele a pessoa repete o pedido e a
+    mensagem (ou o pagamento) sai duas vezes."""
+    kinds = [_DONE_LABEL.get(k, k) for k in dict.fromkeys(done or []) if k]
+    if not kinds:
+        return ""
+    return ("Atenção: antes de falhar eu já fiz, com a sua confirmação: " + ", ".join(kinds)
+            + ". Confira o resultado antes de pedir de novo, para não repetir.")
+
+
 def _record(row: dict, path: Optional[Path] = None) -> None:
     target = path or LOG
     try:
