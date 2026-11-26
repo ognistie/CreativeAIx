@@ -518,11 +518,22 @@ def snapshot(win=None, max_elems: int = 160, text_chars: int = 1500,
                     blocked_reason(url, title + " " + text[:600]), win, main_texts[:250])
 
 
-def read(max_chars: int = 1500, max_links: int = 15) -> dict:
+def read(max_chars: int = 1500, max_links: int = 15, *, expected_url: str = "", view: str = "document",
+         expected_window: int | None = None) -> dict:
     """Titulo, URL, texto visivel e principais links da pagina aberta."""
     win = browser_window()
     if win is None:
         return {"ok": False, "error": "nenhum navegador aberto"}
+    if (expected_window is not None and win.handle != expected_window) or (
+            expected_url and current_url(win) != expected_url):
+        return {"ok": False, "target_changed": True, "error": "A URL observada mudou."}
+    if view == "visible":
+        observed = snapshot(win, text_chars=max_chars)
+        if (not expected_url or observed is None or observed.url != expected_url
+                or current_url(win) != expected_url):
+            return {"ok": False, "target_changed": True, "error": "A URL observada mudou."}
+        return {"ok": True, "title": observed.title, "url": observed.url, "window": win.handle,
+                "text": observed.text, "links": [], "blocked": observed.blocked}
     doc = _document(win)
     text = ""
     if doc is not None:
@@ -542,7 +553,9 @@ def read(max_chars: int = 1500, max_links: int = 15) -> dict:
         if len(top) >= max_links:
             break
     url = current_url(win)
-    return {"ok": True, "title": page_title(win), "url": url,
+    if expected_url and url != expected_url:
+        return {"ok": False, "target_changed": True, "error": "A URL observada mudou."}
+    return {"ok": True, "title": page_title(win), "url": url, "window": win.handle,
             "text": re.sub(r"\n{3,}", "\n\n", text or "").strip()[:max_chars], "links": top,
             "blocked": blocked_reason(url, text)}
 
@@ -564,11 +577,11 @@ def wait_change(win, before: tuple, timeout: float = 5.0) -> bool:
     return False
 
 
-def click(desc: str) -> dict:
+def click(desc: str, *, authorize) -> dict:
     """Acha o link pedido e clica por Invoke; confere se a pagina mudou."""
     win = browser_window()
     if win is None:
-        return {"ok": False, "error": "nenhum navegador aberto"}
+        return {"ok": False, "effect_started": False, "error": "nenhum navegador aberto"}
     try:
         win.set_focus()
     except Exception:
@@ -584,27 +597,35 @@ def click(desc: str) -> dict:
     if target is None:
         if any("sorry/index" in l.url for l in found):
             return {"ok": False, "blocked": True, "error": blocked_reason("https://google.com/sorry")}
-        return {"ok": False, "error": f"nenhum link corresponde a '{desc[:60]}' ({len(found)} links lidos)"}
+        return {"ok": False, "effect_started": False, "hwnd": win.handle,
+                "error": f"nenhum link corresponde a '{desc[:60]}' ({len(found)} links lidos)"}
     before = _signature(win)
-    method = "invoke"
+    def identity():
+        state = element_state(target.elem.element_info.element)
+        return (win.handle, _signature(win), state, _value(target.elem)) if state is not None else None
+
+    from core.automation import _is_front
+    if not _is_front(win.handle):
+        return {"ok": False, "effect_started": False, "error": "foco do navegador não confirmado"}
+    reason = authorize(target.name, identity)
+    if reason:
+        return {"ok": False, "blocked": True, "error": reason}
+    if not _is_front(win.handle) or _signature(win) != before:
+        return {"ok": False, "blocked": True, "error": "A página mudou antes do clique."}
+    # Escolhe um único despacho. Uma exceção ou página inalterada não prova que
+    # o navegador deixou de receber o clique.
+    method = "invoke" if target.kind == "link" else "click"
     try:
-        if target.kind == "link":
+        if method == "invoke":
             target.elem.invoke()
         else:
-            raise RuntimeError("linha: clique direto")
-    except Exception:
-        method = "click"
-        try:
             target.elem.click_input()
-        except Exception as e:
-            return {"ok": False, "error": f"falha ao clicar: {e}"}
+    except Exception as e:
+        return {"ok": False, "effect_started": True, "error": f"falha ao clicar: {e}"}
     changed = wait_change(win, before)
-    if not changed and method == "invoke":
-        try:
-            target.elem.click_input()
-            method = "click"
-            changed = wait_change(win, before, 3.0)
-        except Exception:
-            pass
+    observed_url = current_url(win) if changed else ""
     return {"ok": changed, "method": method, "name": target.name, "url": target.url,
+            "effect_started": True,
+            "destination_verified": target.kind == "link" and observed_url.startswith(("https://", "http://"))
+            and observed_url != url and observed_url == target.url,
             "error": "" if changed else "clique feito mas a pagina nao mudou"}

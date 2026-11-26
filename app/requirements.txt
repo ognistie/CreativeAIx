@@ -10,6 +10,7 @@ websockets>=16.1,<17   # servidor local entre a interface React e o nucleo (desk
 
 # Core / LLM
 anthropic>=0.125.0,<1
+httpx>=0.28,<1
 python-dotenv>=1.2.2,<2
 PyYAML>=6.0   # config.yaml (sem ele o projeto ignora o yaml e usa defaults)
 

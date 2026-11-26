@@ -8,6 +8,9 @@ models:
   fast: "claude-sonnet-5"
   strong: "claude-sonnet-5"
 
+providers:
+  ollama_enabled: false    # selecione uma tag com prefixo ollama: em models para usar o servidor local
+
 agent_models:
   maestro: strong
   vision: fast
@@ -103,6 +106,8 @@ security:
 # Capturas automaticas ficam desativadas; ative para diagnostico quando apropriado.
 privacy:
   capture_enabled: false
+  offline: false  # Bloqueia provedores remotos do app e download do modelo de transcrição.
+  allow_local_models: false  # com offline, libera só Ollama/LM Studio locais (o servidor local pode usar a rede)
 
 # Segundo cerebro (Obsidian). Caminho relativo a pasta app/.
 # Os agentes leem playbooks/politicas/tarefas de referencia e o app grava
@@ -153,10 +158,18 @@ chat:
   web_search: true         # busca na web da Anthropic para fatos atuais, com fontes (US$ 0,01 por busca, max 5)
   max_tool_rounds: 12      # consultas (listar/ler/buscar) por resposta antes de parar e avisar
   max_tokens: 32000        # tamanho maximo de uma resposta (analises longas)
+  context_hybrid: false   # recupera conceitos locais e cita a origem dos trechos históricos
+  context_input_tokens: 0 # 0 desliga; acima de zero conta a entrada pelo provedor antes de gerar
 
 # Execucao das tarefas
 execution:
-  ledger: true             # registro duravel por tarefa em memory/tasks (so observa; false desliga)
+  model_replan: false      # exige orçamento de modelo e prazo absoluto; escolhe só estratégias de leitura aprovadas
+  objective_replan: true  # false restaura as alternativas da Phase IV no Controller
+  ledger: true             # false desliga o registro comum; decisões de efeitos sensíveis são obrigatórias
+  run_limit_s: 0           # prazo absoluto opcional para despachos; 0 usa somente o vigia de inatividade
+  model_budget_usd: 0      # teto optativo por tarefa; 0 mantém o comportamento atual
+  model_call_limit: 30     # com teto ativo, aplica desde a primeira chamada de planejamento
+  model_token_limit: 300000
   # Efeito sensivel (enviar, comprar, pagar, excluir, publicar...): enforce para antes e pergunta
   # (botão Confirmar ou "confirmo" com o código na tela). Shadow só registra em
   # memory/authorization.jsonl; off desliga. Repetir um efeito exige nova aprovação.

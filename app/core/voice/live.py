@@ -198,6 +198,8 @@ class Clip:
 
 
 def _connect(key, timeout):
+    from core.egress import require_online
+    require_online("voz ao vivo")
     import websocket
     return websocket.create_connection(URL, header={'Authorization': 'Bearer ' + key},
         timeout=timeout, suppress_origin=True, redirect_limit=0)

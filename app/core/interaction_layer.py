@@ -15,67 +15,15 @@ class InteractionLayer:
         self.uia = UIADriver()
         self.vision = vision_engine
 
-    def click_element(self, app_name, element_desc):
-        """Clica em um elemento usando a melhor estrategia."""
-        # NIVEL 2: UIA
-        result = self.uia.try_click(app_name, element_desc)
-        if result.get("success"):
-            logger.info(f"UIA click OK: {element_desc}")
-            return {"success": True, "method": "UIA", "details": result}
+    def click_element(self, app_name, element_desc, *, authorize=None):
+        """Resolve e clica via UIA. O executor controla o fallback por visão."""
+        if authorize is None:
+            return {"success": False, "blocked": True, "error": "Porta de efeitos indisponível."}
+        return self.uia.try_click(app_name, element_desc, authorize=authorize)
 
-        # NIVEL 3: Vision
-        if self.vision:
-            logger.info(f"UIA falhou, tentando Vision: {element_desc}")
-            r = self.vision.find_element(element_desc)
-            if r.get("found"):
-                x, y = r.get("x", 0), r.get("y", 0)
-                import pyautogui
-                sw, sh = pyautogui.size()
-                if y < sh - 60:  # Protecao taskbar
-                    from core.automation import human_move
-                    human_move(x, y)
-                    import time; time.sleep(0.15)
-                    pyautogui.click()
-                    return {"success": True, "method": "VISION", "x": x, "y": y}
-            return {"success": False, "method": "VISION", "error": r.get("reason", "Nao encontrado")}
-
-        return {"success": False, "error": "UIA falhou e Vision nao disponivel"}
-
-    def type_in_field(self, app_name, field_desc, text):
-        """Digita em um campo usando a melhor estrategia."""
-        # NIVEL 2: UIA
-        result = self.uia.try_type(app_name, field_desc, text)
-        if result.get("success"):
-            logger.info(f"UIA type OK: {field_desc}")
-            return {"success": True, "method": "UIA"}
-
-        # NIVEL 3: Vision
-        if self.vision:
-            logger.info(f"UIA falhou, tentando Vision type: {field_desc}")
-            r = self.vision.find_element(field_desc)
-            if r.get("found"):
-                x, y = r.get("x", 0), r.get("y", 0)
-                import pyautogui
-                sw, sh = pyautogui.size()
-                if y < sh - 60:
-                    from core.automation import human_move
-                    human_move(x, y)
-                    import time
-                    time.sleep(0.15)
-                    pyautogui.click()
-                    time.sleep(0.2)
-                    pyautogui.click()
-                    time.sleep(0.3)
-                    try:
-                        import pyperclip
-                        pyperclip.copy(text)
-                        pyautogui.hotkey("ctrl", "v")
-                    except:
-                        pyautogui.write(text)
-                    return {"success": True, "method": "VISION", "x": x, "y": y}
-            return {"success": False, "method": "VISION", "error": "Campo nao encontrado"}
-
-        return {"success": False, "error": "UIA falhou e Vision nao disponivel"}
+    def type_in_field(self, app_name, field_desc, text, *, stopped=lambda: False):
+        """Resolve a edição via UIA. Visão, quando disponível, passa pelo executor."""
+        return self.uia.try_type(app_name, field_desc, text, stopped=stopped)
 
     def get_app_state(self, app_name):
         """Identifica o estado atual de um app."""

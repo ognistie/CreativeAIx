@@ -68,7 +68,9 @@ class Transcriber:
             try:
                 WhisperModel = _import_whisper()
                 import os
+                from core.egress import offline
                 self._model = WhisperModel(self.model_size, device="cpu", compute_type=self.compute_type,
+                                           local_files_only=offline(),
                                            cpu_threads=max(2, (os.cpu_count() or 4) - 1))
                 self.error = ""
             except Exception as e:

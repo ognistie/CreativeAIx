@@ -74,7 +74,7 @@ class EffectClassificationFromUntrustedText(unittest.TestCase):
         engine = automation.AutomationEngine.__new__(automation.AutomationEngine)
         asked = []
 
-        def gate(kind, action, label=""):
+        def gate(kind, action, label="", *, target=None):
             asked.append((kind, label))
             return "" if approve else f"Antes de {kind} preciso da sua confirmação."
         engine._authorize_ui = gate
@@ -94,11 +94,11 @@ class EffectClassificationFromUntrustedText(unittest.TestCase):
             self.assertEqual(engine._effect_at_point(100, 200), "")
         self.assertEqual(asked, [])
 
-    def test_effect_already_confirmed_is_not_asked_twice(self):
-        engine, asked, names = self._engine(["Enviar"])
+    def test_resolved_element_takes_precedence_over_plan_description(self):
+        engine, asked, names = self._engine(["Enviar"], approve=True)
         with names:
-            self.assertEqual(engine._effect_at_point(1, 1, already="enviar"), "")
-        self.assertEqual(asked, [])
+            self.assertEqual(engine._effect_at_point(1, 1, description="Pagar"), "")
+        self.assertEqual(asked, [("enviar", "Enviar")])
 
     def test_effect_stop_becomes_needs_confirmation_in_pilot(self):
         from core.action_risk import NeedsConfirmation

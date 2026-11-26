@@ -20,15 +20,17 @@ def _engine():
 class RawClickUsesTheRealElement(unittest.TestCase):
     """S1: `click(x, y)` pegava o efeito so da descricao escrita pelo modelo ("Ponto inicial")."""
 
-    def run_click(self, names):
+    def run_click(self, names, windows=((10, "Fixture"), (10, "Fixture"))):
         from core import automation
         engine = _engine()
         asked = []
-        engine._authorize_ui = lambda kind, action, label="": (asked.append((kind, action, label))
+        engine._authorize_ui = lambda kind, action, label="", **kwargs: (asked.append((kind, action, label))
                                                                or (f"Antes de {kind} preciso da sua confirmação."
                                                                    if kind else ""))
         clicked = Mock()
         with patch.object(automation, "names_at_point", return_value=names), \
+                patch.object(automation, "_effect_window", side_effect=windows), \
+                patch.object(automation, "_uia_point_state", return_value=((11,), "Fixture", 50000, "")), \
                 patch.object(automation.pyautogui, "size", return_value=(1920, 1080)), \
                 patch.object(automation.pyautogui, "click", clicked), patch.object(automation, "human_move"), \
                 patch("core.action_policy.authorize", return_value=""):
@@ -45,6 +47,11 @@ class RawClickUsesTheRealElement(unittest.TestCase):
         result, _asked, clicked = self.run_click(["Área de desenho"])
         self.assertTrue(result["success"])
         clicked.assert_called_once()
+
+    def test_click_aborts_when_foreground_changes_after_target_is_resolved(self):
+        result, _asked, clicked = self.run_click(["Área de desenho"], ((10, "Fixture"), (20, "Outra")))
+        self.assertEqual(result["status"], "needs_confirmation")
+        clicked.assert_not_called()
 
 
 class VisionSmartIsGone(unittest.TestCase):

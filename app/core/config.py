@@ -207,7 +207,12 @@ class Config:
     def get_model(self, agent_name):
         """Retorna o modelo configurado para um agente."""
         model_type = self.get(f"agent_models.{agent_name.lower()}", "fast")
-        return self.get(f"models.{model_type}", DEFAULTS["models"]["fast"])
+        try:                                   # escolhido em Configuracoes > Modelos (vale por cima do yaml)
+            from core.user_settings import model_override
+            chosen = model_override(model_type)
+        except Exception:
+            chosen = ""
+        return chosen or self.get(f"models.{model_type}", DEFAULTS["models"]["fast"])
 
     def get_effort(self, agent_name):
         """Retorna o effort configurado para um agente (None = default da API)."""

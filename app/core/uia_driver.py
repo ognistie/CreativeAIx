@@ -4,9 +4,29 @@ Permite interagir com apps por nome/tipo de controle, nao por pixel.
 """
 
 import logging
+import re
 import time
 
 logger = logging.getLogger("uia_driver")
+
+
+def paste_edit(hwnd, wrapper, text: str, stopped) -> dict:
+    """Foca um campo Edit identificado e cola texto literal, sem gerar teclas do conteúdo."""
+    from core.automation import _is_front, _shell_surface
+    from core.browser_uia import element_state, focused_state
+    from core.clipboard import paste_text
+    state = element_state(wrapper.element_info.element)
+    if state is None or state[2] != 50004 or not _is_front(hwnd) or _shell_surface(hwnd) or stopped():
+        return {"success": False, "error": "O alvo não é um campo de edição confirmado."}
+    wrapper.set_focus()
+    focused = focused_state()
+    if not focused or focused[0] != state[0] or not _is_front(hwnd) or stopped():
+        return {"success": False, "error": "O foco mudou antes da digitação."}
+    try:
+        paste_text(text)
+    except Exception:
+        return {"success": False, "effect_started": True, "error": "Resultado da colagem incerto."}
+    return {"success": True, "method": "UIA"}
 
 # Mapa de controles conhecidos por app
 CONTROL_MAPS = {
@@ -41,24 +61,42 @@ class UIADriver:
         """Conecta a um app pelo titulo da janela."""
         try:
             from pywinauto import Application
-            app = Application(backend="uia").connect(title_re=f".*{app_name}.*", timeout=5)
+            app = Application(backend="uia").connect(title_re=f".*{re.escape(app_name)}.*", timeout=5)
             return {"success": True, "app": app}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def try_click(self, app_name, element_desc):
-        """Tenta clicar em um elemento via UIA."""
+    def try_click(self, app_name, element_desc, *, authorize):
+        """Resolve o controle antes de pedir autorização e despacha uma vez."""
         conn = self.connect_app(app_name)
         if not conn["success"]:
-            return conn
+            return {**conn, "effect_started": False}
 
         app = conn["app"]
+        dispatched = False
         try:
             window = app.top_window()
             window.set_focus()
             time.sleep(0.3)
 
-            # Tenta pelo mapa de controles conhecidos
+            def click(el, method):
+                nonlocal dispatched
+                from core.browser_uia import element_state
+                wrapper = el.wrapper_object()
+                def identity():
+                    state = element_state(wrapper.element_info.element)
+                    return (window.handle, state) if state is not None else None
+
+                reason = authorize(wrapper.window_text(), identity)
+                if reason:
+                    return {"success": False, "blocked": True, "error": reason}
+                from core.automation import _is_front
+                if not _is_front(window.handle):
+                    return {"success": False, "blocked": True, "error": "Foco da janela não confirmado."}
+                dispatched = True
+                wrapper.click_input()
+                return {"success": True, "method": method}
+
             app_key = app_name.lower()
             for map_key in CONTROL_MAPS:
                 if map_key in app_key or app_key in map_key:
@@ -68,6 +106,13 @@ class UIADriver:
                             # Hotkey
                             if "hotkey" in ctrl_info:
                                 import pyautogui
+                                from core.automation import _effect_window, _is_front
+                                reason = authorize(ctrl_name, _effect_window)
+                                if reason:
+                                    return {"success": False, "blocked": True, "error": reason}
+                                if not _is_front(window.handle):
+                                    return {"success": False, "blocked": True, "error": "Foco da janela não confirmado."}
+                                dispatched = True
                                 pyautogui.hotkey(*ctrl_info["hotkey"])
                                 return {"success": True, "method": "hotkey"}
 
@@ -75,33 +120,24 @@ class UIADriver:
                             titles = [ctrl_info["title"]] + ctrl_info.get("alt_titles", [])
                             ctrl_type = ctrl_info.get("control_type", "")
                             for title in titles:
-                                try:
-                                    if ctrl_type:
-                                        el = window.child_window(title_re=f".*{title}.*", control_type=ctrl_type, found_index=0)
-                                    else:
-                                        el = window.child_window(title_re=f".*{title}.*", found_index=0)
-                                    if el.exists(timeout=2):
-                                        el.click_input()
-                                        return {"success": True, "method": "control_map", "title": title}
-                                except:
-                                    continue
+                                criteria = {"control_type": ctrl_type} if ctrl_type else {}
+                                el = window.child_window(title_re=f".*{re.escape(title)}.*", found_index=0, **criteria)
+                                if el.exists(timeout=2):
+                                    return click(el, "control_map")
 
-            # Busca generica por texto
-            try:
-                el = window.child_window(title_re=f".*{element_desc}.*", found_index=0)
-                if el.exists(timeout=3):
-                    el.click_input()
-                    return {"success": True, "method": "generic_search"}
-            except:
-                pass
-
-            return {"success": False, "error": f"Elemento '{element_desc}' nao encontrado via UIA"}
+            el = window.child_window(title_re=f".*{re.escape(element_desc)}.*", found_index=0)
+            if el.exists(timeout=3):
+                return click(el, "generic_search")
+            return {"success": False, "effect_started": False, "hwnd": window.handle,
+                    "error": f"Elemento '{element_desc}' nao encontrado via UIA"}
 
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return {"success": False, "effect_started": dispatched, "error": str(e)}
 
-    def try_type(self, app_name, field_desc, text):
+    def try_type(self, app_name, field_desc, text, *, stopped=lambda: False):
         """Tenta digitar em um campo via UIA."""
+        if not all(isinstance(value, str) and value for value in (app_name, field_desc, text)):
+            return {"success": False, "error": "Aplicativo, campo ou texto ausente."}
         conn = self.connect_app(app_name)
         if not conn["success"]:
             return conn
@@ -111,35 +147,21 @@ class UIADriver:
             window.set_focus()
             time.sleep(0.3)
 
-            # Busca campo de texto
             app_key = app_name.lower()
+            titles = []
             for map_key in CONTROL_MAPS:
                 if map_key in app_key or app_key in map_key:
-                    controls = CONTROL_MAPS[map_key]
-                    for ctrl_name, ctrl_info in controls.items():
+                    for ctrl_name, ctrl_info in CONTROL_MAPS[map_key].items():
                         if field_desc.lower() in ctrl_name or ctrl_name in field_desc.lower():
-                            titles = [ctrl_info.get("title", "")] + ctrl_info.get("alt_titles", [])
-                            for title in titles:
-                                try:
-                                    el = window.child_window(title_re=f".*{title}.*", control_type="Edit", found_index=0)
-                                    if el.exists(timeout=2):
-                                        el.set_focus()
-                                        el.type_keys(text, with_spaces=True, with_newlines=True)
-                                        return {"success": True, "method": "control_map"}
-                                except:
-                                    continue
-
-            # Busca generica
-            try:
-                el = window.child_window(title_re=f".*{field_desc}.*", control_type="Edit", found_index=0)
-                if el.exists(timeout=3):
-                    el.set_focus()
-                    el.type_keys(text, with_spaces=True, with_newlines=True)
-                    return {"success": True, "method": "generic"}
-            except:
-                pass
-
-            return {"success": False, "error": f"Campo '{field_desc}' nao encontrado via UIA"}
+                            titles.extend([ctrl_info.get("title", ""), *ctrl_info.get("alt_titles", [])])
+            for title in dict.fromkeys([*(title for title in titles if title), field_desc]):
+                if stopped():
+                    return {"success": False, "error": "Tarefa cancelada."}
+                edit = window.child_window(title_re=f".*{re.escape(title)}.*", control_type="Edit")
+                if edit.exists(timeout=2):
+                    return paste_edit(window.handle, edit.wrapper_object(), text, stopped)
+            return {"success": False, "effect_started": False, "hwnd": window.handle,
+                    "error": f"Campo '{field_desc}' não encontrado via UIA"}
 
         except Exception as e:
             return {"success": False, "error": str(e)}

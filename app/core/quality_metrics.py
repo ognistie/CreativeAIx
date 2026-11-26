@@ -66,10 +66,19 @@ def compute(history: Iterable[dict], authz: Iterable[dict], last: int = 200) -> 
     per100 = (lambda count: round(100 * count / n, 1)) if n else (lambda count: None)
     seconds = [r["duration_ms"] / 1000 for r in runs if isinstance(r.get("duration_ms"), (int, float))]
     costs = [float((r.get("metrics") or {}).get("cost_usd") or 0) for r in runs]
+    verified = sum(r.get("success") is True and r.get("verified") is True for r in runs)
+    measured_runtime = [r["runtime"] for r in runs if isinstance(r.get("runtime"), dict)]
     unrequested = [a for a in gate if a.get("requested") is False]
     return {
         "pedidos": n,
         "taxa_sucesso": round(sum(1 for r in runs if r.get("success")) / n, 3) if n else None,
+        "taxa_sucesso_verificado": round(verified / n, 3) if n else None,
+        "custo_por_sucesso_verificado_usd": round(sum(costs) / verified, 5) if verified else None,
+        "tokens_total": sum((r.get("metrics") or {}).get("tokens_est", 0) or 0 for r in runs),
+        "tentativas_adicionais": sum(r.get("retries", 0) for r in measured_runtime),
+        "passos_recuperados": sum(r.get("recovered", 0) for r in measured_runtime),
+        "falsos_sucessos": sum(r.get("false_successes", 0) for r in measured_runtime),
+        "pedidos_com_metricas_runtime": len(measured_runtime),
         "travas_por_100": per100(sum(1 for r in runs if str(r.get("error") or "") == STALL)),
         "cancelados_por_100": per100(sum(1 for r in runs if r.get("status") == "cancelled"
                                          and str(r.get("error") or "") != STALL)),

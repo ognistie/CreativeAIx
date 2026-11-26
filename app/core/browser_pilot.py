@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 from core import browser_uia as B
 from core.action_risk import NeedsConfirmation
+from core.step_runtime import UncertainEffect
 
 MAX_TURNS = 14
 MAX_SECONDS = 75          # piloto que nao conclui nisso para e avisa
@@ -330,6 +331,9 @@ class BrowserPilot:
             except NeedsConfirmation as stop:
                 return {"ok": False, "status": "needs_confirmation", "turns": turn, "trail": trail, "result": str(stop),
                         "title": snap.title, "url": snap.url, "say": str(stop)}
+            except UncertainEffect as stop:
+                return {"ok": False, "status": "uncertain", "turns": turn, "trail": trail, "result": str(stop),
+                        "title": snap.title, "url": snap.url, "say": str(stop)}
             confirmed = "CONFERIDO" in outcome
             if act == "click" and trail.count(label) >= 1:
                 outcome += (" | ATENCAO: voce ja clicou neste MESMO elemento antes. Se o resultado "
@@ -352,13 +356,17 @@ class BrowserPilot:
     def _act(self, act: str, d: dict, snap) -> tuple[str, str]:
         import pyautogui
         win = snap.win
-        from core.automation import _bring_to_front, _is_front
+        from core.automation import _is_front
         if not _is_front(win.handle):
             return 'bloqueado: foco mudou desde a observacao', act
         before = B._signature(win)
 
         def same_page():
-            return (_is_front(win.handle) or _bring_to_front(win.handle)) and B._signature(win) == before
+            return _is_front(win.handle) and B._signature(win) == before
+
+        def binding(state, payload=None):
+            current = state()
+            return (win.handle, before, current, payload) if current is not None and same_page() else None
 
         if act == "click":
             el = self._el(snap, d)
@@ -366,7 +374,7 @@ class BrowserPilot:
                 return "id inexistente nesta página", f"click #{d.get('id')}"
             label = f"click {el.role} '{el.name[:50]}'"
             state = B.element_state(el.elem)
-            sensitive = self._check("click", el.name)
+            sensitive = self._check("click", el.name, target=lambda: binding(lambda: B.element_state(el.elem)))
             if sensitive and (state is None or not same_page() or B.element_state(el.elem) != state):
                 raise NeedsConfirmation("O alvo do clique mudou antes da execução.")
             w = B.wrap(el.elem)
@@ -381,9 +389,13 @@ class BrowserPilot:
                 else:
                     w.click_input()
             except Exception as e:
+                if sensitive:
+                    raise UncertainEffect("O clique foi tentado e seu resultado precisa ser conferido.") from e
                 return f"erro ao clicar: {str(e)[:60]}", label
             changed = B.wait_change(win, before, 3.0)
             if not changed:
+                if sensitive:
+                    raise UncertainEffect("O clique foi tentado e a página não confirmou o resultado.")
                 return "clicado (URL/título iguais)", label
             return "página mudou" + _title_check(el.name, win), label
 
@@ -395,7 +407,8 @@ class BrowserPilot:
             label = f"type '{text[:40]}' em '{el.name[:30] or el.role}'"
             submit = bool(d.get("submit"))
             state = B.element_state(el.elem) if submit else None
-            self._check("type", el.name, submit=submit)
+            self._check("type", el.name, submit=submit,
+                        target=lambda: binding(lambda: B.element_state(el.elem), text))
             if submit and (state is None or not same_page() or B.element_state(el.elem) != state):
                 raise NeedsConfirmation("O campo de envio mudou antes da execução.")
             w = B.wrap(el.elem)
@@ -421,14 +434,12 @@ class BrowserPilot:
 
         if act == "press":
             key = str(d.get("key") or d.get("text") or "enter").lower().replace(" ", "")
-            if key in ("enter", "return", "ctrl+enter"):
+            if key in ("enter", "return", "ctrl+enter", "delete", "del", "shift+delete", "shift+del"):
                 focus = B.focused_state()
-                self._check("press", B.focused_edit_name(focus), key=key)
+                self._check("press", B.focused_edit_name(focus), key=key,
+                            target=lambda: binding(B.focused_state, key))
                 if focus is None or not same_page() or B.focused_state() != focus:
                     raise NeedsConfirmation("O campo em foco mudou ou não pôde ser verificado.")
-            elif key in ("delete", "del", "shift+delete", "shift+del"):
-                # Em webmail e gerenciadores de arquivo na web, Delete apaga o item selecionado
-                self._check("press", B.focused_edit_name(B.focused_state()), key=key)
             if key == "ctrl+enter":
                 pyautogui.hotkey("ctrl", "enter")
             else:
@@ -473,12 +484,10 @@ class BrowserPilot:
 
         if act == "vision_click" and self.vision_click:
             desc = str(d.get("description") or d.get("text") or "")
-            from core.action_risk import ui_risk
-            checked = ui_risk("vision_click", desc, web=True) or ""
-            if self._check("vision_click", desc) and not same_page():
+            if not same_page():
                 raise NeedsConfirmation("A página mudou antes do clique.")
             res = self.vision_click({"description": desc + " (dentro da pagina do navegador)", "hwnd": win.handle,
-                                     "_effect_checked": checked})
+                                     "_still_current": lambda: _is_front(win.handle) and B._signature(win) == before})
             _raise_on_effect_stop(res)
             changed = B.wait_change(win, before, 3.0)
             return (f"{res[:40]}; " + ("página mudou" if changed else "sem mudança")), f"vision_click '{desc[:40]}'"
@@ -504,13 +513,14 @@ class BrowserPilot:
         if site:
             self.allowed_sites.add(site)            # aprovado: o resto da tarefa navega nele sem perguntar
 
-    def _check(self, act: str, label: str, submit: bool = False, key: str = "") -> bool:
+    def _check(self, act: str, label: str, submit: bool = False, key: str = "", *, target=None) -> bool:
         if self.authorize_ui is None:
             return False
         from core.action_risk import ui_risk
         kind = ui_risk(act, label, submit=submit, key=key, web=True)
         waited = time.time()
-        message = self.authorize_ui(kind, act, label) if kind else ""
+        binding = {"target": target} if target is not None else {}
+        message = self.authorize_ui(kind, act, label, **binding) if kind else ""
         self._paused = getattr(self, "_paused", 0.0) + (time.time() - waited if kind else 0.0)
         if message:
             raise NeedsConfirmation(message)

@@ -71,6 +71,22 @@ class Lifecycle(unittest.TestCase):
     def teach(self, queries):
         return [self.store.observe(f"pesquisa {q} no google", search_plan(q), True) for q in queries]
 
+    def test_production_requires_verified_distinct_executions(self):
+        task = "pesquisa receita de bolo no google"
+        plan = search_plan("receita de bolo")
+        record = {"success": True, "verified": True}
+        self.assertIsNone(self.store.observe_execution(task, plan, True, records=[], run_id="one"))
+        self.assertIsNone(self.store.observe_execution(task, plan, True,
+                          records=[{"success": True}], run_id="one"))
+        self.assertIsNone(self.store.observe_execution(task, plan, True,
+                          records=[record], run_id="one", simulated=True))
+        for _ in range(3):
+            self.store.observe_execution(task, plan, True, records=[record], run_id="one")
+        self.assertIsNone(self.store.plan_for(task))
+        self.store.observe_execution(task, plan, True, records=[record], run_id="two")
+        self.store.observe_execution(task, plan, True, records=[record], run_id="three")
+        self.assertIsNotNone(self.store.plan_for(task))
+
     def test_promotes_after_three_identical_successes(self):
         self.assertIsNone(self.store.plan_for("pesquisa previsão do tempo no google"))
         self.assertEqual(self.teach(["receita de bolo", "preço do dólar", "horário do jogo"]),

@@ -10,6 +10,7 @@ import { AgentMemoryEditor } from "./AgentMemoryEditor";
 import { AgentSpec } from "./AgentSpec";
 import { AgentErrors, AgentRoute, AgentSkills } from "./AgentWork";
 import { Experiments } from "./Experiments";
+import { ScientificHistory } from "./ScientificHistory";
 import { AgentList, LabHub, type LabArea } from "./LabHub";
 import { AgentKnowledge } from "./AgentKnowledge";
 import { MemorySpine, MemorySpineLoading, useAgentKnowledge } from "./MemorySpine";
@@ -190,7 +191,8 @@ export function LabView() {
                   options={[{ value: "comparar", label: "Comparar versões" }, { value: "evidencias", label: "Evidências" }]} />
               </div>
               <div className="lab-editor-panel">
-                <Experiments key={agent} agent={agent} evidence={evidence} onEvidence={() => setEvidence(true)} onExperiments={() => setEvidence(false)} />
+                <><ScientificHistory key={"science-" + agent} agent={agent} />
+                <Experiments key={agent} agent={agent} evidence={evidence} onEvidence={() => setEvidence(true)} onExperiments={() => setEvidence(false)} /></>
               </div>
             </>}
           </section>

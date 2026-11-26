@@ -18,7 +18,11 @@ from core.session import Session
 
 class _Log(unittest.TestCase):
     def setUp(self):
+        from core.task_ledger import TaskLedger
         self.tmp = tempfile.TemporaryDirectory()
+        journal = patch("core.task_ledger.get_ledger", return_value=TaskLedger(Path(self.tmp.name) / "tasks"))
+        journal.start()
+        self.addCleanup(journal.stop)
         self.log = Path(self.tmp.name) / "authorization.jsonl"
         real_record = R._record
         self.rec = patch.object(R, "_record", side_effect=lambda row, path=None: real_record(row, self.log))
@@ -64,22 +68,15 @@ class I1_MessageSentManyTimes(_Log):
         self.assertIn(R.CONFIRM_MARK, str(stop.exception))
         self.assertEqual([r["decision"] for r in self.rows()], ["blocked"])
 
-    def test_a_confirmed_send_happens_once_per_task(self):
+    def test_inline_confirmation_does_not_release_send(self):
         from core.action_risk import NeedsConfirmation
-        # "confirmo" so libera o efeito que o pedido cita (F7): o pedido precisa mandar enviar
         engine = self.engine("enviar \"Oi\" na conversa — confirmo")
         pilot = self.pilot(engine)
-        sent = 0
         with patch.object(R, "mode", return_value="enforce"):
-            for _ in range(4):           # o piloto via o campo vazio e tentava de novo
-                try:
+            for _ in range(4):
+                with self.assertRaises(NeedsConfirmation):
                     pilot._check("type", "Histórico ativado", submit=True)
-                    sent += 1
-                except NeedsConfirmation as stop:
-                    self.assertIn("uma vez nesta tarefa", str(stop))
-        self.assertEqual(sent, 1)
-        self.assertEqual([r["decision"] for r in self.rows()],
-                         ["allowed", "blocked_repeat", "blocked_repeat", "blocked_repeat"])
+        self.assertEqual([r["decision"] for r in self.rows()], ["blocked"] * 4)
 
     def test_repeat_is_blocked_even_in_shadow_mode(self):
         engine = self.engine("escrever oi")
@@ -91,7 +88,7 @@ class I1_MessageSentManyTimes(_Log):
 
     def test_a_new_task_has_its_own_budget(self):
         engine = self.engine("manda oi — confirmo")
-        with patch.object(R, "mode", return_value="enforce"):
+        with patch.object(R, "mode", return_value="shadow"):
             self.assertEqual(engine._authorize_ui("enviar", "click", "Enviar"), "")
             engine.effect_scope = "tarefa-2"
             self.assertEqual(engine._authorize_ui("enviar", "click", "Enviar"), "")
@@ -281,6 +278,9 @@ class ControllerReplay(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.ledger = TaskLedger(Path(self.tmp.name))
+        journal = patch("core.task_ledger.get_ledger", return_value=self.ledger)
+        journal.start()
+        self.addCleanup(journal.stop)
         self.session = Session()
         self.session.save = lambda *a, **k: None
         self.events = []

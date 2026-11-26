@@ -87,8 +87,12 @@ class PlanSkipTests(unittest.TestCase):
 
     def test_skipped_steps_and_dependents_do_not_run(self):
         """O laco do controlador pula o passo escolhido e quem depende dele (sem contar como falha)."""
+        from core.task_schedule import Availability, TaskSchedule
+
+        schedule = TaskSchedule([{}, {"depends_on": 1}, {}], {1})
+        self.assertEqual([schedule.availability(node) for node in schedule.nodes],
+                         [Availability.SKIPPED, Availability.SKIPPED, Availability.READY])
         src = (APP / "desktop" / "controller.py").read_text(encoding="utf-8")
-        self.assertIn("if si + 1 in skipped or (dependency is not None and int(dependency) in skipped):", src)
         self.assertIn("len(skipped_steps) >= len(plan.get(\"subtasks\", []))", src)   # pular tudo = nao executar
 
 

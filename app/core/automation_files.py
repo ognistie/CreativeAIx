@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import shutil
+import stat
 import time
 import getpass
 from datetime import datetime
@@ -121,12 +122,40 @@ class FileActions:
 
     def _copy_file(self, p):
         s,d = expand(p.get("source","")),expand(p.get("destination",""))
-        if not os.path.exists(s): return f"❌ {s}"
-        if os.path.lexists(d): return f"⛔ Destino ja existe: {d}"
-        if os.path.dirname(d): os.makedirs(os.path.dirname(d),exist_ok=True)
-        shutil.copytree(s,d) if os.path.isdir(s) else shutil.copy2(s,d)
-        # Existence is observed, but content equality of a directory is not assumed.
-        return {"success": os.path.exists(d), "verified": False, "result": f"→ {d}",
+        from core.verification import file_copy
+        if not os.path.exists(s):
+            return {"success": False, "status": "failed", "effect_started": False,
+                    "failure_reason": "copy_source_missing", "result": f"❌ {s}"}
+        if os.path.lexists(d):
+            return {"success": False, "status": "rejected", "result": f"⛔ Destino ja existe: {d}"}
+        directory = os.path.isdir(s)
+        original = os.stat(s)
+        probe = getattr(self, "copy_probe", None)
+        if callable(probe) and not directory:
+            probe(s, d)
+        destination_created = False
+        try:
+            if os.path.dirname(d):
+                os.makedirs(os.path.dirname(d), exist_ok=True)
+            if directory:
+                def reject_links(root, names):
+                    for name in names:
+                        info = os.lstat(os.path.join(root, name))
+                        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                            raise PermissionError("Link ou junção na árvore de origem.")
+                    return ()
+
+                shutil.copytree(s, d, symlinks=True, ignore=reject_links)
+            else:
+                with open(s, "rb") as source, open(d, "xb") as destination:
+                    destination_created = True
+                    shutil.copyfileobj(source, destination)
+                shutil.copystat(s, d)
+        except OSError:
+            return {"success": False, "status": "partial" if destination_created else "uncertain", "effect_started": True,
+                    "result": "A cópia falhou durante a operação. Confira o destino antes de tentar novamente."}
+        verified = not directory and file_copy(s, d, original)
+        return {"success": os.path.exists(d), "verified": verified, "result": f"→ {d}",
                 "evidence": {"verifier": "filesystem", "destination": d}}
 
     def _create_folder(self, p):
@@ -144,10 +173,23 @@ class FileActions:
 
     def _read_file(self, p):
         path = expand(p.get("path",""))
-        if not os.path.exists(path): return "❌"
+        from core.verification import file_identity
+        if not os.path.exists(path):
+            return {"success": False, "status": "failed", "effect_started": False,
+                    "failure_reason": "read_source_missing", "result": "❌ Arquivo ausente."}
+        identity = file_identity(path)
+        if identity is None or not stat.S_ISREG(identity[3]):
+            return "❌ Arquivo regular não confirmado."
         try:
-            with open(path,"r",encoding="utf-8") as f: return f.read(5000)
-        except: return "❌ Binário"
+            with open(path, "r", encoding="utf-8") as stream:
+                data = stream.read(5000)
+                observed = os.fstat(stream.fileno())
+        except (OSError, UnicodeError):
+            return "❌ Arquivo ilegível ou binário."
+        verified = (identity is not None and identity[1:3] == (observed.st_dev, observed.st_ino)
+                    and file_identity(path) == identity)
+        return {"success": verified, "verified": verified,
+                "result": data if verified else "O arquivo mudou durante a leitura."}
 
     def _write_file(self, p):
         path, content = expand(p.get("path","")), p.get("content","")

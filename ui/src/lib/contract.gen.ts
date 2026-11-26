@@ -82,9 +82,16 @@ export interface Methods {
   newSession: [args: [], result: null];
   openBrainFolder: [args: [], result: null];
   openConversation: [args: [sid: string], result: unknown];
+  providerCustomRemove: [args: [name: string], result: unknown];
+  providerCustomSave: [args: [payload: string], result: unknown];
+  providerKeyRemove: [args: [name: string], result: unknown];
+  providerKeySave: [args: [name: string, key: string], result: unknown];
+  providerModels: [args: [name: string], result: unknown];
   providerStatus: [args: [], result: unknown];
   renameConversation: [args: [sid: string, title: string], result: boolean];
   restoreMain: [args: [], result: null];
+  rsiDecide: [args: [candidate: string, decision: string, confirmed: boolean], result: unknown];
+  rsiHistory: [args: [agent: string], result: unknown];
   saveSettings: [args: [payload: string], result: unknown];
   setIntroSeen: [args: [key: string, seen: boolean], result: null];
   setLiveConversation: [args: [on: boolean], result: null];

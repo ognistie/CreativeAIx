@@ -43,7 +43,7 @@ interface RunRow {
   versions: string[];
 }
 interface Run extends RunRow {
-  summary: Record<string, { passed: number; cases: number; valid?: number; cost_usd: number; calls?: number; latency_ms_avg: number | null;
+  summary: Record<string, { passed: number; cases: number; valid?: number; cost_usd: number; cost_known?: boolean; calls?: number; latency_ms_avg: number | null;
     latency_ms_p50?: number | null; latency_ms_p95?: number | null; warnings?: string[] }>;
   results: Result[];
   dataset_snapshot?: EvalSet;
@@ -527,7 +527,7 @@ function RunEvidence({ run, onFeedback }: { run: Run; onFeedback: (row: Result, 
                 {stats.latency_ms_avg == null ? "Latência indisponível" : `${stats.latency_ms_avg} ms por caso, medidos localmente`}
               </p>
               <p className="text-sm text-fg-muted">
-                {run.origin !== "real" ? "Sem chamadas ao provedor" : stats.calls ? `${amount(stats.cost_usd)} estimados · ${stats.calls} chamadas` : "Custo indisponível"}
+                {run.origin !== "real" ? "Sem chamadas ao provedor" : stats.calls ? `${stats.cost_known === true ? amount(stats.cost_usd) + " estimados" : "Custo desconhecido"} · ${stats.calls} chamadas` : "Custo indisponível"}
               </p>
               {stats.latency_ms_p50 != null && <p className="text-sm text-fg-muted">p50 {stats.latency_ms_p50} ms{stats.latency_ms_p95 != null ? ` · p95 ${stats.latency_ms_p95} ms` : ""}</p>}
               {stats.warnings?.length ? <p className="mt-1 text-xs text-warn-ink">{stats.warnings.join(" · ")}</p> : null}

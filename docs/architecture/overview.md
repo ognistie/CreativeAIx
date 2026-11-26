@@ -1,6 +1,8 @@
 # Arquitetura do Creative AIx
 
-Estado em 2026-11-19 (versão `0.1.0-internal`). Um app só: `python app/main.py`.
+Estado revisado em 2026-11-26 (versão `0.1.0-internal`). Um app só: `python app/main.py`.
+
+Incrementos e evidências da evolução operacional: [harness-evolution.md](harness-evolution.md).
 
 ## Visão geral
 

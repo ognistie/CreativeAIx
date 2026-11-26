@@ -98,6 +98,8 @@ slot labPromotionCheck(QString) -> QString
 slot labPublish(QString) -> QString
 slot labReport(QString,QString,QString) -> QString
 slot labResearch(QString) -> QString
+slot rsiHistory(QString) -> QString
+slot rsiDecide(QString,QString,bool) -> QString
 slot labRollback(QString,QString,bool) -> QString
 slot labRun(QString) -> QString
 slot labRunDetail(QString) -> QString
@@ -115,6 +117,11 @@ slot mainActivated() -> void
 slot newSession() -> void
 slot openBrainFolder() -> void
 slot openConversation(QString) -> QString
+slot providerCustomRemove(QString) -> QString
+slot providerCustomSave(QString) -> QString
+slot providerKeyRemove(QString) -> QString
+slot providerKeySave(QString,QString) -> QString
+slot providerModels(QString) -> QString
 slot providerStatus() -> QString
 slot renameConversation(QString,QString) -> bool
 slot restoreMain() -> void

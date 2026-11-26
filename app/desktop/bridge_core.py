@@ -464,7 +464,108 @@ class BridgeCore:
             {"name": "OpenAI", "use": "Conversa por voz (GPT-Live) e voz falada",
              "configured": has("OPENAI_API_KEY"),
              "next": "Opcional. Para a conversa por voz, coloque OPENAI_API_KEY no .env e reabra o app."},
-        ]})
+        ], **self._model_catalog()})
+
+    # ── Modelos e provedores (Configuracoes > Modelos) ─────────────────
+    @staticmethod
+    def _model_catalog() -> dict:
+        """Provedores que o app sabe chamar, se estao prontos (nunca a chave) e o modelo de cada nivel."""
+        from core import provider_registry as R, secret_store
+        from core.config import get_config
+        from core.user_settings import MODEL_TIERS, load
+        chosen = load().get("models", {})
+        catalog = []
+        for p in R.providers().values():
+            try:
+                stored = secret_store.has(p.name)
+            except secret_store.SecretStoreError:
+                stored = False
+            catalog.append({"name": p.name, "label": p.label, "local": p.local, "needs_key": p.needs_key,
+                            "configured": R.configured(p), "stored": stored, "signup": p.signup,
+                            "example": (f"{p.name}:{p.example}" if p.name != "anthropic" else p.example)
+                            if p.example else "",
+                            "key_env": p.key_env, "env_detected": bool(p.key_env and os.getenv(p.key_env, "").strip()),
+                            "custom": p.name not in R.PRESETS, "base_url": p.base_url if p.name not in R.PRESETS else "",
+                            "images": p.capabilities.images, "tools": p.capabilities.tools,
+                            "web_search": p.capabilities.server_tools})
+        models = {tier: {"chosen": chosen.get(tier, ""), "default": str(get_config().get(f"models.{tier}", ""))}
+                  for tier in MODEL_TIERS}
+        return {"catalog": catalog, "models": models, "can_store": secret_store.available()}
+
+    def providerKeySave(self, name: str, key: str) -> str:
+        """Guarda a chave do provedor protegida pelo Windows (DPAPI). A resposta nunca repete a chave."""
+        from core import provider_registry as R, secret_store
+        provider = R.providers().get(name or "")
+        if provider is None or (not provider.needs_key and provider.kind != "anthropic"):
+            return _to_json({"ok": False, "error": "Esse provedor não usa chave."})
+        try:
+            secret_store.save(provider.name, key)
+        except secret_store.SecretStoreError as e:
+            return _to_json({"ok": False, "error": str(e)})
+        return _to_json({"ok": True, **self._model_catalog()})
+
+    def providerCustomSave(self, payload: str) -> str:
+        """Cria/atualiza um provedor compatível com OpenAI pela tela; a chave (opcional) vai para o DPAPI."""
+        from core import secret_store
+        from core.user_settings import save
+        try:
+            d = json.loads(payload or "{}")
+            name = str(d.get("name") or "").strip().lower()
+            row = {"label": d.get("label") or name, "base_url": d.get("base_url"), "images": d.get("images") is True,
+                   "structured": d.get("structured") is True, "tools": d.get("tools", True) is not False,
+                   "example": d.get("example") or ""}
+            save({"custom_providers": {name: row}})
+            key = str(d.get("key") or "").strip()
+            if key:
+                secret_store.save(name, key)
+        except (ValueError, secret_store.SecretStoreError) as e:
+            return _to_json({"ok": False, "error": str(e)[:1].upper() + str(e)[1:]})
+        return _to_json({"ok": True, **self._model_catalog()})
+
+    def providerCustomRemove(self, name: str) -> str:
+        from core import provider_registry as R, secret_store
+        from core.user_settings import save
+        if (name or "") in R.PRESETS:
+            return _to_json({"ok": False, "error": "Provedores prontos não podem ser removidos."})
+        try:
+            save({"custom_providers": {name: None}})
+            secret_store.delete(name)
+        except (ValueError, secret_store.SecretStoreError) as e:
+            return _to_json({"ok": False, "error": str(e)})
+        return _to_json({"ok": True, **self._model_catalog()})
+
+    def providerKeyRemove(self, name: str) -> str:
+        from core import provider_registry as R, secret_store
+        if (name or "") not in R.providers():
+            return _to_json({"ok": False, "error": "Provedor desconhecido."})
+        try:
+            secret_store.delete(name)
+        except secret_store.SecretStoreError as e:
+            return _to_json({"ok": False, "error": str(e)})
+        return _to_json({"ok": True, **self._model_catalog()})
+
+    def providerModels(self, name: str) -> str:
+        """Testa a conexão (GET /models, sem gerar texto) e lista os modelos para escolher."""
+        from core import provider_registry as R
+        from core.egress import EgressDenied, require_online
+        from core.model_provider import OpenAICompatProvider, ProviderError
+        provider = R.providers().get(name or "")
+        if provider is None:
+            return _to_json({"ok": False, "error": "Provedor desconhecido."})
+        if provider.kind == "anthropic":
+            return _to_json({"ok": R.configured(provider), "models": [], "error": "" if R.configured(provider)
+                             else "Falta a chave da Anthropic.", "hint": "Use nomes como claude-sonnet-5."})
+        try:
+            if not provider.local:
+                require_online(provider.label)
+            key = R.api_key(provider)
+            if provider.needs_key and not key:
+                return _to_json({"ok": False, "error": f"Adicione a chave de {provider.label} primeiro."})
+            base = provider.base_url + ("/v1" if provider.kind == "ollama" else "")
+            models = OpenAICompatProvider().list_models(base_url=base, api_key=key, timeout=10)
+        except (ProviderError, EgressDenied) as e:
+            return _to_json({"ok": False, "error": str(e)})
+        return _to_json({"ok": True, "models": [f"{provider.name}:{m}" for m in models]})
 
     def historyDetail(self, task_id: str) -> str:
         """Passos e evidencia de uma execucao do Historico (registro de tarefas; segredos mascarados)."""
@@ -626,6 +727,10 @@ class BridgeCore:
             versions = d.get("versions", [])
             if not isinstance(versions, list) or not 1 <= len(versions) <= 2 or any(not isinstance(v, str) for v in versions):
                 raise ValueError("escolha até duas versões")
+            strategies = d.get("runtime_strategies", {})
+            if not isinstance(strategies, dict) or strategies.keys() - set(versions) or any(
+                    strategy not in ("fixed", "adaptive") for strategy in strategies.values()):
+                raise ValueError("estratégias de runtime inválidas")
             budget = self._lab_paid_budget(d) if mode == "real" else None
             seconds, calls, tokens = d.get("timeout", 180), d.get("calls", 40), d.get("tokens", 160000)
             for value, low, high in ((seconds, 15, 600), (calls, 1, 200), (tokens, 512, 1000000)):
@@ -647,7 +752,8 @@ class BridgeCore:
             with budget_scope(limits):
                 result = lab.run(dataset["name"], versions, planner, origin=mode, cancel=cancel, revision=revision,
                                  split=d.get("split", "all"), repeats=d.get("repeats", 1), context_mode=d.get("context", "fixture"),
-                                 protocol=protocol, on_event=lambda e: self._emit("labProgress", _to_json(e)), budget_usd=budget)
+                                 protocol=protocol, on_event=lambda e: self._emit("labProgress", _to_json(e)), budget_usd=budget,
+                                 runtime_strategies=strategies)
             return {"run": result}
 
         return self._start_lab_job("lab-run", run)
@@ -676,6 +782,17 @@ class BridgeCore:
     def labTraining(self) -> str:
         from core.lab import training_status
         return _to_json({"ok": True, **training_status()})
+
+    def rsiHistory(self, agent: str) -> str:
+        from core.rsi import ScientificMemory
+        return self._brain_call(lambda: {"entries": ScientificMemory(self._lab()).search(agent=agent, limit=50)})
+
+    def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:
+        from core.rsi import decide
+        if confirmed is not True:
+            return _to_json({"ok": False, "error": "Confirme a decisão desta candidata."})
+        return self._brain_call(lambda: {"decision": decide(
+            self._lab(), self._brain().harness, candidate, decision, "operador local")})
 
     def labResearch(self, payload: str) -> str:
         """Propõe uma hipótese isolada; a comparação é uma segunda ação do usuário."""

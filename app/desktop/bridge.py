@@ -314,6 +314,26 @@ class Bridge(QObject, BridgeCore):
     def providerStatus(self) -> str:
         return BridgeCore.providerStatus(self)
 
+    @Slot(str, str, result=str)
+    def providerKeySave(self, name: str, key: str) -> str:
+        return BridgeCore.providerKeySave(self, name, key)
+
+    @Slot(str, result=str)
+    def providerCustomSave(self, payload: str) -> str:
+        return BridgeCore.providerCustomSave(self, payload)
+
+    @Slot(str, result=str)
+    def providerCustomRemove(self, name: str) -> str:
+        return BridgeCore.providerCustomRemove(self, name)
+
+    @Slot(str, result=str)
+    def providerKeyRemove(self, name: str) -> str:
+        return BridgeCore.providerKeyRemove(self, name)
+
+    @Slot(str, result=str)
+    def providerModels(self, name: str) -> str:
+        return BridgeCore.providerModels(self, name)
+
     @Slot(str, result=str)
     def historyDetail(self, task_id: str) -> str:
         return BridgeCore.historyDetail(self, task_id)
@@ -397,6 +417,14 @@ class Bridge(QObject, BridgeCore):
     @Slot(result=str)
     def labTraining(self) -> str:
         return BridgeCore.labTraining(self)
+
+    @Slot(str, result=str)
+    def rsiHistory(self, agent: str) -> str:
+        return BridgeCore.rsiHistory(self, agent)
+
+    @Slot(str, str, bool, result=str)
+    def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:
+        return BridgeCore.rsiDecide(self, candidate, decision, confirmed)
 
     @Slot(str, result=str)
     def labResearch(self, payload: str) -> str:

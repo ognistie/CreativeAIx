@@ -303,13 +303,30 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
     def _run(self, task: str, dry_run: bool, gen_report: bool,
              run_id: int = 0) -> None:
         self._tls.run_id = run_id or self._run_id
-        # Parar (ou o vigia) interrompe tambem a chamada ao modelo em andamento nesta thread
         from core.ai_client import bind_cancel
+        from core.lab_budget import Budget, budget_scope
+        from core.run_context import RunContext
         bind_cancel(lambda: not self._alive())
         self._touch()
         self._start_watchdog(self._tls.run_id)
         try:
-            self._run_inner(task, dry_run, gen_report, run_id)
+            config = getattr(self, "_config", {})
+            usd = float(config.get("execution.model_budget_usd", 0))
+            timeout = float(config.get("execution.run_limit_s", 0))
+            cancelled = lambda: not self._alive()
+            budget = Budget(usd, timeout if timeout > 0 else 0,
+                            int(config.get("execution.model_call_limit", 30)),
+                            int(config.get("execution.model_token_limit", 300000)), cancelled) if usd > 0 else None
+            deadline = budget.deadline if budget else time.monotonic() + timeout if timeout > 0 else None
+            run = RunContext(task, cancelled, deadline, budget, dry_run=dry_run)
+            from core.egress import offline
+            if budget is not None and deadline is not None and config.get("execution.model_replan", False) is True and not offline():
+                from core.objective_replanner import choose_read_strategy
+                run.read_replanner = lambda observation, choices: choose_read_strategy(
+                    self._ai_client, config.get_model("maestro"), observation, choices)
+            bind_cancel(run.interrupted)
+            with budget_scope(run.budget):
+                self._run_inner(task, dry_run, gen_report, run_id, run=run)
         except Exception as error:
             # Falha antes do try interno (registro, metricas): a tarefa termina com erro em vez de deixar o app
             # "ocupado" para sempre
@@ -358,7 +375,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
         threading.Thread(target=watch, daemon=True, name="task-watchdog").start()
 
     def _run_inner(self, task: str, dry_run: bool, gen_report: bool,
-                   run_id: int = 0) -> None:
+                   run_id: int = 0, *, run) -> None:
+        from core.step_runtime import verified_success
         all_success = True
         task_start = time.time()
         metrics_before = self._ai_client.metrics
@@ -369,12 +387,13 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
         # Registro duravel: esta tarefa sobrevive a uma queda do app (core/task_ledger.py).
         # So observa: falhar aqui nao muda o resultado da execucao.
         from core.task_ledger import get_ledger
-        ledger, task_id = get_ledger(), entry["id"]
+        run.ledger, run.task_id = get_ledger(), entry["id"]
+        ledger, task_id = run.ledger, run.task_id
         voice_source = getattr(self._tls, "voice", False) is True
         self._ledger_call(ledger.begin, task_id, task, source="voz" if voice_source or task.strip() in self._voice_hints else "texto",
                           dry_run=dry_run, session_id=self.session.id)
         brain_plan = None
-        all_records: list = []
+        all_records = run.evidence
         said = task
         turn = {"kind": "new", "agents": [], "summary": "", "recorded": False, "content": ""}
         turn["voice"] = voice_source
@@ -416,7 +435,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
             # Escopo de arquivos da conversa: "abra o relatorio" (sem caminho) pode usar a pasta que a pessoa
             # citou antes ou o arquivo que o app criou nesta conversa. Vale so nesta thread, ate o fim do _run.
             from core.file_contracts import CONVERSATION_ROOTS, conversation_roots
-            CONVERSATION_ROOTS.set(tuple(conversation_roots(self.session)))
+            run.file_roots = tuple(conversation_roots(self.session))
+            CONVERSATION_ROOTS.set(run.file_roots)
 
             # Pergunta que o resolvedor respondeu so com o resumo da conversa: com a conversa ligada, quem
             # responde e ela (historico inteiro + leitura de arquivos). Papo e confirmacao seguem sem modelo.
@@ -601,30 +621,36 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
 
             self._ledger_call(ledger.plan, task_id, [f"[{s['agent']}] {s['task']}" for s in subtasks])
             self.capture.clear_records()
-            all_records = []
             step_n = 0
             ctx_mgr = self._ContextManager()
             cont_target = self.session.target(target)
             cont_used = False
-            subtask_status = {}
+            from core.task_schedule import Availability
+            schedule = run.make_schedule(subtasks, skipped)
+            runtime = run.runtime
+            objective_replan = self._config.get("execution.objective_replan", True) is True
+            self.engine._target_hwnd = None
+            entry["runtime"] = {}
 
-            for si, subtask in enumerate(subtasks):
+            for node, subtask in zip(schedule.nodes, subtasks):
+                si = node.id - 1
                 if not self._alive():
                     self._emit("cancelled", {"msg": "Cancelado."})
                     return
 
-                subtask = ctx_mgr.prepare_subtask(subtask, si)
-                subtask_status[si + 1] = False
-                dependency = subtask.get("depends_on")
+                availability = schedule.availability(node)
+                dependency = node.dependency
+                self._ledger_call(ledger.checkpoint, task_id, node.id, dependency, availability.value)
                 # Passo pulado na revisao (ou que depende de um pulado): nao executa e nao conta como falha
-                if si + 1 in skipped or (dependency is not None and int(dependency) in skipped):
+                if availability is Availability.SKIPPED:
                     skipped.add(si + 1)
                     self._log("INFO", "MAESTRO", f"Subtarefa {si + 1} pulada por você.")
                     continue
-                if dependency is not None and not subtask_status.get(int(dependency), False):
+                if availability is Availability.BLOCKED:
                     all_success = False
                     self._log("WARN", "MAESTRO", f"Subtarefa {si + 1} bloqueada: pre-requisito {dependency} falhou.")
                     continue
+                subtask = ctx_mgr.prepare_subtask(subtask, si)
 
                 agent_name = subtask.get("agent", "").upper()
                 agent = self.agents.get(agent_name)
@@ -736,11 +762,16 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 is_desktop = agent_name == "DESKTOP"
                 ws_snapshot = dict(self.engine.workspace)
                 # Acoes longas (piloto do navegador) param no Esc e narram cada turno
-                self.engine.should_stop = lambda: not self._alive()
+                self.engine.should_stop = run.interrupted
                 self.engine.current_agent = agent_name
                 self.engine.authorized_task = said
                 self.engine.effect_scope = task_id      # cada efeito no maximo uma vez nesta tarefa
+                self.engine.effect_session = self.session.id
                 self.engine.confirm_effect = lambda question: self._wait_effect(question, from_voice)
+                def copy_probe(source, destination):
+                    if not dry_run:
+                        self._ledger_call(ledger.copy_intent, task_id, step_n, source, destination)
+                self.engine.copy_probe = copy_probe
                 def on_progress(msg, _a=agent_name):
                     self._log("INFO", _a, msg)
                     # O piloto age por dentro de um passo: e o rastro do que ele ja fez se o app cair
@@ -766,18 +797,30 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     })
 
                     self._ledger_call(ledger.step_started, task_id, step_n, agent_name, action, params, desc)
-                    result = self.engine.execute(action, params, dry_run=dry_run)
+                    def dispatch(arguments):
+                        return self.engine.execute(action, arguments, dry_run=dry_run)
 
-                    # Retry para acoes visuais
-                    # So repete quando o alvo nem foi achado ("❌"): um clique que aconteceu e so nao mudou a pagina
-                    # ("⚠️ ... sem efeito") clicaria de novo (Curtir/Seguir alternavam duas vezes)
-                    if should_retry(action, result, dry_run):
-                        self._ledger_call(ledger.step_retry, task_id, step_n, action)
-                        time.sleep(2)
-                        result = self.engine.execute(action, params, dry_run=dry_run)
+                    from core.action_policy import authorize
+                    result = run.execute_step(
+                        agent_name, action, params, dispatch, retry=action in RETRY_ACTIONS,
+                        adaptive=objective_replan, phase_iv=not objective_replan,
+                        authorize_patch=lambda updated: not authorize(agent_name, said, action, updated),
+                        allow_directory=lambda path: not authorize("FILE", said, "list_files", {"path": path}),
+                        on_patch=lambda patch: self._ledger_call(ledger.note, task_id, "replan", step=step_n,
+                                                               strategy=patch.strategy, observation=patch.observation),
+                        before_retry=lambda: self._ledger_call(ledger.step_retry, task_id, step_n, action))
+                    entry["runtime"].update(actions=runtime.actions, retries=runtime.retries,
+                                            recovered=runtime.recovered, replans=runtime.replans)
+                    # Segunda conferencia fora do handler (core/verification.py): falso sucesso nao ensina nada
+                    from core.verification import apply_independent_check
+                    result = apply_independent_check(action, params, result)
+                    if result.get("false_success"):
+                        entry["runtime"]["false_successes"] = entry["runtime"].get("false_successes", 0) + 1
+                        self._log("WARN", agent_name, f"Conferência independente divergiu: {action}")
                     self._ledger_call(ledger.step_finished, task_id, step_n, action, result)
 
-                    if result.get("status") == "needs_confirmation":
+                    if result.get("status") in ("needs_confirmation", "action_limit", "timeout", "cancelled",
+                                                "uncertain", "partial", "budget_limit"):
                         entry["error"] = result["result"]
                         self._emit("error", {"msg": entry["error"]})
                         return
@@ -836,7 +879,9 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                         break  # subsequent actions may require the failed click/open/type
                     time.sleep(0.05)
                 lap("steps")
-                subtask_status[si + 1] = sub_ok
+                schedule.finish(node, sub_ok)
+                self._ledger_call(ledger.checkpoint, task_id, node.id, dependency,
+                                  "succeeded" if sub_ok else "failed")
 
                 if not dry_run and hasattr(agent, "report_result"):
                     agent.report_result({"task": agent_task}, sub_ok)
@@ -881,7 +926,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 except Exception:
                     pass
 
-            if not dry_run and all_records and all(r.get("verified") is True for r in all_records):
+            if not dry_run and verified_success(all_records):
                 # Registra a ROTA (agentes + tipo de acao, sem conteudo) com
                 # o resultado. Falhas tambem contam: rota que falha mais do
                 # que funciona deixa de ser sugerida ao Maestro.
@@ -898,7 +943,11 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
             if learn_source is not None and all_records and not skipped_steps \
                     and (learn_source.get("learned_key") or not learn_source.get("fast_path")):
                 try:
-                    status = get_learned().observe(task, learn_source, all_success)
+                    if self._alive():
+                        status = get_learned().observe_execution(
+                            task, learn_source, all_success, records=all_records, run_id=task_id)
+                    else:
+                        status = None
                     entry["learned"] = bool(learn_source.get("learned_key"))
                     if status == "promoted" and not learn_source.get("learned_key"):
                         self._log("INFO", "MEMORY", "Aprendi este tipo de pedido: das próximas vezes, sem chamar a IA")
@@ -914,7 +963,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
             self._emit("task_done", {
                 "msg": "Execucao concluida." if all_success else "Execucao concluida com falhas.",
                 "success": all_success,
-                "verified": bool(all_records) and all(r.get("verified") is True for r in all_records),
+                "verified": verified_success(all_records),
                 "steps": step_n,
                 "dry_run": dry_run,
                 "skills": plan.get("skills", []),
@@ -958,8 +1007,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     idle = getattr(self, "_watchdog_fired", None) == self._tls.run_id
                     entry.update(success=False, status="cancelled",
                                  error="parado: a tarefa ficou sem avançar" if idle else "cancelado pelo usuario")
-                entry["verified"] = bool(all_records) and entry.get("success") is True and all(
-                    r.get("verified") is True for r in all_records)
+                entry["verified"] = entry.get("success") is True and verified_success(all_records)
                 # Conversa: este pedido vira contexto do proximo (mesmo se falhou) e ja fica gravado
                 reply_target = (None, None)
                 if not turn["recorded"]:

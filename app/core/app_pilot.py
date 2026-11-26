@@ -19,6 +19,7 @@ from typing import Callable, Optional
 from core import browser_uia as B
 from core.action_risk import NeedsConfirmation
 from core.browser_pilot import _parse, _paste
+from core.step_runtime import UncertainEffect
 
 MAX_TURNS = 12
 MAX_SECONDS = 60          # piloto que nao conclui em 1 min para e avisa (antes: 2 min e 19 chamadas)
@@ -202,20 +203,24 @@ class AppPilot:
             except NeedsConfirmation as stop:
                 return {"ok": False, "status": "needs_confirmation", "turns": turn, "trail": trail,
                         "result": str(stop), "say": str(stop)}
+            except UncertainEffect as stop:
+                return {"ok": False, "status": "uncertain", "turns": turn, "trail": trail,
+                        "result": str(stop), "say": str(stop)}
             self.on_progress(f"[{snap.title[:30]}] {label} — {outcome}" + (f" ({reason})" if reason else ""))
             history.append(f"{label} (motivo: {reason}) -> {outcome}")
             trail.append(label)
         return {"ok": False, "status": "fail", "turns": self.max_turns, "trail": trail,
                 "result": f"Limite de {self.max_turns} ações atingido sem concluir."}
 
-    def _check(self, act: str, label: str, submit: bool = False, key: str = "") -> bool:
+    def _check(self, act: str, label: str, submit: bool = False, key: str = "", *, target=None) -> bool:
         if self.authorize_ui is None:
             return False
         from core.action_risk import ui_risk
         # Titulo da janela (lido do sistema) e campo sem nome contam: Enter no Slack/Teams envia
         kind = ui_risk(act, label, submit=submit, key=key, window=getattr(self, "_window", ""), app=True)
         waited = time.time()
-        message = self.authorize_ui(kind, act, label) if kind else ""
+        binding = {"target": target} if target is not None else {}
+        message = self.authorize_ui(kind, act, label, **binding) if kind else ""
         self._paused = getattr(self, "_paused", 0.0) + (time.time() - waited if kind else 0.0)
         if message:
             raise NeedsConfirmation(message)
@@ -230,17 +235,24 @@ class AppPilot:
 
     def _act(self, act: str, d: dict, snap, win, before: tuple) -> tuple[str, str]:
         import pyautogui
-        from core.automation import _bring_to_front, _is_front
+        from core.automation import _is_front, _stable_window_label
         if not _is_front(win.handle):
             return 'bloqueado: foco mudou desde a observacao', act
 
+        def window_identity():
+            return (win.handle, _stable_window_label(win.window_text())) if _is_front(win.handle) else None
+
         def same_window():
-            return (_is_front(win.handle) or _bring_to_front(win.handle)) and win.window_text() == snap.title
+            return window_identity() == (win.handle, _stable_window_label(snap.title))
 
         def check_enter(key):
             focus = B.focused_state()
             name = focus[1] if focus else ""
-            if self._check("press", name, key=key) and (not same_window() or B.focused_state() != focus):
+            def target():
+                current = B.focused_state()
+                return (window_identity(), key, current) if current is not None and same_window() else None
+            if self._check("press", name, key=key, target=target) and (
+                    focus is None or not same_window() or B.focused_state() != focus):
                 raise NeedsConfirmation("O campo em foco mudou antes do envio.")
 
         if act in ("click", "double_click"):
@@ -249,7 +261,10 @@ class AppPilot:
                 return "id inexistente nesta janela", f"{act} #{d.get('id')}"
             label = f"{act} {el.role} '{el.name[:50]}'"
             state = B.element_state(el.elem)
-            sensitive = self._check(act, el.name)
+            def target():
+                current = B.element_state(el.elem)
+                return (window_identity(), current) if current is not None and same_window() else None
+            sensitive = self._check(act, el.name, target=target)
             if sensitive and (state is None or not same_window() or B.element_state(el.elem) != state):
                 raise NeedsConfirmation("O alvo do clique mudou antes da execução.")
             w = B.wrap(el.elem)
@@ -269,8 +284,13 @@ class AppPilot:
                     except Exception:
                         w.click_input()
             except Exception as e:
+                if sensitive:
+                    raise UncertainEffect("O clique foi tentado e seu resultado precisa ser conferido.") from e
                 return f"erro: {str(e)[:60]}", label
-            return ("janela mudou" if _changed(win, before) else "sem mudança visível"), label
+            changed = _changed(win, before)
+            if sensitive and not changed:
+                raise UncertainEffect("O clique foi tentado e a janela não confirmou o resultado.")
+            return ("janela mudou" if changed else "sem mudança visível"), label
         if act == "type":
             el = self._el(snap, d)
             text = str(d.get("text", ""))
@@ -279,7 +299,10 @@ class AppPilot:
             label = f"type '{text[:40]}' em '{el.name[:30] or el.role}'"
             submit = bool(d.get("submit"))
             state = B.element_state(el.elem) if submit else None
-            sensitive = self._check("type", el.name, submit=submit)
+            def target():
+                current = B.element_state(el.elem)
+                return (window_identity(), current, text) if current is not None and same_window() else None
+            sensitive = self._check("type", el.name, submit=submit, target=target)
             if sensitive and (state is None or not same_window() or B.element_state(el.elem) != state):
                 raise NeedsConfirmation("O campo de envio mudou antes da execução.")
             try:
@@ -323,8 +346,7 @@ class AppPilot:
             if key in ("enter", "return", "ctrl+enter"):
                 check_enter(key)
             elif key in ("delete", "del", "shift+delete", "shift+del"):
-                focus = B.focused_state()
-                self._check("press", focus[1] if focus else "", key=key)
+                check_enter(key)
             keys = [k for k in key.split("+") if k]
             pyautogui.hotkey(*keys) if len(keys) > 1 else pyautogui.press(keys[0] if keys else "enter")
             return ("janela mudou" if _changed(win, before, 1.5) else "ok"), f"press {key}"
@@ -340,13 +362,12 @@ class AppPilot:
             return "ok", f"scroll {'down' if down else 'up'}"
         if act == "vision_click" and self.vision_click:
             desc = str(d.get("description") or d.get("text") or "")
-            from core.action_risk import ui_risk
             from core.browser_pilot import _raise_on_effect_stop
-            checked = ui_risk(act, desc) or ""
-            if self._check(act, desc) and not same_window():
+            if not same_window():
                 raise NeedsConfirmation("A janela mudou antes do clique.")
-            res = self.vision_click({"description": f"{desc} (DENTRO da janela \"{snap.title[:50]}\")", "hwnd": win.handle,
-                                     "_effect_checked": checked})
+            res = self.vision_click({"description": f"{desc} (DENTRO da janela \"{snap.title[:50]}\")",
+                                     "hwnd": win.handle,
+                                     "_still_current": same_window})
             _raise_on_effect_stop(res)
             return (f"{res[:40]}; " + ("janela mudou" if _changed(win, before) else "sem mudança")), \
                 f"vision_click '{desc[:40]}'"

@@ -128,8 +128,11 @@ def planner_version() -> str:
     """Muda quando o prompt do Maestro ou as políticas de plano mudam: moldes antigos ficam velhos."""
     try:
         from agents.maestro import PROMPT
-        from core import plan_validator
-        source = PROMPT + Path(plan_validator.__file__).read_text(encoding="utf-8")
+        directory = Path(__file__).resolve().parent
+        # Incremente a revisão ao mudar a semântica de roteamento ou da evidência.
+        source = "verified-routing-v2\n" + PROMPT
+        for name in ("plan_validator.py", "action_policy.py", "action_risk.py", "file_contracts.py"):
+            source += Path(directory / name).read_text(encoding="utf-8")
     except Exception:
         source = ""
     return hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
@@ -277,15 +280,22 @@ def _load(path: Path) -> dict:
 
 
 def _save(path: Path, data: dict) -> None:
+    from core.atomic_io import replace_file
     path.parent.mkdir(parents=True, exist_ok=True)
     entries = data["entries"]
     if len(entries) > MAX_ENTRIES:
         keep = sorted(entries.items(), key=lambda kv: kv[1].get("last", 0), reverse=True)[:MAX_ENTRIES]
         data["entries"] = dict(keep)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".learned_", suffix=".json")
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(data, stream, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=1)
+        replace_file(tmp, path)
+    finally:
+        try:
+            Path(tmp).unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _enabled() -> bool:
@@ -332,7 +342,17 @@ class LearnedPlans:
         return plan
 
     # Escrita: resultado de uma execução
-    def observe(self, task: str, plan: dict, success: bool) -> Optional[str]:
+    def observe_execution(self, task: str, plan: dict, success: bool, *, records: list[dict],
+                          run_id: str, simulated: bool = False) -> Optional[str]:
+        """Admite sucesso somente com confirmação do executor em todos os passos."""
+        if simulated or not run_id or not records:
+            return None
+        from core.step_runtime import verified_success
+        if success and not verified_success(records):
+            return None
+        return self.observe(task, plan, success, run_id=run_id)
+
+    def observe(self, task: str, plan: dict, success: bool, *, run_id: str = "") -> Optional[str]:
         """Aprende com uma execução terminada. -> status do molde, ou None se nada mudou."""
         if not _enabled() or depends_on_context(task):
             return None
@@ -344,6 +364,10 @@ class LearnedPlans:
                 entry = entries.get(learned)
                 if not entry:
                     return None
+                if run_id and run_id in entry.get("observed_runs", ()):
+                    return None
+                if run_id:
+                    entry["observed_runs"] = [*entry.get("observed_runs", ())[-63:], run_id]
                 entry["last"] = time.time()
                 if success:
                     entry["successes"] = entry.get("successes", 0) + 1
@@ -364,6 +388,10 @@ class LearnedPlans:
                                          "streak": 0, "status": "candidate"}
             if entry.get("status") == "blocked":
                 return "blocked"
+            if run_id and run_id in entry.get("observed_runs", ()):
+                return None
+            if run_id:
+                entry["observed_runs"] = [*entry.get("observed_runs", ())[-63:], run_id]
             if entry.get("planner") != planner_version() or entry.get("signature") != sig:
                 entry.update(streak=0, signature=sig, plan=shaped, planner=planner_version(), status="candidate")
             entry["last"] = time.time()

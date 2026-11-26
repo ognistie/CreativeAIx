@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
@@ -15,8 +16,11 @@ from core.dev_mode import DevMode, path_violation
 
 
 def git(repo, *args):
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, check=True,
-                          encoding="utf-8").stdout
+    process = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
+                             encoding="utf-8", timeout=60)
+    if process.returncode:
+        raise AssertionError(f"git {args!r} retornou {process.returncode}: {process.stderr.strip()}")
+    return process.stdout
 
 
 class DevSchemaTests(unittest.TestCase):
@@ -55,6 +59,9 @@ class DevSchemaTests(unittest.TestCase):
 
 class DevWorktreeTests(unittest.TestCase):
     def setUp(self):
+        # A fixture tem seu próprio Git. O processo pai pode injetar pares
+        # GIT_CONFIG_KEY/ VALUE incompletos após outros testes mexerem no ambiente.
+        self.enterContext(patch.dict(os.environ, {"GIT_CONFIG_COUNT": "0"}))
         base = Path(tempfile.mkdtemp(prefix="devmode-"))
         self.addCleanup(shutil.rmtree, base, True)
         self.repo = base / "repo"

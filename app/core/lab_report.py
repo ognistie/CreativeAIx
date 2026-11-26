@@ -52,6 +52,7 @@ def report(run: dict, format: str, hypothesis: Optional[str] = None) -> str:
         "dataset_version": run["set_version"], "dataset_hash": run.get("dataset_snapshot", {}).get("hash"),
         "versions": versions, "code_revision": run.get("code_revision"), "environment": run.get("environment"),
         "context_mode": run.get("context_mode"), "usage": run.get("usage"), "limits": run.get("protocol", {}).get("limits", {}),
+        "runtime_strategies": run.get("runtime_strategies", {}),
         "repeats": run.get("repeats", 1), "split": run.get("split", "all"),
         "summary": run.get("summary", {}), "comparison": diagnostic,
         "cases": [{"id": case_ids[row["case"]], "trial": row.get("trial", 1), "version": row["version"],

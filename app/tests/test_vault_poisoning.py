@@ -7,6 +7,7 @@ falha depois dele (sem o aviso, a pessoa repete o pedido e a mensagem sai duas v
 Nenhum teste chama modelo, abre app ou toca o desktop.
 """
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -31,8 +32,19 @@ def _engine(said: str, approve: bool):
     return engine, asked
 
 
-class PoisonedNoteDoesNotUnlockEffects(unittest.TestCase):
+class _DurableFixture(unittest.TestCase):
     def setUp(self):
+        from core.task_ledger import TaskLedger
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        journal = patch("core.task_ledger.get_ledger", return_value=TaskLedger(Path(temporary.name)))
+        journal.start()
+        self.addCleanup(journal.stop)
+
+
+class PoisonedNoteDoesNotUnlockEffects(_DurableFixture):
+    def setUp(self):
+        super().setUp()
         self.patches = [patch.object(R, "_record"), patch.object(R, "mode", return_value="enforce")]
         for p in self.patches:
             p.start()
@@ -64,8 +76,9 @@ class PoisonedNoteDoesNotUnlockEffects(unittest.TestCase):
         self.assertIn("POL-009", [v["policy"] for v in check.violations])
 
 
-class EffectDoneWarning(unittest.TestCase):
+class EffectDoneWarning(_DurableFixture):
     def setUp(self):
+        super().setUp()
         self.patches = [patch.object(R, "_record"), patch.object(R, "mode", return_value="enforce")]
         for p in self.patches:
             p.start()

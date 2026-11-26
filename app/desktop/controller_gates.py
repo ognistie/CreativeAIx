@@ -53,7 +53,7 @@ class GateMixin:
                                       "plan": {"steps": [question]}})
             signaled = self._plan_gate.wait(timeout)
             with self._lock:
-                return signaled and self._plan_ok and self._alive()
+                return signaled and self._plan_ok and time.monotonic() < self._effect_deadline and self._alive()
         finally:
             with self._lock:
                 self._plan_token = ""

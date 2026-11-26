@@ -113,7 +113,8 @@ class InsidePilots(unittest.TestCase):
         self.assertEqual(result["status"], "needs_confirmation")
         self.assertIn("confirmação", result["result"])
         clicked.assert_not_called()
-        gate.assert_called_once_with("enviar", "click", "Enviar")
+        from unittest.mock import ANY
+        gate.assert_called_once_with("enviar", "click", "Enviar", target=ANY)
 
     def test_app_pilot_clicks_ordinary_buttons_without_asking(self):
         from core import app_pilot as module
@@ -171,7 +172,8 @@ class InsidePilots(unittest.TestCase):
                     if before == search:
                         gate.assert_not_called()
                     else:
-                        gate.assert_called_once_with("enviar", "press", "")
+                        from unittest.mock import ANY
+                        gate.assert_called_once_with("enviar", "press", "", target=ANY)
 
     def test_pilot_without_gate_behaves_as_before(self):
         from core import app_pilot as module
@@ -198,12 +200,16 @@ class InsideTheExecutor(unittest.TestCase):
 
     def test_shadow_lets_the_step_run_and_records_it(self):
         engine = self.engine("shadow")
+        engine.effect_scope = "synthetic-shadow"
         recorded = []
+        journal = Mock()
         with patch("core.action_policy.authorize", return_value=""), patch.object(R, "mode", return_value="shadow"), \
-                patch.object(R, "_record", side_effect=lambda row, path=None: recorded.append(row)):
+                patch.object(R, "_record", side_effect=lambda row, path=None: recorded.append(row)), \
+                patch("core.task_ledger.get_ledger", return_value=journal):
             message = engine._authorize_ui(R.step_risk("delete_file", {"path": "x"}), "delete_file", "")
         self.assertEqual(message, "")
         self.assertEqual(recorded[0]["decision"], "would_block")
+        self.assertEqual([call.args[2] for call in journal.effect.call_args_list], ["intent", "approved"])
 
     def test_ordinary_steps_never_reach_the_gate(self):
         engine = self.engine("enforce")

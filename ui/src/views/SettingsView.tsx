@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button, Spinner, StatusDot } from "../components/ui";
 import { core } from "../lib/host";
 import { useCoreEvent, useCoreStatus } from "../lib/useCore";
+import { ModelProviders } from "./ModelProviders";
 import { Row, Section, Switch } from "./Page";
 
 // SettingsView: execucao, voz, interface, instrucoes e atalhos (desktop/data/settings.json via saveSettings).
@@ -96,6 +97,8 @@ export function GeneralSettings() {
           </Row>
         ))}
       </Section>
+
+      {status === "open" && <ModelProviders />}
 
       {!s ? (
         <Spinner />

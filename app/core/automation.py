@@ -255,6 +255,16 @@ def names_at_point(x, y, depth: int = 3) -> list:
     return names
 
 
+def _uia_point_state(x, y):
+    try:
+        from pywinauto import Desktop
+        from core.browser_uia import element_state
+        wrapper = Desktop(backend="uia").from_point(int(x), int(y))
+        return element_state(wrapper.element_info.element)
+    except Exception:
+        return None
+
+
 def _paste_front(hwnd, text: str) -> bool:
     """Cola o texto SO se a janela certa esta na frente (senao o Ctrl+V cairia em outro app)."""
     if not _bring_to_front(hwnd):
@@ -387,6 +397,35 @@ def _fg_state():
         return 0, ""
 
 
+def _stable_window_label(label):
+    # O contador inicial do WhatsApp é apresentação. Nome da conversa e outros
+    # prefixos permanecem na identidade.
+    if re.fullmatch(r"\(\d+\)\s+WhatsApp", label, re.IGNORECASE):
+        return label.split(")", 1)[1].strip()
+    return label
+
+
+def _effect_window():
+    hwnd, title = _fg_state()
+    return hwnd, _stable_window_label(title)
+
+
+def _point_window(x, y):
+    """HWND raiz sob o ponto, inclusive quando o pixel pertence a um filho."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.WindowFromPoint.argtypes = (wintypes.POINT,)
+        user32.WindowFromPoint.restype = wintypes.HWND
+        user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
+        user32.GetAncestor.restype = wintypes.HWND
+        hwnd = user32.WindowFromPoint(wintypes.POINT(int(x), int(y)))
+        return int(user32.GetAncestor(hwnd, 2) or 0)
+    except Exception:
+        return 0
+
+
 def _responsive(hwnd: int) -> bool:
     """Janela visivel, de outro processo e respondendo (sem exigir 'ocioso')."""
     try:
@@ -469,7 +508,7 @@ class AutomationEngine(FileActions, WebActions):
             "open_in_editor":self._open_in_editor,"ext_code_task":self._ext_code_task,
             "run_command":self._run_command,"type_text":self._type_text,"hotkey":self._hotkey,
             "click":self._click,"screenshot":self._screenshot,"wait":self._wait,
-            "vision_click":self._vision_click,"vision_type":self._vision_type,
+            "vision_click":lambda p: self._vision_click(p, structured=True),"vision_type":self._vision_type,
             "vision_analyze":self._vision_analyze,"vision_verify":self._vision_verify,
             "web_goto":self._web_goto,"web_click":self._web_click,"web_type":self._web_type,
             "web_key":self._web_key,"web_screenshot":self._web_screenshot,"web_read":self._web_read,"web_new_tab":self._web_new_tab,
@@ -500,30 +539,54 @@ class AutomationEngine(FileActions, WebActions):
         if action in ('run_python', 'run_command', 'pip_install'):
             return {"success":False,"status":"rejected","verified":False,"action":action,
                     "result":"Execucao arbitraria desativada. Use ferramentas declarativas.","timestamp":ts}
+        if action in ("vision_click", "click"):
+            # Metadado interno de um clique que já passou pela porta de efeitos.
+            # O plano do agente não pode fornecê-lo.
+            params = {key: value for key, value in params.items() if key not in ("_effect_checked", "_still_current", "hwnd")}
         from core.action_policy import authorize
         denied = authorize(getattr(self, 'current_agent', ''), getattr(self, 'authorized_task', ''), action, params)
         if denied:
             return {"success":False,"status":"rejected","verified":False,"action":action,"result":denied,"timestamp":ts}
         from core.action_risk import step_risk
-        front = _fg_state() if action == "hotkey" else (0, "")
-        risk = step_risk(action, params, window_title=front[1])
-        foreground = _fg_state() if risk and action in ("click", "vision_click", "uia_click", "hotkey") else None
+        front = _effect_window() if action == "hotkey" else (0, "")
+        # Cliques por coordenada são autorizados depois de localizar o alvo.
+        risk = None if action in ("click", "vision_click", "uia_click") else step_risk(action, params, window_title=front[1])
+        foreground = front if risk and action == "hotkey" else None
         label = str(params.get("description") or params.get("element") or "")
         if action == "hotkey" and risk:
             from core.action_risk import norm_keys
             label = "+".join(norm_keys(params.get("keys"))) + (f" em '{front[1][:40]}'" if front[1] else "")
-        ask = self._authorize_ui(risk, action, label)
-        if not ask and foreground and (not foreground[0] or _fg_state() != foreground):
+        file_before = None
+        if action == "delete_file" and callable(getattr(self, "confirm_effect", None)):
+            from core.verification import file_identity
+            path = expand(params["path"])
+            file_before = file_identity(path)
+            if file_before is None:
+                return {"success": False, "status": "failed", "effect_started": False, "action": action,
+                        "verified": False, "result": "Arquivo ausente ou sem identidade verificável.", "timestamp": ts}
+        if risk:
+            def effect_target():
+                if file_before is not None:
+                    return file_identity(path)
+                return (params, _effect_window() if foreground else None)
+            ask = self._authorize_ui(risk, action, label, target=effect_target)
+        else:
+            ask = ""
+        if not ask and foreground and (not foreground[0] or _effect_window() != foreground):
             ask = "A janela alvo mudou antes da ação."
+        if not ask and file_before is not None and file_identity(path) != file_before:
+            ask = "O arquivo mudou antes da ação."
         if ask:
             return {"success":False,"status":"needs_confirmation","verified":False,"action":action,"result":"⛔ " + ask,
                     "timestamp":ts}
+        if callable(getattr(self, "should_stop", None)) and self.should_stop():
+            return {"success": False, "status": "cancelled", "verified": False,
+                    "action": action, "result": "Cancelado antes da acao.", "timestamp": ts}
         if action != "wait" and not dry_run:
             self._fg_before = _fg_state()
             self._expect = None          # o app esperado vale so ate a proxima acao
         try:
-            # O efeito ja confirmado aqui (pela descricao) nao e perguntado de novo pelo elemento real
-            result = handler({**params, "_effect_checked": risk} if action in ("vision_click", "click") and risk else params)
+            result = handler(params)
             if isinstance(result, dict):
                 rec = {**result, "success": result.get("success") is True,
                        "verified": result.get("verified") is True and result.get("success") is True}
@@ -558,13 +621,28 @@ class AutomationEngine(FileActions, WebActions):
         app_name = p.get("app_name", "")
         element = p.get("element", "")
         if self.dry_run: return f"[SIM] UIA click: {element}"
-        if self.il:
-            result = self.il.click_element(app_name, element)
-            if result.get("success"):
-                return f"✅ UIA click: {element} [{result.get('method','')}]"
-            # Se UIA falhou e tem vision, ja tentou internamente
-            return f"❌ {element}: {result.get('error','')}"
-        return "❌ InteractionLayer nao disponivel"
+        if not self.il or not app_name or not element:
+            return "❌ UIA indisponível ou alvo incompleto"
+        result = self.il.click_element(
+            app_name, element, authorize=lambda name, identity: self._authorize_resolved_click(
+                "uia_click", element, name, identity))
+        if result.get("success"):
+            return f"✅ UIA click: {element} [{result.get('method','')}]"
+        if result.get("blocked"):
+            return EFFECT_STOP + result["error"]
+        if result.get("effect_started") is not False:
+            return {"success": False, "status": "uncertain", "effect_started": True, "result": result["error"]}
+        if result.get("hwnd") and self.vision:
+            return self._vision_click({"description": element, "hwnd": result["hwnd"]}, structured=True)
+        return {"success": False, "status": "failed", "effect_started": False, "result": result["error"]}
+
+    def _authorize_resolved_click(self, action, description, name, identity):
+        from core.action_risk import label_risk
+        stop = getattr(self, "should_stop", None)
+        if callable(stop) and stop():
+            return "Tarefa cancelada antes do clique."
+        kind = label_risk(name) or label_risk(description)
+        return self._authorize_ui(kind, action, name, target=identity)
 
     def _uia_type(self, p):
         app_name = p.get("app_name", "")
@@ -572,9 +650,14 @@ class AutomationEngine(FileActions, WebActions):
         text = p.get("text", "")
         if self.dry_run: return f"[SIM] UIA type: {text[:30]}"
         if self.il:
-            result = self.il.type_in_field(app_name, field, text)
+            stopped = getattr(self, "should_stop", None) or (lambda: False)
+            result = self.il.type_in_field(app_name, field, text, stopped=stopped)
             if result.get("success"):
                 return f"✅ UIA type: '{text[:30]}' [{result.get('method','')}]"
+            if result.get("effect_started") is True:
+                return {"success": False, "status": "uncertain", "result": result["error"]}
+            if result.get("effect_started") is False and result.get("hwnd") and not stopped():
+                return self._vision_type({"description": field, "text": text}, hwnd=result["hwnd"])
             return f"❌ {field}: {result.get('error','')}"
         return "❌ InteractionLayer nao disponivel"
 
@@ -798,23 +881,49 @@ class AutomationEngine(FileActions, WebActions):
         hwnd = getattr(self, '_target_hwnd', None)
         return bool(hwnd and _bring_to_front(hwnd) and _is_front(hwnd))
 
-    def _effect_at_point(self, x, y, already: str = "", action: str = "vision_click") -> str:
+    def _vision_request_window(self):
+        """Usa a janela à frente somente se corresponder ao único app nomeado no pedido."""
+        from core.lexicon import get_lexicon
+        from core.observer import APP_TITLES, _foreground
+        apps = {target for _, target in get_lexicon().apps_in(getattr(self, "authorized_task", ""))}
+        if len(apps) != 1:
+            return None
+        app = apps.pop()
+        if not app.startswith("app:"):
+            return None
+        hints = APP_TITLES.get(app.removeprefix("app:"), ())
+        front = _foreground()
+        if front and any(hint in front[1].lower() for hint in hints):
+            return front[0]
+        return None
+
+    def _effect_at_point(self, x, y, action: str = "vision_click", description: str = "") -> str:
         """Porta de efeito para um clique por coordenada: '' segue; texto = pergunta/recusa."""
         from core.action_risk import label_risk
         names = names_at_point(x, y)
         hits = [(label_risk(n), n) for n in names]
         kind, label = next(((k, n) for k, n in hits if k), (None, ""))
-        if not kind or kind == already:
+        if not kind:
+            kind, label = label_risk(description), description
+        if not kind:
             return ""
-        return self._authorize_ui(kind, action, label)
+        def target():
+            state = _uia_point_state(x, y)
+            if state is None:
+                return None
+            return (x, y, _effect_window(), state,
+                    [_stable_window_label(n) for n in names_at_point(x, y)])
+        return self._authorize_ui(kind, action, label, target=target)
 
-    def _vision_click(self, p):
+    def _vision_click(self, p, *, structured=False):
         desc = p.get("description","")
         if self.dry_run: return f"[SIM] {desc}"
         if not self.vision: return "⚠️ Sem visão"
 
         if p.get('hwnd'):
             self._target_hwnd = p['hwnd']
+        elif not getattr(self, "_target_hwnd", None):
+            self._target_hwnd = self._vision_request_window()
         if not self._ensure_app_focus():
             return '⛔ Janela alvo nao confirmada para visao.'
 
@@ -825,13 +934,16 @@ class AutomationEngine(FileActions, WebActions):
                 if attempt == 0:
                     time.sleep(1)  # espera e tenta de novo
                     continue
-                return f"❌ {desc}: {r.get('reason', r.get('message','não encontrado'))}"
+                message = f"❌ {desc}: {r.get('reason', r.get('message','não encontrado'))}"
+                if structured:
+                    return {"success": False, "status": "failed", "effect_started": False, "result": message}
+                return message
 
             x, y, c = r.get("x",0), r.get("y",0), r.get("confidence",0)
 
             # PROTEÇÃO: se Y está na zona da taskbar (últimos 50px), rejeita
             sw, sh = pyautogui.size()
-            if y > sh - 60:
+            if not (0 <= x < sw and 0 <= y <= sh - 60):
                 if attempt == 0:
                     time.sleep(1); continue
                 return f"⚠️ Coordenada na taskbar ({x},{y}) — elemento errado"
@@ -843,11 +955,21 @@ class AutomationEngine(FileActions, WebActions):
 
             # O efeito vem do elemento REAL sob o ponto (UIA), nao da descricao escrita pelo modelo:
             # "botao azul no canto" podia ser o Enviar e passava sem confirmacao.
-            ask = self._effect_at_point(x, y, p.get("_effect_checked"))
+            terminal = getattr(self, "should_stop", None)
+            before = _effect_window()
+            if not before[0] or before[0] != getattr(self, "_target_hwnd", None) or _point_window(x, y) != before[0]:
+                return EFFECT_STOP + "Janela alvo não confirmada antes do clique."
+            point_before = _uia_point_state(x, y)
+            ask = self._effect_at_point(x, y, description=desc)
             if ask:
                 return EFFECT_STOP + ask
             human_move(x, y)
             time.sleep(0.15)
+            still_current = p.get("_still_current")
+            if (_effect_window() != before or _point_window(x, y) != before[0] or (callable(terminal) and terminal())
+                    or (point_before is not None and _uia_point_state(x, y) != point_before)
+                    or (callable(still_current) and not still_current())):
+                return EFFECT_STOP + "A janela mudou ou a execução foi cancelada."
             pyautogui.click()
             time.sleep(0.4)
             return f"👁️ ({x},{y}) [OCR local]" if local_text else f"👁️ ({x},{y}) [{c:.0%}]"
@@ -862,25 +984,33 @@ class AutomationEngine(FileActions, WebActions):
         if not desc: return "❌ Descrição do link vazia"
         try:
             from core import browser_uia
-        except Exception as e:
-            return self._vision_click({"description": desc}) + f" (UIA indisponível: {e})"
-        try:
-            r = browser_uia.click(desc)
-        except Exception as e:
-            r = {"ok": False, "error": str(e)}
+        except ImportError:
+            return "❌ UIA do navegador indisponível"
+        r = browser_uia.click(desc, authorize=lambda name, identity: self._authorize_resolved_click(
+            "browser_click", desc, name, identity))
         if r.get("ok"):
-            return f"✅ Link '{r.get('name','')[:60]}' → {r.get('url','')[:90]} [UIA {r.get('method','')}]"
+            result = f"✅ Link '{r.get('name','')[:60]}' → {r.get('url','')[:90]} [UIA {r.get('method','')}]"
+            return {"success": True, "verified": r.get("destination_verified") is True, "result": result}
         if r.get("blocked"):
-            return r["error"]
+            return EFFECT_STOP + r["error"]
+        if r.get("effect_started") is not False:
+            return {"success": False, "status": "uncertain", "effect_started": True, "result": r["error"]}
         # Visao como ultimo recurso, mas CONFERIDA: sem mudanca de pagina = falha
-        win = browser_uia.browser_window()
+        win = browser_uia.browser_window() if r.get("hwnd") else None
+        if win is None or win.handle != r["hwnd"]:
+            return {"success": False, "status": "failed", "effect_started": False, "result": r["error"]}
         before = browser_uia._signature(win) if win else None
         vdesc = desc if "navegador" in desc else desc + " (dentro da pagina do navegador)"
-        res = self._vision_click({"description": vdesc})
+        res = self._vision_click({"description": vdesc, "hwnd": win.handle,
+                                  "_still_current": lambda: browser_uia._signature(win) == before},
+                                 structured=True)
+        if isinstance(res, dict):
+            return res
         if res.startswith("👁️") and win is not None:
             if browser_uia.wait_change(win, before):
                 return f"{res} → página mudou (visão; UIA: {r.get('error','')[:60]})"
-            return f"⚠️ Clique por visão sem efeito na página: {desc[:60]}"
+            return {"success": False, "status": "uncertain", "effect_started": True,
+                    "result": f"⚠️ Clique por visão sem mudança observada: {desc[:60]}"}
         return res
 
     def _browser_task(self, p):
@@ -900,8 +1030,9 @@ class AutomationEngine(FileActions, WebActions):
                              request=getattr(self, "authorized_task", "") or "")
         r = pilot.run(goal, p.get("start_url", ""), hints, resume=p.get("resume"))
         self.last_say = r.get("say", "")
-        if r["status"] == "needs_confirmation":
-            return {"success": False, "status": r["status"], "result": format_result(r)}
+        if r["status"] in ("needs_confirmation", "uncertain"):
+            return {"success": False, "status": r["status"],
+                    "result": r["result"] if r["status"] == "uncertain" else format_result(r)}
         return format_result(r)
 
     def effects_done_in(self, scope) -> list:
@@ -910,7 +1041,7 @@ class AutomationEngine(FileActions, WebActions):
             return []
         return list(getattr(self, "_effects_done", []))
 
-    def _authorize_ui(self, kind, action, label=""):
+    def _authorize_ui(self, kind, action, label="", *, target=None):
         """Porta de efeito para passos e pilotos. '' segue; texto = pergunta de confirmacao."""
         if not kind:
             return ""
@@ -920,23 +1051,87 @@ class AutomationEngine(FileActions, WebActions):
         if getattr(self, "_effects_scope", object()) != scope:
             self._effects_scope, self._effects_done = scope, []
         confirm_effect = getattr(self, "confirm_effect", None)
+        from core.action_risk import mode
+        policy = mode()
         task = getattr(self, "authorized_task", "") or ""
-        ask = authorize_once(kind, self._effects_done, task=task,
+        task_id = getattr(self, "effect_scope", "")
+        session_id = getattr(self, "effect_session", "")
+        agent = getattr(self, "current_agent", "")
+        if not callable(confirm_effect) and policy == "enforce":
+            return authorize_once(kind, self._effects_done, task=task,
+                                  agent=getattr(self, "current_agent", ""), action=action, label=label,
+                                  current=policy, accept_inline=False)
+        expires = time.monotonic() + 180
+        def binding():
+            import json
+            resource = target() if target else None
+            if target and resource is None:
+                raise ValueError("Alvo indisponível")
+            return json.dumps([scope, getattr(self, "effect_scope", ""), getattr(self, "effect_session", ""),
+                               getattr(self, "current_agent", ""), getattr(self, "authorized_task", ""),
+                               action, kind, label, mode(),
+                               resource], sort_keys=True)
+
+        try:
+            bound = binding()
+        except (ValueError, TypeError, OSError):
+            return "Não foi possível identificar o alvo do efeito."
+        # O caminho interativo usado pelo Controller e pelos pilotos exige uma trilha
+        # durável própria para CADA tentativa, inclusive quando a política está em shadow/off.
+        from core.task_ledger import get_ledger
+        from uuid import uuid4
+        effect_id = uuid4().hex
+
+        def persist(phase):
+            journal.effect(task_id, effect_id, phase, agent=agent, action=action, kind=kind,
+                           session_id=session_id, policy=f"effects-v1:{policy}")
+
+        try:
+            journal = get_ledger()
+            persist("intent")
+        except Exception:
+            return "Registro durável indisponível. O efeito sensível foi bloqueado antes de executar."
+        stop = getattr(self, "should_stop", None)
+        if callable(stop) and stop():
+            return "Tarefa cancelada antes do efeito."
+        done = list(self._effects_done)
+        ask = authorize_once(kind, done, task=task,
                              agent=getattr(self, "current_agent", ""), action=action, label=label,
-                             accept_inline=not callable(confirm_effect))
+                             current=policy, accept_inline=False)
         if ask and callable(confirm_effect):
             approved = confirm_effect(ask)
             stop = getattr(self, "should_stop", None)
-            approved = approved and not (callable(stop) and stop())
+            approved = approved and time.monotonic() < expires and not (callable(stop) and stop())
+            if approved:
+                try:
+                    approved = binding() == bound
+                except (ValueError, TypeError, OSError):
+                    approved = False
+            try:
+                persist("approved" if approved else "declined")
+            except Exception:
+                return "Registro durável indisponível. O efeito sensível foi bloqueado antes de executar."
             _record({"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "agent": getattr(self, "current_agent", ""),
                      "action": action, "kind": kind, "requested": requested(kind, task),
                      "task_id": getattr(self, "effect_scope", None),
                      "decision": "approved_once" if approved else "declined"})
             if approved:
+                if callable(stop) and stop():
+                    return "Tarefa cancelada antes do efeito."
                 if kind not in self._effects_done:
                     self._effects_done.append(kind)
                 return ""
             return "Ação não autorizada. A execução foi interrompida antes desse efeito."
+        if not ask:
+            try:
+                stop = getattr(self, "should_stop", None)
+                if (callable(stop) and stop()) or binding() != bound or time.monotonic() >= expires:
+                    persist("cancelled")
+                    return "Tarefa cancelada ou alvo alterado antes do efeito."
+                persist("approved")
+            except Exception:
+                return "Registro durável indisponível. O efeito sensível foi bloqueado antes de executar."
+            self._effects_done = done
         return ask
 
     def _app_task(self, p):
@@ -964,24 +1159,46 @@ class AutomationEngine(FileActions, WebActions):
                          authorize_ui=self._authorize_ui)
         r = pilot.run(goal, hwnd, title, hints=_brain_hints("DESKTOP", goal))
         self.last_say = r.get("say", "")
-        if r["status"] == "needs_confirmation":
-            return {"success": False, "status": r["status"], "result": format_result(r)}
+        if r["status"] in ("needs_confirmation", "uncertain"):
+            return {"success": False, "status": r["status"],
+                    "result": r["result"] if r["status"] == "uncertain" else format_result(r)}
         return format_result(r)
 
     def _browser_read(self, p):
         """Le titulo, URL, texto e links da pagina aberta no navegador do usuario."""
         if self.dry_run: return "[SIM] Ler página do navegador"
+        expected_url = p.get("_expected_url", "")
         try:
             from core import browser_uia
-            r = browser_uia.read(max_chars=int(p.get("max_chars", 1500)))
+            max_chars = max(1, min(12000, int(p.get("max_chars", 1500))))
+            options = {"expected_url": expected_url, "view": p.get("_read_view", "document"),
+                       "expected_window": p.get("_read_window")} if expected_url else {}
+            r = browser_uia.read(max_chars=max_chars, **options)
         except Exception as e:
             return f"⚠️ Leitura do navegador indisponível: {e}"
         if not r.get("ok"):
+            if r.get("target_changed"):
+                return {"success": False, "status": "rejected", "result": r["error"]}
             return f"⚠️ {r.get('error','')}"
         if r.get("blocked"):
-            return r["blocked"]
+            return {"success": False, "status": "rejected", "result": r["blocked"]}
+        if expected_url and r["url"] != expected_url:
+            return {"success": False, "status": "rejected", "result": "Leitura fora da URL pedida."}
+        if expected_url and not r["text"].strip():
+            return {"success": False, "status": "failed", "effect_started": False,
+                    "failure_reason": "web_empty", "observed_url": r["url"],
+                    "observed_window": r.get("window"), "result": "Página sem texto observado."}
+        marker = p.get("_expected_text")
+        if expected_url and marker and " ".join(marker.split()) not in " ".join(r["text"].split()):
+            return {"success": False, "status": "failed", "effect_started": False,
+                    "failure_reason": "web_marker_missing", "observed_url": r["url"],
+                    "observed_window": r.get("window"), "result": "Trecho pedido ausente na leitura observada."}
         links = "\n".join(f"- {l['name']}: {l['url']}" for l in r["links"][:10])
-        return f"🌐 {r['title']}\n{r['url']}\n{r['text']}" + (f"\nLinks:\n{links}" if links else "")
+        text = f"🌐 {r['title']}\n{r['url']}\n{r['text']}" + (f"\nLinks:\n{links}" if links else "")
+        if not expected_url:
+            return text
+        return {"success": True, "verified": True, "result": text,
+                "evidence": {"verifier": "browser_uia_url_and_text", "url": r["url"]}}
 
     def _open_path(self, p):
         """Abre pasta/arquivo direto (sem digitar no menu Iniciar). Nunca executa programas."""
@@ -1039,16 +1256,21 @@ class AutomationEngine(FileActions, WebActions):
         return run(p.get("tool", ""), p.get("prompt", ""), p.get("folder", ""),
                    on_progress=getattr(self, "on_progress", None), should_stop=getattr(self, "should_stop", None))
 
-    def _vision_type(self, p):
+    def _vision_type(self, p, *, hwnd=None):
         desc, text = p.get("description",""), p.get("text","")
         if self.dry_run: return f"[SIM]"
         if not self.vision: return "⚠️ Sem visão"
         if not text: return "❌ Texto vazio"
 
-        if not self._ensure_app_focus():
+        if hwnd is None:
+            hwnd = getattr(self, "_target_hwnd", None) or self._vision_request_window()
+        if not hwnd or not _bring_to_front(hwnd) or not _is_front(hwnd) or _shell_surface(hwnd):
             return '⛔ Janela alvo nao confirmada para digitacao.'
 
+        stopped = getattr(self, "should_stop", None) or (lambda: False)
         for attempt in range(2):
+            if stopped():
+                return {"success": False, "status": "cancelled", "result": "Tarefa cancelada."}
             r = self.vision.find_element(desc)
             if r.get("error") or not r.get("found"):
                 if attempt == 0: time.sleep(1); continue
@@ -1058,7 +1280,7 @@ class AutomationEngine(FileActions, WebActions):
 
             # PROTEÇÃO taskbar
             sw, sh = pyautogui.size()
-            if y > sh - 60:
+            if not (0 <= x < sw and 0 <= y <= sh - 60):
                 if attempt == 0: time.sleep(1); continue
                 return f"⚠️ Campo na taskbar ({x},{y})"
 
@@ -1066,24 +1288,19 @@ class AutomationEngine(FileActions, WebActions):
                 if attempt == 0: time.sleep(1); continue
                 return f"⚠️ Confiança: {c:.0%}"
 
-            # Clica no campo e digita
-            human_move(x, y)
-            time.sleep(0.15)
-            pyautogui.click()
-            time.sleep(0.2)
-            pyautogui.click()  # duplo clique para garantir foco no campo
-            time.sleep(0.3)
-
-            # Digita via clipboard (mais confiável)
+            if _point_window(x, y) != hwnd:
+                return EFFECT_STOP + "Campo está fora da janela alvo."
+            from core.uia_driver import paste_edit
             try:
-                from core.clipboard import paste_text
-                paste_text(text)
+                from pywinauto import Desktop
+                field = Desktop(backend="uia").from_point(int(x), int(y))
+                outcome = paste_edit(hwnd, field, text, stopped)
             except Exception:
-                refused = keyboard_fallback(text)
-                if refused:
-                    return refused
-
-            time.sleep(0.3)
+                return EFFECT_STOP + "Campo de edição não pôde ser identificado."
+            if outcome.get("effect_started"):
+                return {"success": False, "status": "uncertain", "result": outcome["error"]}
+            if not outcome["success"]:
+                return EFFECT_STOP + outcome["error"]
             return f"👁️ ({x},{y}): '{text[:40]}' [{c:.0%}]"
 
         return f"❌ Falhou após 2 tentativas: {desc}"
@@ -1142,10 +1359,19 @@ class AutomationEngine(FileActions, WebActions):
         if x<=0 or y<=0 or x>=sw or y>=sh: return f"❌ ({x},{y})"
         # A descricao do passo e escrita pelo modelo: o efeito vem do elemento REAL sob o ponto (UIA),
         # como no vision_click. "Ponto inicial" sobre o botao Enviar pedia nada e enviava.
-        ask = self._effect_at_point(x, y, p.get("_effect_checked"), action="click")
+        before = _effect_window()
+        point_before = _uia_point_state(x, y)
+        ask = self._effect_at_point(x, y, action="click", description=p.get("description", ""))
         if ask:
             return EFFECT_STOP + ask
-        try: human_move(x,y); pyautogui.click(); return f"({x},{y})"
+        try:
+            human_move(x,y)
+            stop = getattr(self, "should_stop", None)
+            if (_effect_window() != before or (callable(stop) and stop())
+                    or (point_before is not None and _uia_point_state(x, y) != point_before)):
+                return EFFECT_STOP + "A janela mudou ou a execução foi cancelada."
+            pyautogui.click()
+            return f"({x},{y})"
         except: return "❌ FailSafe"
 
     def _screenshot(self, p):

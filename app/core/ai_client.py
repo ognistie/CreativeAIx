@@ -24,6 +24,7 @@ from contextvars import ContextVar
 from typing import Any, Optional
 
 from anthropic import Anthropic, APIError, Timeout
+from core.model_provider import OllamaProvider, OpenAICompatProvider, ProviderError
 
 logger = logging.getLogger("ai_client")
 
@@ -162,24 +163,65 @@ def call_limit_s() -> float:
         return 300.0
 
 
+def _gate(model: str, service: str) -> str:
+    """Provedor do modelo. O modo offline estrito bloqueia todos (loopback não prova que o servidor local não
+    usa a rede); privacy.allow_local_models libera só os provedores locais, por escolha explícita."""
+    from core.config import get_config
+    from core.egress import require_online
+    from core.provider_registry import provider_of
+    provider = provider_of(model)
+    if not (provider.local and get_config().get("privacy.allow_local_models", False) is True):
+        require_online(service)
+    return provider.kind
+
+
+def _external_cost(model: str, input_tokens: int, output_tokens: int):
+    """Custo fora da Anthropic: local = 0; remoto = preço de providers.prices ou 0 (desconhecido).
+    None = modelo da Anthropic (tabela própria)."""
+    from core.provider_registry import price, provider_of
+    provider = provider_of(model)
+    if provider.kind == "anthropic":
+        return None
+    if provider.local:
+        return 0.0
+    known = price(model)
+    return (input_tokens * known[0] + output_tokens * known[1]) / 1_000_000 if known else 0.0
+
+
+def _other_provider_chosen() -> bool:
+    """Algum modelo configurado é de outro provedor: o app abre sem chave da Anthropic."""
+    from core.config import get_config
+    from core.provider_registry import provider_of
+    from core.user_settings import MODEL_TIERS, model_override
+    chosen = list((get_config().models or {}).values()) + [model_override(t) for t in MODEL_TIERS]
+    return any(provider_of(str(m)).kind != "anthropic" for m in chosen if m)
+
+
 class AIClient:
     """Cliente centralizado para a API Anthropic."""
 
     on_progress = None   # callback de andamento (ver __init__)
 
-    def __init__(self) -> None:
-        api_key = os.getenv("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY nao configurada no .env")
+    def __init__(self, *, transport=None, local_provider=None, compat_provider=None) -> None:
+        from core.config import get_config
+        self._local_provider = local_provider
+        # DeepSeek, OpenAI, OpenRouter, Groq, LM Studio... (core/provider_registry.py)
+        self._compat_provider = compat_provider or OpenAICompatProvider()
+        if self._local_provider is None and get_config().get("providers.ollama_enabled", False) is True:
+            self._local_provider = OllamaProvider()
+        if transport is None:
+            from core.provider_registry import PRESETS, api_key as provider_key
+            api_key = provider_key(PRESETS["anthropic"])
+            if not api_key and self._local_provider is None and not _other_provider_chosen():
+                raise ValueError("ANTHROPIC_API_KEY nao configurada no .env")
 
-        # O SDK ja faz retry com backoff em 408/409/429/5xx e erros de rede.
-        # Timeout de leitura curto: em streaming ele vale ENTRE pedacos da
-        # resposta. Sem ele, uma conexao engasgada deixava a tarefa parada
-        # em "Analisando" por ate 10 minutos (default do SDK).
-        self._client = Anthropic(
-            api_key=api_key, max_retries=2,
-            timeout=Timeout(180.0, connect=10.0, read=60.0),
-        )
+            # O SDK repete erros transitórios. Em streaming, o timeout de leitura
+            # vale entre pedaços da resposta.
+            transport = Anthropic(
+                api_key=api_key, max_retries=2,
+                timeout=Timeout(180.0, connect=10.0, read=60.0),
+            ) if api_key else None
+        self._client = transport
         self._metrics: dict[str, Any] = {
             "total_calls": 0,
             "total_input_tokens": 0,
@@ -229,6 +271,13 @@ class AIClient:
         output_tokens, cache_read_tokens, cache_write_tokens, cost_usd,
         duration_ms, stop_reason}.
         """
+        kind = _gate(model, "modelo remoto")
+        stop = getattr(_scope, "should_stop", None)
+        if callable(stop) and stop():
+            raise LLMCancelled("Execução interrompida antes de chamar o modelo.")
+        if kind != "anthropic":
+            return self._local(model, system, [{"role": "user", "content": self._build_content(user_content, images)}],
+                               max_tokens=max_tokens, schema=json_schema, agent=agent)
         params: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
@@ -252,7 +301,7 @@ class AIClient:
         start = time.time()
         from core.lab_budget import current
         budget = current.get()
-        client = self._client
+        client = self._anthropic()
         if budget is not None:
             client = client.with_options(max_retries=0)
             reserved = budget.start(client, params)
@@ -295,7 +344,7 @@ class AIClient:
                 "agent": agent, "model": getattr(resp, "model", None) or model, "max_tokens": max_tokens,
                 "effort": params.get("output_config", {}).get("effort"),
                 "tokens": sum(meta[key] for key in ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")),
-                "cost_usd": meta["cost_usd"],
+                "cost_usd": meta["cost_usd"], "cost_known": meta["cost_known"],
             })
         return meta
 
@@ -309,6 +358,9 @@ class AIClient:
         on_text(trecho) recebe o texto conforme chega; should_stop() True interrompe o streaming (a
         resposta parcial ainda volta, com stop_reason "cancelled").
         Cache: system marcado e cache automatico no fim do historico (o prefixo cresce a cada volta)."""
+        if _gate(model, "conversa e busca remotas") != "anthropic":
+            return self._local(model, system, messages, max_tokens=max_tokens, tools=tools or (),
+                               agent=agent, on_text=on_text, should_stop=should_stop, conversation=True)
         params: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages,
                                   "cache_control": {"type": "ephemeral"}}
         if system:
@@ -321,13 +373,24 @@ class AIClient:
         cancelled = False
         # Mesmo cancelamento da thread da tarefa (bind_cancel) e o mesmo prazo total das outras chamadas
         thread_stop = getattr(_scope, "should_stop", None)
+        if (should_stop is not None and should_stop()) or (callable(thread_stop) and thread_stop()):
+            return None
         limit = call_limit_s()
+        from core.lab_budget import current
+        budget = current.get()
+        client = self._anthropic()
+        if budget is not None:
+            client = client.with_options(max_retries=0)
+            reserved = budget.start(client, params)
+            params["timeout"] = budget.time_left()
         try:
-            with self._client.messages.stream(**params) as stream:
+            with client.messages.stream(**params) as stream:
                 for event in stream:
                     if (should_stop is not None and should_stop()) or (callable(thread_stop) and thread_stop()):
                         cancelled = True
                         break
+                    if budget is not None:
+                        budget.time_left()
                     if time.time() - start > limit:
                         raise LLMCancelled(f"O modelo passou de {limit:.0f} s sem terminar; parei para não travar.")
                     if on_text is not None and getattr(event, "type", "") == "text":
@@ -347,10 +410,101 @@ class AIClient:
             self._count("truncated")
         elif resp.stop_reason == "refusal":
             self._count("errors")
-        self._record_success(resp, model, duration_ms, agent)
+        meta = self._record_success(resp, model, duration_ms, agent)
+        if budget is not None:
+            budget.settle(reserved, meta)
         return resp
 
     # ─── Helpers internos ──────────────────────────────────────────
+
+    def _anthropic(self):
+        if self._client is None:
+            # Chave adicionada depois de abrir o app (Configuracoes > Modelos): cria o cliente na hora
+            from core.provider_registry import PRESETS, api_key
+            key = api_key(PRESETS["anthropic"])
+            if not key:
+                raise ProviderError("Falta a chave da Anthropic: adicione em Configurações > Modelos.")
+            self._client = Anthropic(api_key=key, max_retries=2, timeout=Timeout(180.0, connect=10.0, read=60.0))
+        return self._client
+
+    @staticmethod
+    def capabilities(model):
+        from core.provider_registry import capabilities
+        return capabilities(model)
+
+    def count_input_tokens(self, model, system, messages, tools=()) -> int:
+        """Conta a requisição montada antes de admitir a geração."""
+        if _gate(model, "contagem de contexto") != "anthropic":
+            raise ProviderError("A contagem exata de tokens só existe para modelos da Anthropic.")
+        stop = getattr(_scope, "should_stop", None)
+        if callable(stop) and stop():
+            raise LLMCancelled("Execução interrompida antes de contar tokens.")
+        params = {"model": model, "messages": messages, "timeout": 10}
+        if system:
+            params["system"] = system
+        if tools:
+            params["tools"] = tools
+        return self._anthropic().messages.count_tokens(**params).input_tokens
+
+    def _local(self, model, system, messages, *, max_tokens, agent, tools=(), schema=None,
+               on_text=None, should_stop=None, conversation=False):
+        from core.lab_budget import RequestLimit, current
+        from core.provider_registry import api_key, split
+        target, name = split(model)
+        key = ""
+        if target.kind == "ollama":
+            provider = getattr(self, "_local_provider", None)
+            if provider is None:                 # escolher um modelo ollama: ja e a autorizacao
+                provider = self._local_provider = OllamaProvider()
+        else:
+            provider = getattr(self, "_compat_provider", None) or OpenAICompatProvider()
+            key = api_key(target)
+            if target.needs_key and not key:
+                raise ProviderError(f"Falta a chave de {target.label}: adicione em Configurações > Modelos.")
+        if current.get() is not None:
+            raise RequestLimit(f"{target.label} não oferece contagem exata de tokens antes do despacho; "
+                               "experimentos com orçamento estrito usam a Anthropic.")
+        stop = getattr(_scope, "should_stop", None)
+        started = time.monotonic()
+        deadline = started + call_limit_s()
+
+        def cancelled():
+            return time.monotonic() >= deadline or (callable(stop) and stop()) or (
+                callable(should_stop) and should_stop())
+
+        def relay(piece):
+            if on_text is not None:
+                try:
+                    on_text(piece)
+                except Exception:
+                    pass
+
+        try:
+            if target.kind == "ollama":
+                response = provider.generate(model, system, messages, max_tokens=max_tokens, tools=tools,
+                                             schema=schema, timeout=min(60, call_limit_s()),
+                                             on_text=relay, cancelled=cancelled)
+            else:
+                response = provider.generate(name, system, messages, base_url=target.base_url, api_key=key,
+                                             capabilities=self.capabilities(model), max_tokens=max_tokens,
+                                             tools=tools, schema=schema, timeout=min(120, call_limit_s()),
+                                             on_text=relay, cancelled=cancelled)
+        except ProviderError:
+            self._count("errors")
+            raise
+        if response is None:
+            if conversation:
+                return None
+            raise LLMCancelled("Geração local interrompida.")
+        if response.stop_reason == "max_tokens":
+            self._count("truncated")
+        meta = self._record_success(response, model, round((time.monotonic() - started) * 1000), agent)
+        observer = _call_observation.get()
+        if observer is not None:
+            observer.append({"agent": agent, "model": model, "max_tokens": max_tokens, "effort": None,
+                             "tokens": meta["input_tokens"] + meta["output_tokens"], "cost_usd": meta["cost_usd"],
+                             "cost_known": meta["cost_known"]})
+        return response if conversation else meta
 
     def _lock_for_metrics(self) -> threading.Lock:
         lock = getattr(self, "_metrics_lock", None)
@@ -417,8 +571,12 @@ class AIClient:
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
         cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
 
-        cost = estimate_cost(model, input_tokens, output_tokens,
-                             cache_read, cache_write)
+        cost = _external_cost(model, input_tokens, output_tokens)
+        from core.provider_registry import price, provider_of
+        target = provider_of(model)
+        cost_known = target.kind == "anthropic" or target.local or price(model) is not None
+        if cost is None:
+            cost = estimate_cost(model, input_tokens, output_tokens, cache_read, cache_write)
         # Busca na web (ferramenta do servidor, usada pela conversa): cobrada por busca, fora dos tokens
         server_use = getattr(usage, "server_tool_use", None)
         searches = getattr(server_use, "web_search_requests", 0) if server_use is not None else 0
@@ -434,6 +592,7 @@ class AIClient:
             m["total_cache_read_tokens"] += cache_read
             m["total_cache_write_tokens"] += cache_write
             m["total_cost_usd"] += cost
+            m["unknown_cost_calls"] = m.get("unknown_cost_calls", 0) + int(not cost_known)
             m["total_llm_ms"] = m.get("total_llm_ms", 0) + duration_ms
 
             per = m["calls_by_model"].setdefault(
@@ -469,6 +628,8 @@ class AIClient:
             "cache_read_tokens": cache_read,
             "cache_write_tokens": cache_write,
             "cost_usd": round(cost, 6),
+            "cost_known": cost_known,
+            "cost_status": "known" if cost_known else "unknown",
             "duration_ms": duration_ms,
             "stop_reason": resp.stop_reason,
         }

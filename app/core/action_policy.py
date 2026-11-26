@@ -30,9 +30,19 @@ def blocked_hotkey(keys) -> bool:
 def authorize(agent, task, action, params, *, file_scope=None):
     if action not in TOOLS.get(agent, set()):
         return f'Ferramenta {action} nao autorizada para {agent or "contexto ausente"}.'
+    from core.egress import offline
+    if offline() and (agent == "EXTCODE" or (agent == "WEB" and action not in {"browser_read", "wait"})
+                      or (agent == "DESKTOP" and action not in {"wait", "wait_for_window", "wait_for_element"})
+                      or action == "open_path"):
+        return "Modo offline: a ferramenta depende de aplicação externa sem isolamento de rede."
     if action == 'hotkey' and blocked_hotkey((params or {}).get('keys')):
         return 'Atalho bloqueado: abre Executar/Iniciar/terminal, onde digitar executa comandos.'
     if agent == 'FILE' and action != 'wait':
+        from core.paths import is_network_path
+        import os
+        if any(isinstance(value, str) and is_network_path(os.path.expandvars(os.path.expanduser(value)))
+               for key, value in params.items() if key in ("path", "source", "destination")):
+            return "Caminho de rede recusado antes do acesso."
         from agents.file_agent import _has_explicit_confirmation
         roots = request_roots(task) if file_scope is None else file_scope
         allow_delete = file_scope is None and _has_explicit_confirmation(task)

@@ -28,8 +28,8 @@ class LabWorkspaceTest(unittest.TestCase):
         candidate = self.lab.create_variant(agent, active["id"], "Revise o resultado pedido.", note="Hipótese sintética")
         return [active["id"], candidate["id"]]
 
-    def copy_case(self, destination="b.txt"):
-        return {"id": "copia", "task": f"Copie a.txt para {destination} dentro de {{ws}}",
+    def copy_case(self, destination="b.txt", split="development"):
+        return {"id": "copia", "task": f"Copie a.txt para {destination} dentro de {{ws}}", "split": split,
                 "setup": {"a.txt": "teste"}, "expect": {"contains": {destination: "teste"}}}
 
     def client(self, outputs):
@@ -64,7 +64,7 @@ class LabWorkspaceTest(unittest.TestCase):
         return {"steps": [{"action": "copy_file", "params": {"source": "{ws}/a.txt", "destination": f"{{ws}}/{destination}"}}]}
 
     def test_dataset_revisions_replay_export_and_rollback(self):
-        old = self.lab.save_eval_set("copia", [self.copy_case()], expected="new")
+        old = self.lab.save_eval_set("copia", [self.copy_case(split="holdout")], expected="new")
         versions = self.versions("FILE")
         sdk, client = self.client([self.copy_plan("errado.txt"), self.copy_plan("b.txt")])
         cancel = threading.Event()
@@ -109,6 +109,19 @@ class LabWorkspaceTest(unittest.TestCase):
         sdk.messages.stream.assert_not_called()
         self.assertEqual(run["status"], "orcamento")
         self.assertEqual(run["usage"]["calls_started"], 0)
+
+    def test_conversation_budget_counts_tools_and_reserves_server_search_cost(self):
+        from core.lab_budget import RequestLimit
+
+        sdk, client = self.client([])
+        tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 5}]
+        with budget_scope(Budget(0.01, 30, 2, 30000, lambda: False)):
+            with self.assertRaises(RequestLimit):
+                client.converse("claude-sonnet-4-6", "", [{"role": "user", "content": "teste"}],
+                                tools=tools, max_tokens=10)
+        sdk.messages.count_tokens.assert_called_once()
+        self.assertEqual(sdk.messages.count_tokens.call_args.kwargs["tools"], tools)
+        sdk.messages.stream.assert_not_called()
 
     def test_separate_corpora_and_guarded_proposal(self):
         dataset = self.lab.save_eval_set("copia", [self.copy_case(), {**self.copy_case("c.txt"), "id": "reservado",

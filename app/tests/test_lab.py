@@ -68,6 +68,22 @@ class LabAcceptance(unittest.TestCase):
     def plan_for(self, version, task):
         return (good_planner if version["id"] == self.variant["id"] else sloppy_planner)(version, task)
 
+    def test_unknown_cost_survives_case_summary_and_export(self):
+        import json
+        from core.lab_report import report
+        def planner(version, task):
+            plan = good_planner(version, task)
+            plan["metrics"].update(cost_usd=0.0, cost_known=False)
+            return plan
+        run = self.lab.run("arquivos-basico", [self.base["id"]], planner, origin="real")
+        self.assertTrue(all(row["metrics"]["cost_known"] is False for row in run["results"]))
+        self.assertFalse(run["summary"][self.base["id"]]["cost_known"])
+        self.assertFalse(json.loads(report(run, "json"))["summary"][self.base["id"]]["cost_known"])
+        replay = self.lab.run("arquivos-basico", [self.base["id"]],
+                              lambda version, task: {**good_planner(version, task), "metrics": {
+                                  "calls": 0, "tokens": 0, "cost_usd": 0.0, "cost_known": True}}, origin="simulado")
+        self.assertTrue(replay["summary"][self.base["id"]]["cost_known"])
+
     def test_same_cases_two_versions_with_state_checked_on_disk(self):
         run = self.lab.run("arquivos-basico", [self.base["id"], self.variant["id"]], self.plan_for, origin="simulado")
         s = run["summary"]
@@ -99,7 +115,8 @@ class LabAcceptance(unittest.TestCase):
             return good_planner(version, task)
         run = self.lab.run("arquivos-basico", [self.variant["id"]], planner, origin="simulado", cancel=cancel)
         self.assertEqual(run["status"], "cancelado")
-        self.assertEqual(run["summary"][self.variant["id"]]["cancelled"], 2)
+        self.assertEqual(run["summary"][self.variant["id"]]["cancelled"], 3)
+        self.assertNotIn("executado", [event["kind"] for event in run["results"][1]["trace"]])
         self.assertIn("execução incompleta", run["summary"][self.variant["id"]]["warnings"])
 
         def broken_tool(version, task):
@@ -299,6 +316,9 @@ class LabOptimization(unittest.TestCase):
     def test_promotion_needs_real_evidence_and_no_regression(self):
         v = self.lab.create_variant("FILE", self.base["id"], "Confira o destino antes de copiar.")
         self.assertFalse(self.lab.promotion_check(v["id"])["ok"])                       # sem experimento
+        self.lab.run("arquivos-basico", [self.base["id"], v["id"]], self.planner_by_instructions,
+                     origin="real", split="development")
+        self.assertFalse(self.lab.promotion_check(v["id"])["ok"])
         self.lab.run("arquivos-basico", [self.base["id"], v["id"]], self.planner_by_instructions, origin="simulado")
         self.assertFalse(self.lab.promotion_check(v["id"])["ok"])                       # simulado nao conta
         with self.assertRaises(ValueError):
@@ -326,8 +346,10 @@ class LabOptimization(unittest.TestCase):
                                 self.planner_by_instructions, origin="real")
         self.assertEqual([f["case"] for f in seen["failures"]], ["copiar"])            # usou as falhas reais
         s = out["run"]["summary"]
-        self.assertEqual((s[out["baseline"]]["passed"], s[out["variant"]["id"]]["passed"]), (3, 4))
-        self.assertTrue(out["verdict"]["ok"])                                          # promovivel...
+        self.assertEqual((s[out["baseline"]]["passed"], s[out["variant"]["id"]]["passed"]), (2, 3))
+        self.assertFalse(out["verdict"]["ok"])                                        # requer holdout independente
+        self.assertEqual(out["run"]["split"], "development")
+        self.assertTrue(all(case["id"] != "nao-sair-da-pasta" for case in out["run"]["dataset_snapshot"]["cases"]))
         self.assertEqual(self.h.load()["agents"].get("FILE", {}).get("instructions", ""), "")   # ...mas nao publicada
         sim = self.lab.research("FILE", "acertar o nome", propose, self.planner_by_instructions, origin="simulado")
         self.assertFalse(sim["verdict"]["ok"])

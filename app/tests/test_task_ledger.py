@@ -185,7 +185,8 @@ class Recovery(Base):
 class ControllerIntegration(unittest.TestCase):
     """O _run de verdade com agentes falsos: os eventos saem nos pontos certos, sem mudar a execucao."""
 
-    def run_task(self, results, ledger, cancel_at=None, retryable=False):
+    def run_task(self, results, ledger, cancel_at=None, retryable=False, action="wait", *,
+                 goal="fazer", domain="DESKTOP", steps=None, execute_step=None):
         from desktop.controller import Controller
         c = Controller.__new__(Controller)
         c.state = {"running": True}
@@ -207,17 +208,18 @@ class ControllerIntegration(unittest.TestCase):
         c.session.save = lambda *a, **k: None
         c._ContextManager = lambda: Mock(prepare_subtask=lambda s, i: s, extract_from_results=Mock(return_value={}),
                                          after_subtask=Mock(), has_folder=False)
-        action = "vision_click" if retryable else "wait"
+        action = "vision_click" if retryable else action
         agent = Mock(spec=["plan"])
-        agent.plan.return_value = {"steps": [{"action": action, "params": {"seconds": 0}, "description": f"passo {i}"}
-                                             for i in range(len(results))]}
-        c.agents = {"DESKTOP": agent}
+        agent.plan.return_value = {"steps": steps if steps is not None else [
+            {"action": action, "params": {"seconds": 0}, "description": f"passo {i}"}
+            for i in range(len(results))]}
+        c.agents = {domain: agent}
         c.maestro = Mock(analyze=Mock(return_value={"analysis": "a", "skills": [], "subtasks": [
-            {"agent": "DESKTOP", "task": "fazer", "params": {}, "original_task": "fazer"}]}))
+            {"agent": domain, "task": goal, "params": {}, "original_task": goal}]}))
         sequence = iter(results)
 
         def execute(a, p, dry_run=False):
-            result = next(sequence)
+            result = execute_step(a, p) if execute_step else next(sequence)
             if cancel_at == "during":
                 c._cancel_event.set()
             return {"action": a, "params": p, **result}
@@ -228,11 +230,11 @@ class ControllerIntegration(unittest.TestCase):
         c._emit_usage = lambda: None
         with patch("core.task_ledger.get_ledger", return_value=ledger), patch("desktop.controller.history_store.append"), \
                 patch("core.plan_validator.validate_steps", return_value=Mock(approved=True)), \
-                patch("core.followup.resolve", return_value={"task": "fazer", "kind": "new", "target": None}), \
+                patch("core.followup.resolve", return_value={"task": goal, "kind": "new", "target": None}), \
                 patch("core.followup.from_hint", return_value=None), \
                 patch("agents.maestro.vault_plan", return_value=None), patch("agents.maestro.continue_plan", return_value=None), \
                 patch("core.user_settings.load", return_value={"plan_review": False}), patch("time.sleep"),                 patch("core.action_logger.log_action"):
-            c._run("fazer", False, False, 1)
+            c._run(goal, False, False, 1)
         return c
 
     def setUp(self):
@@ -246,11 +248,40 @@ class ControllerIntegration(unittest.TestCase):
         return self.ledger.load(ids[0])
 
     def test_successful_task_is_recorded_from_start_to_end(self):
-        self.run_task([{"success": True, "verified": True, "status": "succeeded", "result": "ok"}], self.ledger)
+        self.run_task([{"success": True, "verified": True, "status": "succeeded", "result": "ok"}],
+                      self.ledger, action="vision_verify")
         task = self.only_task()
         self.assertEqual((task["state"], task["goal"]), ("completed", "fazer"))
         self.assertEqual(len(task["steps_done"]), 1)
         self.assertTrue(task["verified"])
+
+    def test_wait_only_is_completed_without_outcome_evidence(self):
+        self.run_task([{"success": True, "verified": True, "status": "succeeded", "result": "ok"}], self.ledger)
+        task = self.only_task()
+        self.assertEqual(task["state"], "completed")
+        self.assertFalse(task["verified"])
+
+    def test_controller_preserves_finished_step_and_records_alternative_copy(self):
+        from core.automation_files import FileActions
+        root = Path(self.tmp.name)
+        (root / "recebidos").mkdir()
+        (root / "recebidos" / "relatorio.txt").write_text("conteúdo", encoding="utf-8")
+        dest = root / "saida" / "copia.txt"
+        actions = FileActions()
+        steps = [
+            {"action": "create_folder", "params": {"path": str(dest.parent)}, "description": "preparar"},
+            {"action": "copy_file", "params": {"source": str(root / "relatorio.txt"), "destination": str(dest)},
+             "description": "copiar"},
+        ]
+        with patch("core.action_policy.authorize", return_value=""):
+            self.run_task([], self.ledger, goal=f"Copie relatorio.txt dentro de {root}", domain="FILE", steps=steps,
+                          execute_step=lambda name, params: getattr(actions, f"_{name}")(params))
+        task = self.only_task()
+        self.assertTrue(task["verified"])
+        self.assertEqual(dest.read_text(encoding="utf-8"), "conteúdo")
+        self.assertEqual([row["action"] for row in task["steps_done"]], ["create_folder", "copy_file"])
+        transitions = [e for e in self.ledger.events(task["id"]) if e.get("kind") == "replan"]
+        self.assertEqual([row["step"] for row in transitions], [2])
 
     def test_unverified_success_stays_visible_as_unverified(self):
         self.run_task([{"success": True, "verified": False, "status": "succeeded", "result": "ok"}], self.ledger)
@@ -270,7 +301,7 @@ class ControllerIntegration(unittest.TestCase):
         self.assertEqual(self.only_task()["state"], "cancelled")
 
     def test_automatic_retry_is_visible(self):
-        self.run_task([{"success": False, "status": "failed", "result": "❌ nao achei"},
+        self.run_task([{"success": False, "status": "failed", "effect_started": False, "result": "❌ nao achei"},
                        {"success": True, "verified": False, "status": "succeeded", "result": "ok"}], self.ledger, retryable=True)
         kinds = [e["type"] for e in self.ledger.events(self.ledger.task_ids()[0])]
         self.assertIn("step_retry", kinds)
