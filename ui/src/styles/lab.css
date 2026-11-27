@@ -95,59 +95,10 @@
 .lab-memory-editor { padding: 18px 20px 20px; border: 1px solid var(--edge); border-radius: 16px; background: var(--bg-surface); }
 .lab-memory-editor > header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
 
-/* passar o mouse isola um agente; o selecionado so ganha destaque (os outros ficam a meia luz, nao somem) */
-/* fluxo: tracejado que corre (pedido subindo e sendo delegado) */
-.mt-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; color: var(--text-secondary); }
-.mt-legend i { display: inline-block; margin-right: 6px; vertical-align: middle; }
-.mt-key-flow { width: 18px; border-top: 2px dashed var(--accent); }
-.mt-key-leaf { width: 9px; height: 9px; border-radius: 2px; background: var(--accent); }
-.mt-key-fruit { width: 11px; height: 11px; border-radius: 50%; background: #e28aa1; }
 
 [data-motion="off"] :is(.lab-hub-card, .lab-agent-card) { transition: none; --lift: 0px !important; }
 @media (prefers-reduced-motion: reduce) { :is(.lab-hub-card, .lab-agent-card) { transition: none; --lift: 0px !important; } }
 
-/* ── Memória dos agentes: medula em pixels (views/lab/MemorySpine.tsx), mesmo traço da árvore do Cérebro ─────── */
-.memory-spine { --bark-dark: #2f2622; --bark-light: #8a7a6b;
-  --bone-0: #8f7f6a; --bone-1: #d8ccb6; --bone-2: #f1e9da; --bone-3: #fffaf0;
-  --brain-0: #5b3fa6; --brain-1: #8f72dc; --brain-2: #bba6f2; --brain-3: #efe6ff;
-  display: grid; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--edge); border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-surface) 82%, transparent); }
-[data-theme="escuro"] .memory-spine, [data-photo="on"] .memory-spine { --bark-dark: #a08d7b; --bark-light: #6f6152;
-  --bone-0: #6d604f; --bone-1: #b9ac96; --bone-2: #ddd2bf; --bone-3: #f6efe2; }
-.ms-scene { position: relative; width: 100%; aspect-ratio: 1000 / 640; isolation: isolate; }
-.ms-art { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.bone-0 { fill: var(--bone-0); } .bone-1 { fill: var(--bone-1); } .bone-2 { fill: var(--bone-2); } .bone-3 { fill: var(--bone-3); }
-.brain-0 { fill: var(--brain-0); } .brain-1 { fill: var(--brain-1); } .brain-2 { fill: var(--brain-2); } .brain-3 { fill: var(--brain-3); }
-.ms-cord, .ms-nerve, .ms-brain, .ms-flow, .ms-tie, .ms-ganglion, .ms-bead { transition: opacity 200ms var(--ease-out); }
-.ms-cord.is-soft, .ms-brain.is-soft { opacity: .75; }
-.ms-flow { fill: none; stroke: var(--agent, var(--accent)); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 2 12; opacity: .75;
-  animation: ms-run 2.6s linear infinite; }
-.ms-flow-cord { stroke: var(--accent); stroke-width: 2.5; opacity: .9; }
-@keyframes ms-run { to { stroke-dashoffset: -56; } }
-[data-motion="off"] .ms-flow { animation: none; }
-@media (prefers-reduced-motion: reduce) { .ms-flow { animation: none; } }
-.ms-tie { stroke: #e28aa1; stroke-width: 1; stroke-dasharray: 2 5; opacity: .22; }
-.ms-tie.is-lit { opacity: .9; }
-.ms-tie.is-dim { opacity: .06; }
-.memory-spine .is-dim { opacity: .16; }
-.memory-spine .is-muted { opacity: .55; }
-.ms-points, .ms-labels { position: absolute; inset: 0; pointer-events: none; margin: 0; padding: 0; list-style: none; }
-.ms-points li, .ms-labels li { position: absolute; translate: -50% -50%; }
-.ms-ganglion button, .ms-bead button { pointer-events: auto; display: block; cursor: pointer; padding: 0; border: 0; transition: transform 140ms var(--ease-out); }
-.ms-ganglion button { width: 9px; height: 9px; border-radius: 2px; background: var(--agent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--agent) 30%, transparent); }
-.ms-bead button { width: 13px; height: 13px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd1dc, #e28aa1 55%, #b04f6c); box-shadow: 0 0 0 3px #e28aa133; }
-.ms-ganglion button:hover, .ms-bead button:hover, .ms-ganglion button:focus-visible, .ms-bead button:focus-visible { transform: scale(1.6); outline: none; }
-.ms-ganglion button[aria-current="true"], .ms-bead button[aria-current="true"] { transform: scale(1.7); box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--agent, #e28aa1); }
-.ms-agent button { pointer-events: auto; display: grid; justify-items: center; gap: 1px; padding: 6px 12px 7px;
-  border: 1px solid color-mix(in srgb, var(--agent) 55%, var(--edge)); border-radius: 12px;
-  background: color-mix(in srgb, var(--agent) 22%, var(--bg-surface)); color: var(--text-primary); box-shadow: 0 6px 16px -8px #0009;
-  transition: transform 160ms var(--ease-out), background 160ms; cursor: pointer; }
-.ms-agent button:hover, .ms-agent button:focus-visible { transform: translateY(-2px); background: color-mix(in srgb, var(--agent) 34%, var(--bg-surface)); outline: none; }
-.ms-agent button[aria-pressed="true"] { border-color: var(--agent); box-shadow: 0 0 0 2px var(--agent), 0 8px 20px -8px #000a; }
-.ms-agent i { width: 8px; height: 8px; border-radius: 2px; background: var(--agent); }
-.ms-agent strong { font-size: 13px; font-weight: 650; white-space: nowrap; }
-.ms-agent small { font-size: 10.5px; color: var(--text-secondary); white-space: nowrap; }
-.ms-root { position: absolute; bottom: 0; translate: -50% 0; margin: 0; font-size: 11.5px; letter-spacing: .04em; color: var(--text-secondary); white-space: nowrap; }
 
 /* Conhecimento do agente: lista de notas + leitura/edicao (views/lab/AgentKnowledge.tsx) */
 .lab-knowledge { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; min-height: 420px; }
@@ -190,3 +141,49 @@
 .lab-note > footer button { padding: 3px 9px; border: 1px solid var(--edge); border-radius: 999px; font-size: 12px; color: var(--text-primary); background: var(--bg-chip); }
 .lab-note > footer button:hover:not(:disabled) { background: var(--bg-hover); }
 .lab-note > footer button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ── Panorama do harness em 3D (views/lab/HarnessPanorama.tsx): canvas + cartoes por cima ───────────────────── */
+.harness-panorama { display: grid; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--edge); border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent); }
+.harness-panorama.is-compact { height: 100%; grid-template-rows: minmax(0, 1fr) auto; padding: 10px; border-radius: 14px; }
+.hp-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; min-height: 360px; overflow: hidden; border-radius: 12px; outline: none;
+  touch-action: none; }
+.is-compact .hp-stage { aspect-ratio: auto; height: 100%; min-height: 0; }
+.hp-stage:focus-visible { box-shadow: 0 0 0 2px var(--focus-ring, var(--accent)); }
+.hp-canvas { position: absolute; inset: 0; display: block; cursor: grab; }
+.hp-canvas:active { cursor: grabbing; }
+.hp-live { position: absolute; top: 10px; left: 10px; display: flex; gap: 10px; align-items: flex-start; max-width: min(420px, 62%);
+  padding: 9px 12px; border: 1px solid var(--edge); border-radius: 12px; pointer-events: none;
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent); backdrop-filter: blur(6px); box-shadow: 0 8px 24px -14px #0008; }
+.hp-live-dot { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; flex: none; background: var(--text-tertiary, #999); }
+.hp-live.is-on .hp-live-dot { background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: hp-ping 1.4s ease-out infinite; }
+@keyframes hp-ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+.hp-live-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 650; color: var(--text-primary); }
+.hp-live-title em { font-style: normal; font-weight: 600; font-size: 11px; padding: 1px 8px; border-radius: 999px;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.hp-live-task { margin: 3px 0 0; font-size: 12.5px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-live-step { margin: 2px 0 0; font-size: 11.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hp-tools { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; align-items: center; }
+.hp-icon, .hp-select { height: 30px; border: 1px solid var(--edge); border-radius: 999px; color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent); backdrop-filter: blur(6px); }
+.hp-icon { display: grid; place-items: center; width: 30px; cursor: pointer; }
+.hp-icon:hover { background: var(--bg-hover); }
+.hp-icon[aria-pressed="true"] { color: var(--accent); }
+.hp-select { padding: 0 10px; font-size: 12px; }
+.hp-tip { position: absolute; z-index: 2; display: grid; gap: 2px; max-width: 280px; padding: 8px 11px; pointer-events: none;
+  transform: translate(14px, 14px); border: 1px solid var(--edge); border-radius: 10px; font-size: 12px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent); color: var(--text-primary); box-shadow: 0 12px 28px -14px #000a; }
+.hp-tip small { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); }
+.hp-tip strong { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.hp-tip span { color: var(--text-secondary); line-height: 1.4; }
+.hp-tip em { font-style: normal; font-size: 11px; color: var(--accent); }
+.hp-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text-secondary); }
+.is-compact .hp-legend { font-size: 11px; gap: 4px 12px; }
+.hp-k { display: inline-block; margin-right: 6px; vertical-align: middle; }
+.hp-k-route { width: 18px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #7d8aa5, var(--accent)); }
+.hp-k-note { width: 8px; height: 8px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #c9d6ff, #3b82f6); }
+.hp-k-shared { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd1dc, #e88aa6); }
+.hp-k-plan { width: 9px; height: 9px; rotate: 45deg; background: linear-gradient(135deg, #ffe2a3, #f5b43c); }
+.hp-k-hyp { width: 8px; height: 8px; border-radius: 50%; background: #9aa3b2; }
+[data-motion="off"] .hp-live.is-on .hp-live-dot { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hp-live.is-on .hp-live-dot { animation: none; } }

@@ -58,6 +58,8 @@ export interface TaskState {
   finalMetrics: { api_calls: number; tokens_est: number; cost_usd: number } | null;
   artifacts: Artifacts;
   plan: Array<{ agent: string; text: string }>;
+  /** Por onde o pedido passou (atalho, aprendido, conversa, maestro, "conversa→maestro"): panorama do harness */
+  planRoute: string;
   steps: Step[];
   replies: string[];
   turns: Turn[];
@@ -90,6 +92,7 @@ export const initialTaskState: TaskState = {
   finalMetrics: null,
   artifacts: { folder: "", files: [], url: "" },
   plan: [],
+  planRoute: "",
   steps: [],
   replies: [],
   turns: [],
@@ -192,7 +195,7 @@ function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
         const a = parseAgent(str(st.description));
         return { agent: a.agent || str(st.action), text: a.text };
       });
-      return { ...s, plan: steps, phaseMsg: "Executando" };
+      return { ...s, plan: steps, planRoute: str((p.plan as P | undefined)?.route), phaseMsg: "Executando" };
     }
     case "stepStart": {
       const a = parseAgent(str(p.desc));

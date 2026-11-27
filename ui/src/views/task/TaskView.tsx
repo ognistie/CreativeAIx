@@ -11,6 +11,39 @@ import { phaseIndex, usageLine, type Step, type TaskState, type Turn } from "../
 import { ICONS } from "../../lib/icons.gen";
 import { Composer, type ComposerOptions } from "./Composer";
 
+// Panorama do harness ao vivo (Lab): carrega so quando aberto, fora do pacote principal da conversa
+const LivePanorama = lazy(() => import("../lab/HarnessPanorama").then((m) => ({ default: m.LivePanorama })));
+const PANORAMA_KEY = "creative-aix.live-panorama";
+
+/** A conversa com o panorama do harness ao lado (abre e fecha pelo botao; a escolha fica salva). */
+function WithPanorama({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(PANORAMA_KEY) === "1"; } catch { return false; }
+  });
+  const toggle = () => setOpen((v) => {
+    try { localStorage.setItem(PANORAMA_KEY, v ? "0" : "1"); } catch { /* sem armazenamento: so nesta sessao */ }
+    return !v;
+  });
+  return (
+    <div className="task-split">
+      <div className="task-split-main">
+        <button type="button" className="task-panorama-toggle" aria-pressed={open} onClick={toggle}
+          title={open ? "Fechar o panorama do harness" : "Ver o harness trabalhando ao vivo"}>
+          <Icon name="layers" size={14} /> <span>Panorama</span>
+        </button>
+        {children}
+      </div>
+      {open && (
+        <aside className="task-split-aside" aria-label="Panorama do harness ao vivo">
+          <Suspense fallback={<div className="h-full w-full animate-pulse rounded-[14px] bg-chip" />}>
+            <LivePanorama />
+          </Suspense>
+        </aside>
+      )}
+    </div>
+  );
+}
+
 // TaskView: sem tarefa, saudacao + caixa + sugestoes. Com tarefa: a conversa, o pedido atual, o plano,
 // os passos em tempo real e o resultado (o que foi criado e o custo real).
 
@@ -57,6 +90,7 @@ export function TaskView({ dev }: { dev?: DevMode } = {}) {
     const shortcuts = devOn ? ((dev?.shortcuts ?? []) as Shortcut[]).filter((x) => x.request) : [];
     const cards = devOn ? ((dev?.cards ?? []) as Card[]).filter((x) => x.request) : [];
     return (
+      <WithPanorama>
       <div className="chat-font h-full overflow-y-auto px-6">
         {/* Centralizado, um pouco abaixo do meio: o olho cai na caixa de pedido, nao no topo da janela */}
         <div className="chat-landing mx-auto flex min-h-full w-full flex-col justify-center">
@@ -106,13 +140,15 @@ export function TaskView({ dev }: { dev?: DevMode } = {}) {
           )}
         </div>
       </div>
+      </WithPanorama>
     );
   }
 
   return (
+    <WithPanorama>
     <div className="chat-font flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-6">
-        <div className="mx-auto flex max-w-[760px] flex-col gap-7 pb-10 pt-4">
+        <div className="mx-auto flex max-w-[760px] flex-col gap-7 pb-10 pt-14">
           {s.turns.map((t, i) => (
             <TurnView key={i} turn={t} />
           ))}
@@ -131,6 +167,7 @@ export function TaskView({ dev }: { dev?: DevMode } = {}) {
         </div>
       </div>
     </div>
+    </WithPanorama>
   );
 }
 

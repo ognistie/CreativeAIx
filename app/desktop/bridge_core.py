@@ -787,6 +787,20 @@ class BridgeCore:
         from core.rsi import ScientificMemory
         return self._brain_call(lambda: {"entries": ScientificMemory(self._lab()).search(agent=agent, limit=50)})
 
+    def harnessPanorama(self) -> str:
+        """Dados da cena 3D do harness (roteamento, planos aprendidos, hipoteses do Lab). So leitura."""
+        from core.panorama import build
+        from core.learned_plans import get_learned
+
+        def run():
+            try:
+                from core.rsi import ScientificMemory
+                science = ScientificMemory(self._lab()).search(limit=40)
+            except Exception:
+                science = []                      # sem pasta pessoal do Lab: a camada de hipoteses fica vazia
+            return build(history_store.list_all(limit=200), get_learned().entries(), science)
+        return self._brain_call(run)
+
     def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:
         from core.rsi import decide
         if confirmed is not True:

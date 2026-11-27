@@ -443,6 +443,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
             chat_on = self._chat_enabled(dry_run, from_voice)
             if self._answer_without_running(res, said, task, target, entry, turn, ledger, task_id, dry_run,
                                             from_voice, chat_on):
+                entry.setdefault("route", "resposta")          # panorama do harness (core/panorama.py)
                 return
 
             self._emit("phase", {"phase": "maestro", "msg": "Analisando intencao..."})
@@ -482,6 +483,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 # Rota aplicada no Lab: o perfil decide o agente antes da conversa (que reescreveria o pedido)
                 if not plan and kind == "new" and not target:
                     plan = profile_plan(route_task)
+            handed_by_chat = False
             if not plan and chat_on and kind in ("new", "question"):
                 lap("resolve")
                 # So pedido novo pode virar acao; pergunta/comentario a conversa apenas responde
@@ -506,6 +508,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     entry["success"] = bool(res.get("answer"))
                     return
                 if chat is not None and chat.kind == "answer":
+                    entry["route"] = "conversa"
                     self._emit("answer", {"msg": chat.text, "run_id": self._tls.run_id})
                     turn["kind"] = "question"
                     turn["summary"] = chat.text
@@ -517,6 +520,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     route_task = chat.task
                     # O molde aprendido e da FALA da pessoa; o pedido reescrito pela conversa nao vira molde
                     learnable = False
+                    handed_by_chat = True
                     self._log("INFO", "CHAT", f"Pedido de ação: {route_task[:160]}")
                     self._emit("resolved", {"said": said, "task": route_task, "kind": kind, "target": target or ""})
                     entry["resolved"] = route_task
@@ -529,6 +533,9 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
             plan = plan or self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
             if plan.get("learned_key"):
                 self._log("INFO", "MAESTRO", plan.get("analysis", "Plano aprendido"))
+            # Por onde o pedido passou: o panorama do harness mostra ao vivo e soma o trafego no historico
+            from core.panorama import route_of
+            entry["route"] = route_of(plan, handed_by_chat)
             # Copia do plano como saiu do planejador (a execucao acrescenta alvos de continuacao aos params)
             import copy as _copy
             learn_source = _copy.deepcopy(plan) if learnable else None
@@ -608,6 +615,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
 
             self._emit("plan_ready", {"plan": {
                 "task_summary": plan.get("analysis", ""),
+                "route": entry.get("route", ""),
                 "steps": [
                     {
                         "step": i + 1,

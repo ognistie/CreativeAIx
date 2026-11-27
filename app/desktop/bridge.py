@@ -422,6 +422,10 @@ class Bridge(QObject, BridgeCore):
     def rsiHistory(self, agent: str) -> str:
         return BridgeCore.rsiHistory(self, agent)
 
+    @Slot(result=str)
+    def harnessPanorama(self) -> str:
+        return BridgeCore.harnessPanorama(self)
+
     @Slot(str, str, bool, result=str)
     def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:
         return BridgeCore.rsiDecide(self, candidate, decision, confirmed)

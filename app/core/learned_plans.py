@@ -411,7 +411,11 @@ class LearnedPlans:
     def entries(self) -> list:
         with _lock:
             data = _load(self.path)["entries"]
-        return [{"key": k, **{f: v.get(f) for f in ("template", "status", "successes", "failures", "streak", "replays")}}
+        def agents(entry: dict) -> list:
+            subs = ((entry.get("plan") or {}).get("subtasks") or []) if isinstance(entry.get("plan"), dict) else []
+            return sorted({str(s.get("agent") or "").upper() for s in subs if isinstance(s, dict) and s.get("agent")})
+        return [{"key": k, **{f: v.get(f) for f in ("template", "status", "successes", "failures", "streak", "replays")},
+                 "agents": agents(v)}
                 for k, v in sorted(data.items(), key=lambda kv: -kv[1].get("last", 0))]
 
     def forget(self, key: str) -> bool:

@@ -131,6 +131,38 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
     },
   }),
   journalSave: ([payload]) => ({ ok: true, entry: { ...JSON.parse(String(payload)), id: "j1" } }),
+  harnessPanorama: () => ({
+    ok: true,
+    routing: {
+      total: 48,
+      routes: [
+        { route: "conversa", runs: 17, ok: 17, avg_ms: 3400 }, { route: "atalho", runs: 11, ok: 11, avg_ms: 1300 },
+        { route: "maestro", runs: 12, ok: 10, avg_ms: 14200 }, { route: "aprendido", runs: 5, ok: 5, avg_ms: 6100 },
+        { route: "continuar", runs: 2, ok: 2, avg_ms: 2900 }, { route: "resposta", runs: 1, ok: 1, avg_ms: 400 },
+      ],
+      agents: [
+        { agent: "DESKTOP", runs: 14, ok: 13 }, { agent: "WEB", runs: 8, ok: 8 }, { agent: "DATA", runs: 6, ok: 5 },
+        { agent: "FILE", runs: 4, ok: 4 }, { agent: "CODE", runs: 3, ok: 2 }, { agent: "EXTCODE", runs: 1, ok: 1 },
+      ],
+      edges: [{ from: "conversa", to: "maestro", runs: 4 }],
+      recent: [{ route: "conversa", ok: true, agents: ["CHAT"], when: "2026-11-27T09:12", ms: 3100 }],
+    },
+    evolution: {
+      plans: [
+        { key: "p1", template: "abrir ⟨app⟩ e escrever ⟨texto⟩", status: "promoted", successes: 6, failures: 0, streak: 6, replays: 3, agents: ["DESKTOP"] },
+        { key: "p2", template: "pesquisar ⟨termo⟩ no youtube", status: "promoted", successes: 4, failures: 0, streak: 4, replays: 1, agents: ["WEB"] },
+        { key: "p3", template: "copie ⟨arquivo⟩ dentro de ⟨caminho⟩", status: "candidate", successes: 2, failures: 0, streak: 2, replays: 0, agents: ["FILE"] },
+        { key: "p4", template: "crie uma planilha de ⟨tema⟩", status: "candidate", successes: 1, failures: 1, streak: 1, replays: 0, agents: ["DATA"] },
+        { key: "p5", template: "mande ⟨mensagem⟩ no teams", status: "blocked", successes: 0, failures: 2, streak: 0, replays: 0, agents: ["DESKTOP"] },
+      ],
+      hypotheses: [
+        { id: "h1", agent: "FILE", objective: "Conferir o destino antes de mover", result: "aguardando decisão", origin: "real", when: "2026-11-26T18:20" },
+        { id: "h2", agent: "WEB", objective: "Preferir fontes oficiais", result: "refutada", origin: "real", when: "2026-11-25T10:02" },
+        { id: "h3", agent: "DATA", objective: "Sempre incluir gráfico", result: "promovida", origin: "real", when: "2026-11-24T15:41" },
+      ],
+      summary: { promoted: 2, candidate: 2, blocked: 1, hypotheses: 3 },
+    },
+  }),
   labVersions: () => ({
     ok: true,
     versions: [
@@ -321,6 +353,7 @@ export function mockSocket(): SocketLike {
   return sock;
 }
 
+let demoRun = 0;
 function simulate(task: string, emit: (name: string, payload: unknown) => void) {
   const steps = [
     "[DATA] Montar a planilha com as categorias do mês",
@@ -328,8 +361,8 @@ function simulate(task: string, emit: (name: string, payload: unknown) => void) 
     "[FILE] Salvar em Documentos como Gastos-novembro.xlsx",
   ];
   const at = (ms: number, fn: () => void) => setTimeout(fn, ms);
-  at(100, () => emit("phaseChanged", { msg: "Entendendo o pedido" }));
-  at(700, () => emit("planReady", { plan: { steps: steps.map((d) => ({ description: d })) } }));
+  at(100, () => emit("phaseChanged", { msg: "Entendendo o pedido", run_id: ++demoRun }));
+  at(700, () => emit("planReady", { plan: { route: "conversa→maestro", steps: steps.map((d) => ({ description: d })) } }));
   steps.forEach((d, i) => {
     at(1200 + i * 1400, () => emit("stepStart", { step: i + 1, desc: d, total: steps.length, progress: (i / steps.length) * 100 }));
     at(1900 + i * 1400, () => emit("stepDone", { step: i + 1, desc: d, ok: true, result: i === 2 ? "C:\\Users\\voce\\Documents\\Gastos-novembro.xlsx" : "ok", progress: ((i + 1) / steps.length) * 100 }));

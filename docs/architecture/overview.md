@@ -84,6 +84,7 @@ A integração entre conversa, visão, resultados e seus limites está em [voice
 | Preferências e Harness | `core/user_settings.py`, `core/harness.py` | validados por esquema |
 | Aparência | `app/design/theme.json` → `ui/src/styles/tokens.css` | contraste AA conferido no gate |
 | Papéis de parede gerativos | `ui/src/lib/scenes.ts`, `lib/wallpaper/` | cena → buffer → estilo; ver [wallpapers.md](wallpapers.md) |
+| Panorama do harness (3D, ao vivo) | `core/panorama.py` (`harnessPanorama`), `ui/src/lib/panorama.ts`, `views/lab/HarnessPanorama.tsx` | roteamento (tráfego do histórico, campo `route`), memória dos agentes e evolução (planos aprendidos, hipóteses do Lab); acende a rota do pedido atual |
 
 ## Contrato da interface
 

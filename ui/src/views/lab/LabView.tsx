@@ -13,7 +13,8 @@ import { Experiments } from "./Experiments";
 import { ScientificHistory } from "./ScientificHistory";
 import { AgentList, LabHub, type LabArea } from "./LabHub";
 import { AgentKnowledge } from "./AgentKnowledge";
-import { MemorySpine, MemorySpineLoading, useAgentKnowledge } from "./MemorySpine";
+import { HarnessPanorama } from "./HarnessPanorama";
+import { useAgentKnowledge } from "./knowledge";
 import { AGENTS, AGENT_LOOK, call, type Memory, type Spec } from "./types";
 
 // AI Research Lab: tres areas na entrada, cada uma SO com o que e dela (antes a ficha do agente misturava edicao,
@@ -41,7 +42,7 @@ const INTRO: Record<Area, string> = {
   agents: "Escolha um agente para ajustar como ele trabalha, ou crie um novo.",
   agent: "",
   experiments: "Só testes: crie versões de um agente, rode os mesmos casos e compare com a versão ativa.",
-  memory: "O Maestro é o cérebro e cada agente sai da medula com o seu nervo. Navegue pelo conhecimento de cada um, abra e edite as notas.",
+  memory: "O harness inteiro em 3D: por onde os pedidos passam, a memória de cada agente e o que o sistema aprendeu. Gire, aproxime e clique para abrir e editar as notas.",
 };
 
 type Move = { area?: Area; agent?: string; tab?: Tab; note?: string };
@@ -120,11 +121,11 @@ export function LabView() {
           {area === "agents" && <AgentList onOpen={(id) => go({ agent: id, tab: "visao", area: "agent" })} />}
           {area === "memory" && (
             <div className="lab-memory">
-              {knowledge ? (
-                <MemorySpine knowledge={knowledge} selected={agent} note={note}
+              {knowledgeError ? <MemoryUnavailable error={knowledgeError} /> : (
+                <HarnessPanorama knowledge={knowledge} selected={agent} note={note}
                   onSelect={(id) => id !== agent && go({ agent: id })}
                   onNote={(id, rel) => go({ agent: id, note: rel })} />
-              ) : <MemorySpineLoading error={knowledgeError} />}
+              )}
               <section className="lab-memory-editor" aria-label={`Conhecimento de ${look.name}`}>
                 <header>
                   <span className="lab-editor-emblem" style={{ "--agent-color": look.color } as React.CSSProperties}><Icon name={look.icon} size={18} /></span>
@@ -137,7 +138,7 @@ export function LabView() {
                 {memTab === "memoria" ? <AgentMemoryEditor key={agent} agent={agent} onDirty={setDirty} />
                   : knowledge ? <AgentKnowledge key={agent} agent={agent} knowledge={knowledge} rel={note}
                     onRel={(rel) => rel !== note && go({ note: rel })} onDirty={setDirty} onChanged={reloadKnowledge} />
-                  : <MemorySpineLoading error={knowledgeError} />}
+                  : knowledgeError ? <MemoryUnavailable error={knowledgeError} /> : <Skeleton className="h-[420px] w-full rounded-r3" />}
               </section>
             </div>
           )}
@@ -211,4 +212,8 @@ export function LabView() {
       />
     </div>
   );
+}
+
+function MemoryUnavailable({ error }: { error: string }) {
+  return <EmptyState icon="alert-circle" title="Memória indisponível">{error}</EmptyState>;
 }
