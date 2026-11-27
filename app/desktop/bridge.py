@@ -28,6 +28,7 @@ class Bridge(QObject, BridgeCore):
     stepDone           = Signal(str)
     apiUsage           = Signal(str)
     contextExtracted   = Signal(str)
+    cognitiveActivity  = Signal(str)
     taskDone           = Signal(str)
     executionFinished  = Signal(str)
     reportReady        = Signal(str)

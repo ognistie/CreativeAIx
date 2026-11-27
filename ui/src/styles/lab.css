@@ -185,5 +185,20 @@
 .hp-k-shared { width: 10px; height: 10px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd1dc, #e88aa6); }
 .hp-k-plan { width: 9px; height: 9px; rotate: 45deg; background: linear-gradient(135deg, #ffe2a3, #f5b43c); }
 .hp-k-hyp { width: 8px; height: 8px; border-radius: 50%; background: #9aa3b2; }
+.hp-timeline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 2px; border-top: 1px solid var(--edge); font-size: 12px; color: var(--text-secondary); }
+.hp-timeline label, .hp-inspector label { display: grid; gap: 5px; min-width: 0; }
+.hp-timeline select, .hp-inspector select { max-width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--edge); border-radius: 8px; background: var(--bg-surface); color: var(--text-primary); }
+.hp-timeline button, .hp-inspector button { padding: 6px 10px; border: 1px solid var(--edge); border-radius: 8px; color: var(--text-primary); background: var(--bg-surface); }
+.hp-timeline button:disabled { opacity: .5; }
+.hp-timeline input { flex: 1; min-width: 120px; accent-color: var(--accent); }
+.hp-timeline p { flex-basis: 100%; margin: 0; }
+.hp-inspector { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 12px; border: 1px solid var(--edge); border-radius: 12px; font-size: 12px; color: var(--text-secondary); }
+.hp-inspector strong { color: var(--text-primary); font-size: 13px; }
+.hp-inspector p { margin: 6px 0; line-height: 1.6; overflow-wrap: anywhere; }
+.hp-inspector ul { max-height: 120px; overflow: auto; }
+.hp-error { color: var(--text-primary); font-size: 12px; padding: 8px; border: 1px solid var(--edge); border-radius: 8px; }
+.is-compact .hp-timeline { max-height: 125px; overflow-y: auto; }
+.is-compact .hp-timeline select { width: 100%; }
+@media (max-width: 900px) { .hp-inspector { grid-template-columns: 1fr; } .hp-tools { top: auto; bottom: 10px; } }
 [data-motion="off"] .hp-live.is-on .hp-live-dot { animation: none; }
 @media (prefers-reduced-motion: reduce) { .hp-live.is-on .hp-live-dot { animation: none; } }

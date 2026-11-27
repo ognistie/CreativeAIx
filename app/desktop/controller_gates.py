@@ -53,7 +53,10 @@ class GateMixin:
                                       "plan": {"steps": [question]}})
             signaled = self._plan_gate.wait(timeout)
             with self._lock:
-                return signaled and self._plan_ok and time.monotonic() < self._effect_deadline and self._alive()
+                approved = signaled and self._plan_ok and time.monotonic() < self._effect_deadline and self._alive()
+            from core.panorama import activity
+            activity("decision", status="completed" if approved else "blocked", action="effect_approval")
+            return approved
         finally:
             with self._lock:
                 self._plan_token = ""

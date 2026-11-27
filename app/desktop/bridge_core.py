@@ -793,12 +793,14 @@ class BridgeCore:
         from core.learned_plans import get_learned
 
         def run():
+            warnings = []
             try:
                 from core.rsi import ScientificMemory
                 science = ScientificMemory(self._lab()).search(limit=40)
             except Exception:
-                science = []                      # sem pasta pessoal do Lab: a camada de hipoteses fica vazia
-            return build(history_store.list_all(limit=200), get_learned().entries(), science)
+                science = []
+                warnings.append("Memória científica indisponível; a camada de evolução pode estar incompleta.")
+            return {**build(history_store.list_all(limit=200), get_learned().entries(), science), "warnings": warnings}
         return self._brain_call(run)
 
     def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:
@@ -1046,6 +1048,7 @@ class BridgeCore:
         m = {
             "phase":              self._on_phase,
             "plan_ready":         lambda p: self._emit("planReady", _to_json(p)),
+            "cognitive_activity": lambda p: self._emit("cognitiveActivity", _to_json(p)),
             "step_start":         lambda p: self._emit("stepStart", _to_json(p)),
             "step_done":          lambda p: self._emit("stepDone", _to_json(p)),
             "api_usage":          lambda p: self._emit("apiUsage", _to_json(p)),

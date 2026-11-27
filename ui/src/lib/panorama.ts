@@ -1,18 +1,12 @@
 // Panorama 3D do harness: layout da cena, camera em perspectiva e o que acende ao vivo. Puro e deterministico
 // (testado em panorama.test.ts); o desenho em canvas fica em views/lab/HarnessPanorama.tsx.
 //
-// A cena, de baixo para cima (y para cima, unidades do mundo):
-//   chao        grade em perspectiva e as sombras dos nos (profundidade real)
-//   roteamento  o caminho de um pedido: Pedido -> Entendimento -> resposta direta | atalho sem IA | plano aprendido |
-//               continuar | Conversa | Maestro -> Politicas -> agentes. A espessura de cada trilha e o trafego real
-//               (historico); ao vivo, a trilha do pedido atual acende e pulsos correm por ela
-//   memoria     o Maestro no centro, os agentes em orbita, as notas de cada agente numa nuvem em volta dele e a
-//               memoria comum (notas usadas por mais de um agente) entre o centro e os donos
-//   evolucao    o auto-aperfeicoamento por cima: planos aprendidos (candidato, promovido, bloqueado) e as hipoteses do
-//               Lab, ligados aos agentes que mudam
+// Regioes funcionais no alto, distribuicao pela medula e agentes nas ramificacoes.
+// Feixes e dendritos correspondem a conexoes do codigo; apenas traceLit acende eventos observados.
+// Notas e memoria comum preservam os caminhos do Cerebro; planos e hipoteses vem dos registros existentes.
 
 export type Vec3 = readonly [number, number, number];
-export type NodeKind = "core" | "agent" | "note" | "shared" | "stage" | "plan" | "hypothesis";
+export type NodeKind = "core" | "agent" | "note" | "shared" | "stage" | "plan" | "hypothesis" | "tool" | "model";
 export type EdgeKind = "own" | "shared" | "route" | "traffic" | "evolve";
 
 export interface SceneNode {
@@ -51,28 +45,36 @@ export interface EvolutionData {
   hypotheses: Array<{ id: string; agent: string; objective: string; result: string; origin?: string; when?: string }>;
   summary: { promoted: number; candidate: number; blocked: number; hypotheses: number };
 }
-export interface PanoramaInput { agents: PanoramaAgent[]; routing?: RoutingData | null; evolution?: EvolutionData | null }
+export interface PanoramaInput { agents: PanoramaAgent[]; routing?: RoutingData | null; evolution?: EvolutionData | null; events?: import("./cognitive").CognitiveEvent[] }
 
 const CORE = "MAESTRO";
-const AGENT_RING = 270;
-const AGENT_Y = 40;
+const AGENT_Y = 120;
 const NOTE_SHELL = 60;
 const MAX_NOTES = 28;
 const MAX_SHARED = 22;
 const ROUTE_Y = -130;
-const EVO_Y = 245;
-export const FLOOR_Y = -215;
+const EVO_Y = 350;
+export const FLOOR_Y = -460;
 
 /** Estagios do roteamento: id, rotulo e posicao (frente da cena = z positivo, onde a camera comeca). */
 export const STAGES: Array<{ id: string; label: string; pos: Vec3; hint: string }> = [
-  { id: "pedido", label: "Pedido", pos: [0, ROUTE_Y - 20, 400], hint: "Texto ou voz entra aqui" },
-  { id: "entendimento", label: "Entendimento", pos: [0, ROUTE_Y - 10, 300], hint: "Resolve a conversa: continuação, pergunta, pedido novo" },
-  { id: "resposta", label: "Resposta direta", pos: [-370, ROUTE_Y, 235], hint: "Respondido sem plano (papo, tela, andamento)" },
-  { id: "atalho", label: "Atalho sem IA", pos: [-230, ROUTE_Y, 205], hint: "Abrir app, pasta ou pesquisa citada: zero modelo" },
-  { id: "aprendido", label: "Plano aprendido", pos: [-95, ROUTE_Y, 190], hint: "Molde que já deu certo: executa sem chamar o Maestro" },
-  { id: "continuar", label: "Continuar", pos: [40, ROUTE_Y, 190], hint: "Age no que já está aberto" },
-  { id: "conversa", label: "Conversa", pos: [185, ROUTE_Y, 210], hint: "Responde com leitura de arquivos e busca; ação vai ao Maestro" },
-  { id: "politicas", label: "Políticas", pos: [0, ROUTE_Y + 30, 40], hint: "Validação do plano e dos passos em código, confirmação de efeitos" },
+  { id: "pedido", label: "Estímulo", pos: [0, -420, 80], hint: "Texto ou voz; desktop/controller.py" },
+  { id: "entendimento", label: "Entendimento", pos: [-120, 220, 50], hint: "Resolve a conversa: continuação, pergunta, pedido novo · core/followup.py" },
+  { id: "resposta", label: "Resposta direta", pos: [-230, 205, 55], hint: "Respondido sem plano (papo, tela, andamento)" },
+  { id: "atalho", label: "Atalho sem IA", pos: [-85, 15, 85], hint: "Abrir app, pasta ou pesquisa citada: zero modelo" },
+  { id: "aprendido", label: "Plano aprendido", pos: [-80, 55, -90], hint: "Molde que já deu certo: executa sem chamar o Maestro" },
+  { id: "continuar", label: "Continuar", pos: [55, -15, -70], hint: "Age no que já está aberto" },
+  { id: "conversa", label: "Conversa", pos: [215, 140, -10], hint: "Responde com leitura de arquivos e busca; ação vai ao Maestro" },
+  { id: "politicas", label: "Decisão · políticas", pos: [100, 140, 75], hint: "Validação e confirmação de efeitos · core/plan_validator.py · desktop/controller_gates.py" },
+];
+export const REGIONS: Array<{ id: string; label: string; pos: Vec3; color: string; detail: string }> = [
+  { id: "perception", label: "Percepção · Vision", pos: [-315, 220, -90], color: "#86adb8", detail: "Leitura da tela e localização visual · core/vision.py · core/screen_question.py. Vision observa; o executor realiza o clique." },
+  { id: "memory", label: "Hipocampo · memória", pos: [-140, 110, -85], color: "#d48da7", detail: "Recuperação e associação · core/brain.py · core/context_engine.py. Analogia funcional, sem equivalência biológica." },
+  { id: "context", label: "Contexto", pos: [130, 270, -60], color: "#79a9ba", detail: "Seleção de referências e contexto da sessão. O contador indica caracteres selecionados, não tokens." },
+  { id: "spine", label: "Medula · distribuição", pos: [0, -70, 0], color: "#8e9cb4", detail: "Comunicação e despacho · TaskSchedule / StepRuntime / Controller" },
+  { id: "verify", label: "Validação", pos: [120, -320, 20], color: "#80b4a1", detail: "Conferência independente · core/verification.py. Operação concluída não significa resultado verificado." },
+  { id: "learning", label: "Plasticidade · RSI", pos: [-70, 355, -45], color: "#d9b776", detail: "Planos aprendidos e memória científica · core/learned_plans.py · core/rsi.py. Promoção humana continua obrigatória no Lab." },
+  { id: "model", label: "Interface de modelos", pos: [300, 230, -110], color: "#a095b8", detail: "Chamadas por core/ai_client.py. A cena só indica uma chamada quando ela é observada." },
 ];
 const ROUTE_STAGE: Record<string, string> = {
   resposta: "resposta", atalho: "atalho", aprendido: "aprendido", continuar: "continuar", conversa: "conversa", maestro: CORE,
@@ -125,15 +127,15 @@ export function layoutPanorama(input: PanoramaInput): Scene {
   const maxAgentRuns = Math.max(1, ...[...traffic.values()].map((a) => a.runs));
 
   // Maestro no centro
-  const corePos: Vec3 = [0, AGENT_Y + 20, 0];
+  const corePos: Vec3 = [0, AGENT_Y + 100, 0];
   nodes.push({ id: CORE, kind: "core", pos: corePos, r: 30, color: core?.color ?? "#8b5cf6", label: core?.name ?? "Maestro",
     agent: CORE, detail: "Planeja e delega. Recebe o que nenhum atalho resolveu.", weight: 1 });
 
-  // Agentes em orbita (leve ondulacao para nao parecer um prato)
+  // Agentes distribuidos ao longo da medula, em ramificacoes bilaterais.
   const agentPos = new Map<string, Vec3>([[CORE, corePos]]);
   ring.forEach((a, i) => {
-    const ang = -Math.PI / 2 + (i / Math.max(ring.length, 1)) * Math.PI * 2 + 0.35;
-    const pos: Vec3 = [Math.cos(ang) * AGENT_RING, AGENT_Y + Math.sin(i * 1.7) * 26, Math.sin(ang) * AGENT_RING];
+    const side = i % 2 === 0 ? -1 : 1;
+    const pos: Vec3 = [side * (235 + (i % 3) * 25), 25 - Math.floor(i / 2) * 125, Math.sin(i * 1.7) * 95];
     agentPos.set(a.id, pos);
     const t = traffic.get(a.id);
     nodes.push({ id: a.id, kind: "agent", pos, r: 19 + 7 * ((t?.runs ?? 0) / maxAgentRuns), color: a.color, label: a.name,
@@ -153,7 +155,7 @@ export function layoutPanorama(input: PanoramaInput): Scene {
       const id = `note:${a.id}:${rel}`;
       nodes.push({ id, kind: "note", pos: add(center, scale(shell[k]!, wob)), r: 5.6, color: a.color, agent: a.id, rel,
         label: noteName(rel), detail: `Nota de ${a.name}` });
-      if (k % 2 === 0) edges.push({ id: `e:${id}`, a: a.id, b: id, kind: "own", weight: 0.3, lift: 0 });
+      edges.push({ id: `e:${id}`, a: id, b: a.id, kind: "own", weight: 0.3, lift: 12 });
     });
   }
 
@@ -200,11 +202,16 @@ export function layoutPanorama(input: PanoramaInput): Scene {
   const handed = (input.routing?.edges ?? []).find((e) => e.from === "conversa" && e.to === "maestro")?.runs ?? 0;
   R("stage:conversa", CORE, handed / total, 90);
   for (const s of ["atalho", "aprendido", "continuar"]) R(`stage:${s}`, "stage:politicas", routeWeight(s), 20);
-  R(CORE, "stage:politicas", routeWeight("maestro") + handed / total, 40);
+  R(CORE, "stage:politicas", routeWeight("maestro"), 40);
+  for (const region of REGIONS) nodes.push({ ...region, id: `region:${region.id}`, kind: "stage", r: 14 });
+  for (const [a, b] of [["stage:entendimento", "region:memory"], ["region:memory", "region:context"],
+    ["region:context", CORE], ["stage:politicas", "region:spine"], ["region:spine", "region:verify"],
+    ["region:verify", "region:learning"], ["region:learning", "region:memory"], [CORE, "region:model"]]) R(a!, b!, 0, 30);
   // Politicas -> agentes: trafego por agente
   for (const a of ring) {
     const t = traffic.get(a.id);
-    edges.push({ id: `traffic:${a.id}`, a: "stage:politicas", b: a.id, kind: "traffic", weight: (t?.runs ?? 0) / maxAgentRuns, lift: 70 });
+    edges.push({ id: `traffic:${a.id}`, a: "region:spine", b: a.id, kind: "traffic", weight: (t?.runs ?? 0) / maxAgentRuns, lift: 55 });
+    edges.push({ id: `verify:${a.id}`, a: a.id, b: "region:verify", kind: "evolve", weight: 0, lift: -30 });
   }
 
   // Evolucao: planos aprendidos num halo acima do Maestro, hipoteses do Lab num anel maior
@@ -231,6 +238,22 @@ export function layoutPanorama(input: PanoramaInput): Scene {
     if (agentPos.has(h.agent)) edges.push({ id: `evo:${id}`, a: id, b: h.agent, kind: "evolve", weight: 0.25, lift: -30 });
   });
 
+  // Periferia criada somente a partir de chamadas observadas, nunca de capacidades presumidas.
+  const calls = new Map<string, import("./cognitive").CognitiveEvent>();
+  for (const e of input.events ?? []) if (e.action && (e.stage === "model" || e.stage === "execution")) {
+    calls.set(`${e.stage}:${e.agent}:${e.action}`, e);
+  }
+  [...calls.entries()].slice(-24).forEach(([key, e], i) => {
+    const parent = agentPos.has(e.agent) ? e.agent : e.agent === "CHAT" ? "stage:conversa"
+      : ["VISION", "ASSIST", "READER"].includes(e.agent) ? "region:perception" : "region:model";
+    const pos = nodes.find((n) => n.id === parent)!.pos;
+    const id = `call:${key}`;
+    nodes.push({ id, kind: e.stage === "model" ? "model" : "tool", agent: e.agent, label: e.action,
+      pos: [pos[0] + (pos[0] < 0 ? -1 : 1) * 170, pos[1] + (i % 3 - 1) * 35, pos[2] - 70 - (i % 2) * 40],
+      r: 8, color: e.stage === "model" ? "#a095b8" : "#83b6a5", detail: `Chamada observada · ${e.status} · ${e.ms} ms. Sem conteúdo ou credenciais.` });
+    edges.push({ id: `e:${id}`, a: parent, b: id, kind: "own", lift: 30, weight: 0 });
+  });
+
   return { nodes, edges, byId: new Map(nodes.map((n) => [n.id, n])), floorY: FLOOR_Y };
 }
 
@@ -239,15 +262,16 @@ export interface Camera { yaw: number; pitch: number; dist: number; target: Vec3
 export interface Projected { x: number; y: number; depth: number; k: number; visible: boolean }
 export const NEAR = 40;
 
-export const VIEWS: Record<"geral" | "rotas" | "memoria" | "evolucao", Camera> = {
-  geral: { yaw: 0.25, pitch: 0.36, dist: 780, target: [0, -5, 70], fov: 0.95 },
+export const VIEWS: Record<"geral" | "rotas" | "contexto" | "memoria" | "evolucao", Camera> = {
+  geral: { yaw: 0.22, pitch: 0.12, dist: 900, target: [0, -15, 0], fov: 0.95 },
   rotas: { yaw: 0.05, pitch: 0.6, dist: 700, target: [0, ROUTE_Y + 30, 170], fov: 0.95 },
+  contexto: { yaw: -0.3, pitch: 0.12, dist: 540, target: [0, 205, -10], fov: 0.95 },
   memoria: { yaw: 0.6, pitch: 0.24, dist: 700, target: [0, AGENT_Y + 30, 0], fov: 0.95 },
   evolucao: { yaw: 0.2, pitch: -0.1, dist: 600, target: [0, EVO_Y - 20, 0], fov: 0.95 },
 };
 
 export function clampCamera(c: Camera): Camera {
-  return { ...c, pitch: Math.max(-0.7, Math.min(1.25, c.pitch)), dist: Math.max(320, Math.min(2200, c.dist)) };
+  return { ...c, pitch: Math.max(-1.5, Math.min(1.5, c.pitch)), dist: Math.max(85, Math.min(2400, c.dist)) };
 }
 
 /** Projeta um ponto do mundo na tela (perspectiva). k = pixels por unidade do mundo naquela profundidade. */
@@ -337,7 +361,7 @@ export function liveLit(s: LiveInput, sceneEdges: SceneEdge[]): LiveLit {
   if (then) hop(entry, stageOf(then));
   const last = then ? stageOf(then) : entry;
   const acting = s.planAgents.filter((a) => a !== "CHAT");
-  if (acting.length && last && last !== "stage:resposta" && last !== "stage:conversa") {
+    if (acting.length && last && last !== "stage:resposta" && last !== "stage:conversa") {
     hop(last, "stage:politicas");
     for (const a of acting) {
       nodes.add(a);
@@ -348,4 +372,46 @@ export function liveLit(s: LiveInput, sceneEdges: SceneEdge[]): LiveLit {
   for (const st of s.steps) if (st.state === "running" && st.agent && st.agent !== "CHAT") working.add(st.agent);
   if (chatSteps && s.busy) working.add("stage:conversa");
   return { nodes, path, working, outcome };
+}
+
+/** Apenas os sinais explicitamente observados acendem o observatorio. Sem dados, a cena fica quieta. */
+export function traceLit(events: import("./cognitive").CognitiveEvent[], scene: Scene): LiveLit {
+  const event = events.at(-1);
+  const nodes = new Set<string>(), working = new Set<string>(), path: string[] = [];
+  if (!event) return { nodes, working, path, outcome: "" };
+  const stages: Record<string, string> = { stimulus: "stage:pedido", understanding: "stage:entendimento",
+    memory: "region:memory", context: "region:context", planning: CORE, decision: "stage:politicas",
+    transmission: "region:spine", execution: event.agent, verification: "region:verify",
+    learning: "region:learning", recovery: CORE, model: "region:model" };
+  const id = stages[event.stage] || CORE;
+  nodes.add(id);
+  if (event.agent && scene.byId.has(event.agent)) nodes.add(event.agent);
+  if (event.status === "started") working.add(id);
+  const callId = `call:${event.stage}:${event.agent}:${event.action}`;
+  if (scene.byId.has(callId)) {
+    nodes.add(callId); path.push(`e:${callId}`);
+    const connection = scene.edges.find((e) => e.id === `e:${callId}`);
+    if (connection) nodes.add(connection.a);
+  }
+  const pairs: Record<string, [string, string]> = { memory: ["region:memory", "region:context"],
+    context: ["region:context", CORE], execution: ["region:spine", event.agent],
+    verification: [event.agent, "region:verify"], learning: ["region:verify", "region:learning"],
+    model: [event.agent || CORE, "region:model"], transmission: ["stage:politicas", "region:spine"] };
+  const pair = pairs[event.stage];
+  if (pair && !(event.stage === "memory" && event.count === 0)) {
+    for (const edge of scene.edges) if (edge.a === pair[0] && edge.b === pair[1]) path.push(edge.id);
+  }
+  if (event.stage === "memory" && event.count > 0) {
+    for (const ref of event.refs) {
+      const matches = scene.nodes.filter((n) => n.rel && (n.rel === ref || noteName(n.rel) === ref) && (!event.agent || n.agent === event.agent));
+      // Titulos ambiguos nao sao prova de qual nota foi recuperada.
+      if (matches.length === 1) {
+        const note = matches[0]!;
+        nodes.add(note.id);
+        for (const edge of scene.edges) if (edge.a === note.id && edge.b === event.agent) path.push(edge.id);
+      }
+    }
+  }
+  const outcome = event.status === "verified" ? "ok" : ["failed", "blocked", "uncertain"].includes(event.status) ? "fail" : "";
+  return { nodes, working, path, outcome };
 }

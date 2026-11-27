@@ -42,7 +42,10 @@ def retrieve(turns: list[RememberedTurn], query: str, *, limit: int = 6) -> list
         semantic = sum(bool((concept - requested) & candidate) for concept in concepts)
         if lexical or semantic:
             ranked.append((2 * lexical + semantic, turn.turn, turn))
-    return [row[2] for row in sorted(ranked, key=lambda row: row[:2], reverse=True)[:limit]]
+    selected = [row[2] for row in sorted(ranked, key=lambda row: row[:2], reverse=True)[:limit]]
+    from core.panorama import activity
+    activity("memory", agent="CHAT", count=len(selected), action="conversation_turns")
+    return selected
 
 
 def quoted_excerpts(turns: list[RememberedTurn]) -> str:

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon, Segmented, Skeleton } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { core } from "../../lib/host";
+import { core, demoMode } from "../../lib/host";
 import { useTask } from "../../lib/stores";
 import { fmtDuration } from "../../lib/taskStore";
 import {
-  clampCamera, curvePoints, layoutPanorama, liveLit, pick, project, STAGES, VIEWS,
+  clampCamera, curvePoints, layoutPanorama, traceLit, pick, project, STAGES, VIEWS,
   type Camera, type EvolutionData, type LiveLit, type RoutingData, type Scene, type SceneNode, type Vec3,
 } from "../../lib/panorama";
+import { COGNITIVE_STAGES, STATUS_LABEL, animationTime, signalProgress, detailLevel, eventsAt, eventSource, type CognitiveRun } from "../../lib/cognitive";
 import { useAgentKnowledge, type Knowledge } from "./knowledge";
 import { AGENTS, AGENT_LOOK, call } from "./types";
 
@@ -17,7 +18,7 @@ import { AGENTS, AGENT_LOOK, call } from "./types";
 
 type View = keyof typeof VIEWS;
 const VIEW_OPTIONS: Array<{ value: View; label: string }> = [
-  { value: "geral", label: "Geral" }, { value: "rotas", label: "Rotas" },
+  { value: "geral", label: "Geral" }, { value: "rotas", label: "Atividade" }, { value: "contexto", label: "Contexto" },
   { value: "memoria", label: "Memória" }, { value: "evolucao", label: "Evolução" },
 ];
 const ROUTE_LABEL: Record<string, string> = {
@@ -27,15 +28,15 @@ const ROUTE_LABEL: Record<string, string> = {
 const KIND_LABEL: Record<SceneNode["kind"], string> = {
   core: "Cérebro do harness", agent: "Agente", note: "Nota", shared: "Memória comum", stage: "Etapa do roteamento",
   plan: "Plano aprendido", hypothesis: "Hipótese do Lab",
+  tool: "Ferramenta observada", model: "Modelo observado",
 };
-const finishedLine = (steps: number, ms: number | null) =>
-  [steps ? `${steps} ${steps === 1 ? "passo" : "passos"}` : "sem passos no computador", ms ? fmtDuration(ms) : ""].filter(Boolean).join(" · ");
 export const routeLabel = (route: string) => route.split("→").map((r) => ROUTE_LABEL[r] ?? r).join(" → ");
 
-interface Harness { routing: RoutingData; evolution: EvolutionData }
+interface Harness { routing: RoutingData; evolution: EvolutionData; runs: CognitiveRun[] }
 
 /** Roteamento e evolucao do nucleo; recarrega quando um pedido termina (o historico e os planos mudaram). */
-function useHarness(busy: boolean): Harness | null {
+function useHarness(busy: boolean): { data: Harness | null; error: string } {
+  const [error, setError] = useState("");
   const [data, setData] = useState<Harness | null>(null);
   const [version, setVersion] = useState(0);
   const was = useRef(busy);
@@ -50,11 +51,19 @@ function useHarness(busy: boolean): Harness | null {
   useEffect(() => {
     let active = true;
     void call(core().call("harnessPanorama")).then((r) => {
-      if (active && r.ok) setData({ routing: r.routing as RoutingData, evolution: r.evolution as EvolutionData });
+      if (!active) return;
+      if (!r.ok) { setError(r.error || "Telemetria indisponível."); return; }
+      setError(Array.isArray(r.warnings) ? r.warnings.join(" ") : "");
+      setData({ routing: r.routing as RoutingData, evolution: r.evolution as EvolutionData, runs: (r.runs as CognitiveRun[]) ?? [] });
     });
     return () => { active = false; };
   }, [version]);
-  return data;
+  useEffect(() => {
+    const refresh = () => setVersion((v) => v + 1);
+    const offHistory = core().on("historyChanged", refresh), offLab = core().on("labFinished", refresh);
+    return () => { offHistory(); offLab(); };
+  }, []);
+  return { data, error };
 }
 
 // ── cores ───────────────────────────────────────────────────────────────────
@@ -103,15 +112,36 @@ export interface PanoramaProps {
 
 export function HarnessPanorama({ knowledge, compact = false, selected = "", note = "", onSelect, onNote }: PanoramaProps) {
   const task = useTask();
-  const harness = useHarness(task.busy);
+  const { data: harness, error: harnessError } = useHarness(task.busy);
+  const [runKey, setRunKey] = useState("live");
+  const [playhead, setPlayhead] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [inspected, setInspected] = useState("");
+  const [connection, setConnection] = useState("");
+  const replay = harness?.runs.find((r) => r.id === runKey);
+  const recorded = replay?.events ?? [];
+  const duration = recorded.at(-1)?.ms ?? 0;
+  const observed = useMemo(() => runKey === "live" ? task.cognitive : eventsAt(recorded, playhead), [runKey, task.cognitive, recorded, playhead]);
+  const current = observed.at(-1);
+  const signalAt = useRef(0);
+  useEffect(() => { signalAt.current = performance.now(); }, [current, runKey]);
+  useEffect(() => {
+    if (!playing || runKey === "live") return;
+    const start = performance.now(), from = playhead;
+    const timer = setInterval(() => {
+      const next = Math.min(duration, from + performance.now() - start);
+      setPlayhead(next);
+      if (next >= duration) setPlaying(false);
+    }, 50);
+    return () => clearInterval(timer);
+    // O cursor avanca pelo relogio, sem reiniciar o intervalo a cada quadro.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, runKey, duration]);
   const scene = useMemo<Scene | null>(() => knowledge && layoutPanorama({
     agents: AGENTS.map((id) => ({ id, name: AGENT_LOOK[id]!.name, color: AGENT_LOOK[id]!.color, ...knowledge.agents[id]! })),
-    routing: harness?.routing, evolution: harness?.evolution,
-  }), [knowledge, harness]);
-  const live = useMemo<LiveLit | null>(() => scene && liveLit({
-    busy: task.busy, status: task.status, route: task.planRoute, planAgents: task.plan.map((p) => p.agent),
-    steps: task.steps.filter((x) => x.kind === "step").map((x) => ({ agent: x.agent, state: x.state })), review: !!task.review,
-  }, scene.edges), [scene, task.busy, task.status, task.planRoute, task.plan, task.steps, task.review]);
+    routing: harness?.routing, evolution: harness?.evolution, events: observed,
+  }), [knowledge, harness, observed]);
+  const live = useMemo<LiveLit | null>(() => scene && traceLit(observed, scene), [scene, observed]);
 
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -119,13 +149,13 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
   const goal = useRef<Camera>({ ...VIEWS.geral });
   const viewCam = useRef<Camera>({ ...VIEWS.geral });   // a camera de fato desenhada (enquadrada); o clique usa a mesma
   const hoverId = useRef("");
-  const state = useRef({ scene, live, selected, note, compact });
-  state.current = { scene, live, selected, note, compact };
+  const state = useRef({ scene, live, selected, note, compact, current, connection });
+  state.current = { scene, live, selected, note, compact, current, connection };
   const outcomeAt = useRef(0);
   const dragging = useRef(false);
   const down = useRef<{ x: number; y: number; yaw: number; pitch: number; moved: boolean } | null>(null);
   const [view, setView] = useState<View>("geral");
-  const [spin, setSpin] = useState(() => !reducedMotion());
+  const [spin, setSpin] = useState(true);
   const spinRef = useRef(spin);
   spinRef.current = spin;
   const [tip, setTip] = useState<{ node: SceneNode; x: number; y: number } | null>(null);
@@ -139,7 +169,9 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     if (!scene) return out;
     for (const e of scene.edges) {
       const a = scene.byId.get(e.a)!, b = scene.byId.get(e.b)!;
-      out.set(e.id, curvePoints(a.pos, b.pos, e.lift, e.kind === "own" ? 4 : 16));
+      const nerve: Vec3 = [12 * Math.sin(b.pos[1] / 100), b.pos[1], 0];
+      out.set(e.id, e.kind === "traffic" ? [...curvePoints(a.pos, nerve, 0, 10), ...curvePoints(nerve, b.pos, e.lift, 12).slice(1)]
+        : curvePoints(a.pos, b.pos, e.lift, e.kind === "own" ? 8 : 16));
     }
     return out;
   }, [scene]);
@@ -154,12 +186,14 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     const ctx = el.getContext("2d");
     if (!ctx) return;
     let theme = readTheme();
-    let w = 0, h = 0, dpr = 1, raf = 0, visible = true, last = performance.now();
+    let w = 0, h = 0, dpr = 1, raf = 0, visible = true, last = performance.now(), dirty = true;
+    let lastState: unknown = null, lastSignaling = false;
     const resize = () => {
       const r = box.getBoundingClientRect();
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = Math.max(1, r.width);
       h = Math.max(1, r.height);
+      dirty = true;
       el.width = Math.round(w * dpr);
       el.height = Math.round(h * dpr);
       el.style.width = `${w}px`;
@@ -170,15 +204,22 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     resize();
     const io = new IntersectionObserver(([e]) => { visible = !!e?.isIntersecting; if (visible) loop(); });
     io.observe(box);
-    const mo = new MutationObserver(() => { theme = readTheme(); });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style", "class", "data-photo"] });
+    const mo = new MutationObserver(() => { theme = readTheme(); dirty = true; });
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const changed = () => { theme = readTheme(); dirty = true; };
+    media.addEventListener("change", changed);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "style", "class", "data-photo", "data-motion", "data-palette"] });
 
     const frame = (now: number) => {
       const dt = Math.min(64, now - last);
       last = now;
       const c = cam.current, g = goal.current;
       const ease = 1 - Math.pow(0.0025, dt / 1000);                 // aproxima ~uniforme, independe do fps
-      if (spinRef.current && !dragging.current) g.yaw += dt * 0.00006;
+      const moving = Math.abs(c.yaw - g.yaw) + Math.abs(c.pitch - g.pitch) + Math.abs(c.dist - g.dist)
+        + Math.hypot(...c.target.map((v, i) => v - g.target[i]!)) > 0.001;
+      const signaling = !!state.current.current && now - signalAt.current < 1200 && spinRef.current && !theme.calm;
+      if (!dirty && lastState === state.current && !moving && !signaling && !lastSignaling) return;
+      dirty = false; lastState = state.current; lastSignaling = signaling;
       cam.current = clampCamera({
         ...c, yaw: c.yaw + (g.yaw - c.yaw) * ease, pitch: c.pitch + (g.pitch - c.pitch) * ease, dist: c.dist + (g.dist - c.dist) * ease,
         target: [c.target[0] + (g.target[0] - c.target[0]) * ease, c.target[1] + (g.target[1] - c.target[1]) * ease,
@@ -192,19 +233,21 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       cancelAnimationFrame(raf);
       const tick = (now: number) => {
         if (!visible) return;
-        frame(now);
+        if (now - last >= 32) frame(now);
         raf = requestAnimationFrame(tick);
       };
       raf = requestAnimationFrame(tick);
     };
     loop();
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); mo.disconnect(); };
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); io.disconnect(); mo.disconnect(); media.removeEventListener("change", changed); };
     // O canvas so existe com a cena pronta (antes disso aparece o esqueleto): o laco liga quando ela fica pronta
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
   function draw(ctx: CanvasRenderingContext2D, w: number, h: number, dpr: number, now: number, th: Theme) {
-    const { scene: sc, live: lv, selected: sel, note: nt, compact: small } = state.current;
+    const { scene: sc, live: lv, selected: sel, note: nt, compact: small, current: event, connection: selectedEdge } = state.current;
+    const clock = animationTime(now, th.calm || !spinRef.current || now - signalAt.current >= 1200 || !event);
+    const lod = detailLevel(w, small);
     const c = viewCam.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
@@ -218,19 +261,6 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     const P = (p: Vec3) => project(p, c, w, h);
     const far = c.dist + 900;
     const fog = (depth: number) => Math.max(0.18, Math.min(1, 1.15 - (depth - c.dist * 0.45) / (far - c.dist * 0.45)));
-
-    // Chao: grade em perspectiva que some ao longe
-    ctx.lineWidth = 1;
-    for (let i = -10; i <= 10; i++) {
-      for (const dir of [0, 1]) {
-        const a: Vec3 = dir ? [i * 60, sc.floorY, -560] : [-600, sc.floorY, i * 56];
-        const b: Vec3 = dir ? [i * 60, sc.floorY, 620] : [600, sc.floorY, i * 56];
-        const pa = P(a), pb = P(b);
-        if (!pa.visible || !pb.visible) continue;
-        ctx.strokeStyle = th.dark ? `rgba(160,170,210,${0.07 * fog((pa.depth + pb.depth) / 2)})` : `rgba(60,70,100,${0.08 * fog((pa.depth + pb.depth) / 2)})`;
-        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
-      }
-    }
 
     // Foco: agente sob o mouse ou escolhido
     const hov = hoverId.current ? sc.byId.get(hoverId.current) : undefined;
@@ -251,19 +281,22 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     }
 
     // Ligacoes e trilhas
-    const t = now / 1000;
+
     for (const e of sc.edges) {
       const pts = curvesRef.current.get(e.id);
       if (!pts) continue;
       const a = sc.byId.get(e.a)!, b = sc.byId.get(e.b)!;
       const isLit = litPath.has(e.id);
+      const inspectedEdge = selectedEdge === e.id;
       let color = th.muted, alpha = 0.18, width = 1;
       if (e.kind === "route") { color = isLit ? th.accent : "#7d8aa5"; alpha = isLit ? 0.95 : 0.16 + 0.6 * e.weight; width = (isLit ? 3 : 1) + 5 * e.weight; }
       else if (e.kind === "traffic") { color = isLit ? th.accent : b.color; alpha = isLit ? 0.9 : 0.1 + 0.5 * e.weight; width = (isLit ? 2.5 : 0.8) + 4 * e.weight; }
       else if (e.kind === "shared") { color = "#e88aa6"; alpha = focus ? (e.b === focus ? 0.75 : 0.06) : 0.22; width = 1; }
-      else if (e.kind === "own") { color = b.color; alpha = focus && focus !== a.id ? 0.04 : 0.16; width = 0.8; }
+      else if (e.kind === "own") { color = b.color; alpha = focus && focus !== a.id && focus !== b.id ? 0.04 : 0.16; width = 0.8; }
+      if (isLit && e.kind === "own") { color = th.accent; alpha = 0.95; width = 2; }
       else if (e.kind === "evolve") { color = a.color; alpha = focus ? (e.b === focus ? 0.7 : 0.05) : 0.24; width = 1; }
-      if (alpha < 0.03) continue;
+      if (inspectedEdge) { color = th.accent; alpha = 1; width = 2.5; }
+      if (alpha < 0.03 || (lod === 1 && e.kind === "own" && !focus && !isLit)) continue;
       ctx.beginPath();
       let started = false, depthSum = 0, k = 0;
       for (const q of pts) {
@@ -278,11 +311,24 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       if (e.kind === "evolve") ctx.setLineDash([3, 5]); else ctx.setLineDash([]);
       ctx.stroke();
       ctx.setLineDash([]);
-      // Pulsos: rota acesa (ao vivo) corre rapido; trafego forte tem um fluxo calmo, o harness "respirando"
-      const flow = isLit ? 2 : (e.kind === "route" || e.kind === "traffic") && e.weight > 0.25 && !small ? 1 : 0;
-      if (flow && !th.calm) {
+      // Fibras paralelas formam feixes organicos da mesma conexao, sem inventar componentes.
+      if (lod > 1 && (e.kind === "traffic" || e.kind === "route" || e.kind === "evolve")) {
+        for (let strand = -2; strand <= 2; strand++) {
+          if (!strand) continue;
+          ctx.beginPath();
+          pts.forEach((q, i) => {
+            const wave = Math.sin((i / (pts.length - 1)) * Math.PI);
+            const p = P([q[0] + strand * wave * 3, q[1], q[2] + strand * wave * 5]);
+            if (!p.visible) return;
+            if (!i) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          });
+          ctx.lineWidth = 0.6; ctx.globalAlpha = 0.3; ctx.stroke(); ctx.globalAlpha = 1;
+        }
+      }
+      const flow = isLit && clock > 0;
+      if (flow) {
         for (let j = 0; j < (isLit ? 3 : 1); j++) {
-          const u = ((t * (isLit ? 0.55 : 0.12) + j / 3 + (e.id.length % 7) / 7) % 1);
+          const u = signalProgress(now, signalAt.current, j * 0.07);
           const idx = u * (pts.length - 1);
           const i0 = Math.floor(idx), fr = idx - i0;
           const q0 = pts[i0]!, q1 = pts[Math.min(pts.length - 1, i0 + 1)]!;
@@ -312,7 +358,7 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       const isHover = hoverId.current === n.id, isSel = (n.kind === "agent" || n.kind === "core") && n.id === sel || n.rel === nt && !!nt;
       const glowOn = lit.has(n.id) || working.has(n.id) || isHover || isSel;
       if (glowOn) {
-        const pulse = working.has(n.id) ? 1 + 0.25 * Math.sin(now / 180) : 1;
+        const pulse = working.has(n.id) && clock ? 1 + 0.12 * Math.sin(clock / 180) : 1;
         const gr = ctx.createRadialGradient(p.x, p.y, R * 0.6, p.x, p.y, R * 2.6 * pulse);
         const col = lit.has(n.id) && n.kind === "stage" ? th.accent : n.color;
         gr.addColorStop(0, rgba(col.startsWith("#") ? col : "#16897e", 0.5));
@@ -320,12 +366,13 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
         ctx.fillStyle = gr;
         ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.6 * pulse, 0, Math.PI * 2); ctx.fill();
       }
-      if (n.kind === "stage") drawPad(ctx, p.x, p.y, R, lit.has(n.id) ? th.accent : "#7d8aa5", th.dark);
-      else if (n.kind === "plan") drawCrystal(ctx, p.x, p.y, R, n.color, now, n.status === "promoted");
+      if (n.kind === "stage") drawNeuron(ctx, p.x, p.y, R, n.color);
+      else if (n.kind === "plan") drawCrystal(ctx, p.x, p.y, R, n.color, 0, n.status === "promoted");
+      else if (n.kind === "core" || n.kind === "agent") drawNeuron(ctx, p.x, p.y, R, n.color);
       else drawSphere(ctx, p.x, p.y, R, n.color);
-      if (n.kind === "core") drawOrbit(ctx, n, c, w, h, now, th);
+      if (n.kind === "core") drawOrbit(ctx, n, c, w, h, 0, th);
       // Resultado do ultimo pedido: anel verde (ok) ou vermelho (falhou) que se desfaz
-      if (lv?.outcome && sinceOutcome < 2.6 && (n.kind === "agent" && lit.has(n.id) || n.id === "MAESTRO")) {
+      if (clock && lv?.outcome && sinceOutcome < 1.2 && (n.kind === "agent" && lit.has(n.id) || n.id === "MAESTRO")) {
         ctx.strokeStyle = rgba(lv.outcome === "ok" ? "#22c55e" : "#ef4444", 1 - sinceOutcome / 2.6);
         ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(p.x, p.y, R * (1.3 + sinceOutcome * 0.9), 0, Math.PI * 2); ctx.stroke();
@@ -341,7 +388,9 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     // Rotulos: agentes, Maestro e etapas (no modo compacto, so as etapas acesas)
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (const { n, p } of order) {
+    const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+    const priority = (n: SceneNode) => n.kind === "core" || n.kind === "agent" ? 0 : lit.has(n.id) ? 1 : 2;
+    for (const { n, p } of [...order].sort((a, b) => priority(a.n) - priority(b.n))) {
       const isStage = n.kind === "stage";
       if (!(n.kind === "agent" || n.kind === "core" || (isStage && (!small || lit.has(n.id))))) continue;
       const R = Math.max(3, n.r * p.k);
@@ -350,7 +399,15 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       const label = n.label ?? n.id;
       const tw = ctx.measureText(label).width;
       const dot = isStage ? 0 : 10;                     // ponto na cor do agente, antes do nome
-      const y = p.y + (isStage && !n.labelAbove ? R * 0.9 + 12 : -(R + 13));
+      const preferredY = p.y + (isStage && !n.labelAbove ? R * 0.9 + 12 : -(R + 13));
+      const bounds = (y: number) => ({ left: p.x - (tw + dot) / 2 - 9, right: p.x + (tw + dot) / 2 + 9,
+        top: y - size / 2 - 6, bottom: y + size / 2 + 6 });
+      const y = [0, -22, 22, -44, 44].map((offset) => preferredY + offset).find((candidate) => {
+        const b = bounds(candidate);
+        return b.top > 4 && b.bottom < h - 4 && !occupied.some((a) => b.left < a.right && b.right > a.left && b.top < a.bottom && b.bottom > a.top);
+      });
+      if (y === undefined) continue; // o inspetor mantem acesso aos nomes ocultos pelo nivel de detalhe
+      occupied.push(bounds(y));
       ctx.globalAlpha = fog(p.depth) * (isStage && !lit.has(n.id) ? 0.75 : 1);
       ctx.fillStyle = th.dark ? "rgba(20,22,30,0.72)" : "rgba(255,255,255,0.82)";
       roundRect(ctx, p.x - (tw + dot) / 2 - 7, y - size / 2 - 4, tw + dot + 14, size + 8, (size + 8) / 2);
@@ -402,6 +459,7 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     const m = local(e);
     const n = pick(scene.nodes, viewCam.current, m.w, m.h, m.x, m.y);
     if (!n) return;
+    setInspected(n.id); setConnection("");
     if ((n.kind === "agent" || n.kind === "core") && onSelect) onSelect(n.id);
     else if ((n.kind === "note" || n.kind === "shared") && n.rel && onNote) onNote(n.agent ?? "MAESTRO", n.rel);
     else {
@@ -426,6 +484,8 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       ArrowLeft: { yaw: g.yaw + 0.15 }, ArrowRight: { yaw: g.yaw - 0.15 }, ArrowUp: { pitch: g.pitch + 0.1 }, ArrowDown: { pitch: g.pitch - 0.1 },
       "+": { dist: g.dist * 0.88 }, "=": { dist: g.dist * 0.88 }, "-": { dist: g.dist * 1.12 },
     };
+    const pan: Record<string, Vec3> = { w: [0, 25, 0], s: [0, -25, 0], a: [-25, 0, 0], d: [25, 0, 0], q: [0, 0, -25], e: [0, 0, 25] };
+    if (pan[e.key]) { e.preventDefault(); goal.current = { ...g, target: g.target.map((v, i) => v + pan[e.key]![i]!) as unknown as Vec3 }; return; }
     if (e.key === "0") return goTo(view);
     const s = step[e.key];
     if (!s) return;
@@ -436,35 +496,25 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
   if (!knowledge || !scene) return <Skeleton className={cn("w-full rounded-r4", compact ? "h-full" : "aspect-[16/9]")} />;
 
   const ev = harness?.evolution.summary;
+  const inspectedNode = scene.byId.get(inspected);
+  const inspectedConnection = scene.edges.find((e) => e.id === connection);
   const notes = Object.values(knowledge.agents).reduce((s, a) => s + a.own.length, 0);
-  const running = task.steps.filter((x) => x.kind === "step" && x.state === "running").at(-1);
-  const recent = harness?.routing.recent?.[0];
 
   return (
     <section className={cn("harness-panorama", compact && "is-compact")} aria-label="Panorama do harness">
+      {harnessError && <p className="hp-error" role="status">{harnessError} As regiões continuam navegáveis; dados de atividade não disponíveis.</p>}
       <div ref={wrap} className="hp-stage" tabIndex={0} onKeyDown={onKey}
-        aria-label="Cena 3D do harness. Arraste para girar, use a roda para aproximar; setas giram, mais e menos aproximam, zero volta a visão.">
+        aria-label="Cena 3D do harness. Arraste para girar em 360 graus; roda aproxima, setas giram, W A S D deslocam o foco, zero volta a visão.">
         <canvas ref={canvas} className="hp-canvas" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
           onPointerLeave={() => { hoverId.current = ""; setTip(null); }} onDoubleClick={() => goTo(view)} />
 
         <div className={cn("hp-live", task.busy && "is-on")} aria-live="polite">
           <span className="hp-live-dot" aria-hidden />
-          {task.busy || task.status !== "idle" ? (
-            <div className="min-w-0">
-              <p className="hp-live-title">{task.busy ? "Ao vivo" : task.status === "done" ? "Concluído" : task.status === "failed" ? "Falhou" : "Último pedido"}
-                {task.planRoute && <em>{routeLabel(task.planRoute)}</em>}
-                {!task.planRoute && task.steps.some((x) => x.agent === "CHAT") && <em>Conversa</em>}</p>
-              <p className="hp-live-task" title={task.task}>{task.task}</p>
-              <p className="hp-live-step">{running ? `${AGENT_LOOK[running.agent]?.name ?? running.agent} · ${running.desc}`
-                : task.busy ? task.phaseMsg : finishedLine(task.steps.filter((x) => x.kind === "step").length, task.finishedMs)}</p>
-            </div>
-          ) : (
-            <div className="min-w-0">
-              <p className="hp-live-title">Em espera</p>
-              <p className="hp-live-step">{recent ? `Último: ${routeLabel(recent.route)} · ${recent.ok ? "ok" : "falhou"}${recent.when ? ` · ${recent.when.replace("T", " ")}` : ""}`
-                : "Faça um pedido e acompanhe a rota acender aqui."}</p>
-            </div>
-          )}
+          <div className="min-w-0">
+            <p className="hp-live-title">{demoMode ? "Demonstração · dados fictícios" : runKey !== "live" ? "Replay registrado" : task.dryRun ? "Simulação" : task.busy ? "Ao vivo" : "Observatório"}</p>
+            <p className="hp-live-step">{current ? `${COGNITIVE_STAGES[current.stage].label} · ${STATUS_LABEL[current.status]}` : "Sem evento observado neste instante"}</p>
+            {current?.count ? <p className="hp-live-step">{current.count} {current.action === "selected_characters" ? "caracteres selecionados" : current.stage === "model" ? "tokens reportados" : "referências"}</p> : null}
+          </div>
         </div>
 
         <div className="hp-tools">
@@ -474,7 +524,7 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
               {VIEW_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           )}
-          <button type="button" className="hp-icon" aria-pressed={spin} title={spin ? "Parar de girar" : "Girar sozinho"} onClick={() => setSpin((v) => !v)}>
+          <button type="button" className="hp-icon" aria-pressed={spin} title={spin ? "Pausar impulsos" : "Mostrar impulsos observados"} onClick={() => setSpin((v) => !v)}>
             <Icon name={spin ? "stop" : "play"} size={13} />
           </button>
           <button type="button" className="hp-icon" title="Voltar a visão" onClick={() => goTo(view)}><Icon name="refresh" size={13} /></button>
@@ -491,6 +541,50 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
         )}
       </div>
 
+      <div className="hp-timeline">
+        <label>Operação
+          <select aria-label="Operação para explorar" value={runKey} onChange={(e) => { setRunKey(e.target.value); setPlaying(false); setPlayhead(0); }}>
+            <option value="live">Execução atual</option>
+            {(harness?.runs ?? []).filter((r) => r.id).map((r) => <option key={r.id} value={r.id}>{r.when.replace("T", " ")} · {routeLabel(r.route)}{!r.events.length ? " · sem registro cognitivo" : ""}</option>)}
+          </select>
+        </label>
+        {runKey !== "live" && <>
+          <button type="button" disabled={!recorded.length} onClick={() => { if (playhead >= duration) setPlayhead(0); setPlaying((v) => !v); }}>{playing ? "Pausar replay" : "Reproduzir"}</button>
+          <input type="range" aria-label="Instante da operação" min={0} max={Math.max(1, duration)} value={playhead} onChange={(e) => { setPlaying(false); setPlayhead(Number(e.target.value)); }} />
+          <span>{fmtDuration(playhead)} / {fmtDuration(duration)}</span>
+          {!recorded.length && <p>Esta operação não possui eventos cognitivos registrados. Nenhuma atividade será inventada.</p>}
+          {!!replay?.dropped && <p>Registro parcial: {replay.dropped} eventos excederam o limite.</p>}
+        </>}
+      </div>
+      {!compact && <div className="hp-inspector">
+        <div>
+          <label>Região ou unidade
+            <select aria-label="Inspecionar região ou unidade" value={inspected} onChange={(e) => setInspected(e.target.value)}>
+              <option value="">Escolha uma região, agente ou memória</option>
+              {scene.nodes.map((n) => <option key={n.id} value={n.id}>{KIND_LABEL[n.kind]} · {n.label || n.id}</option>)}
+            </select>
+          </label>
+          <strong>{inspectedNode?.label || "Explore uma região"}</strong>
+          <p>{inspectedNode?.detail || "Selecione uma região, agente, memória ou sinapse. A organização nervosa é uma analogia funcional da arquitetura."}</p>
+          {inspectedNode && <button type="button" onClick={() => { goal.current = { ...goal.current, target: inspectedNode.pos, dist: 240 }; }}>Entrar na região</button>}
+          {inspectedNode?.agent && onSelect && <button type="button" onClick={() => onSelect(inspectedNode.agent!)}>Ver agente</button>}
+          {inspectedNode?.rel && onNote && <button type="button" onClick={() => onNote(inspectedNode.agent || "MAESTRO", inspectedNode.rel!)}>Abrir nota</button>}
+        </div>
+        <div>
+          <label>Sinapse
+            <select aria-label="Inspecionar conexão" value={connection} onChange={(e) => setConnection(e.target.value)}>
+              <option value="">Selecione uma conexão</option>
+              {scene.edges.filter((e) => !inspected || e.a === inspected || e.b === inspected).map((e) => <option key={e.id} value={e.id}>{scene.byId.get(e.a)?.label} → {scene.byId.get(e.b)?.label}</option>)}
+            </select>
+          </label>
+          {inspectedConnection && <p>{inspectedConnection.kind} · peso observado {inspectedConnection.weight.toFixed(2)}. A ligação indica um caminho do código; não prova uso nesta operação.</p>}
+        </div>
+        <div>
+          <strong>{current ? COGNITIVE_STAGES[current.stage].label : "Proveniência"}</strong>
+          <p>{current ? `${eventSource(current)} · ${current.agent || "runtime"} · ${current.action || STATUS_LABEL[current.status]}` : "Sinais aparecem apenas quando há um evento registrado."}</p>
+          {!!current?.refs.length && <ul>{current.refs.map((ref, i) => <li key={`${ref}:${i}`}>{ref}</li>)}</ul>}
+        </div>
+      </div>}
       <div className="hp-legend">
         <span><i className="hp-k hp-k-route" /> rota de um pedido · espessura = tráfego real ({harness?.routing.total ?? 0} pedidos)</span>
         <span><i className="hp-k hp-k-note" /> {notes} notas dos agentes</span>
@@ -513,7 +607,8 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
 
 /** Painel ao vivo para a tela de conversa: carrega a propria memoria. */
 export function LivePanorama() {
-  const { knowledge } = useAgentKnowledge();
+  const { knowledge, error } = useAgentKnowledge();
+  if (error) return <p className="hp-error" role="status">Memória indisponível: {error}</p>;
   return <HarnessPanorama knowledge={knowledge} compact />;
 }
 
@@ -531,19 +626,21 @@ function drawSphere(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   }
 }
 
-function drawPad(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, dark: boolean) {
-  const rx = r * 1.7, ry = r * 0.62, depth = Math.max(2, r * 0.35);
-  ctx.fillStyle = shade(color.startsWith("#") ? color : "#7d8aa5", dark ? -0.45 : -0.3);   // lateral do disco
-  ctx.beginPath(); ctx.ellipse(x, y + depth, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillRect(x - rx, y, rx * 2, depth);
-  const g = ctx.createLinearGradient(x, y - ry, x, y + ry);
-  g.addColorStop(0, shade(color.startsWith("#") ? color : "#7d8aa5", 0.45));
-  g.addColorStop(1, color.startsWith("#") ? color : "#7d8aa5");
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
+function drawNeuron(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
+  ctx.save(); ctx.translate(x, y);
+  const fill = ctx.createRadialGradient(-r * 0.3, -r * 0.25, r * 0.05, 0, 0, r * 1.25);
+  fill.addColorStop(0, shade(color, 0.25)); fill.addColorStop(1, shade(color, -0.6));
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = rgba(color, 0.7); ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let i = 0; i <= 40; i++) {
+    const a = i / 40 * Math.PI * 2, radius = r * (0.95 + 0.23 * Math.sin(a * 3) + 0.13 * Math.cos(a * 5));
+    const px = Math.cos(a) * radius, py = Math.sin(a) * radius;
+    if (!i) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  drawSphere(ctx, -r * 0.12, r * 0.1, r * 0.28, color);
+  ctx.restore();
 }
 
 function drawCrystal(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string, now: number, bright: boolean) {

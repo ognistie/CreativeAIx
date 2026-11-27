@@ -2,10 +2,49 @@
 
 import unittest
 
-from core.panorama import build, evolution, route_of, routing
+from core.panorama import ActivityTrace, activity_scope, activity, build, capture_event, evolution, route_of, routing, MAX_EVENTS
 
 
 class RouteTests(unittest.TestCase):
+    def test_stdout_observer_keeps_scope_without_transferring_execution_authority(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from core.panorama import activity_callback
+        trace = ActivityTrace(3)
+        with activity_scope(trace):
+            record = activity_callback()
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda _: record("execution", agent="EXTCODE", action="MCP:local.read"), range(40)))
+        self.assertEqual([e["seq"] for e in trace.events], list(range(40)))
+        self.assertTrue(all(e["action"] == "MCP:local.read" for e in trace.events))
+
+    def test_trace_is_scoped_bounded_and_never_infers_legacy_activity(self):
+        published = []
+        trace = ActivityTrace(7, published.append)
+        with activity_scope(trace):
+            capture_event("step_start", {"agent": "FILE", "action": "read_file", "prompt": "private body"})
+            activity("verification", agent="FILE", status="uncertain")
+            for _ in range(MAX_EVENTS):
+                activity("context", count=4)
+        activity("learning", status="verified")
+        self.assertEqual(len(trace.events), MAX_EVENTS)
+        self.assertEqual(trace.dropped, 2)
+        self.assertEqual(published[0]["run_id"], 7)
+        self.assertNotIn("private body", str(trace.events))
+        self.assertEqual(trace.events[1]["status"], "uncertain")
+        rows = build([{"id": "r", "cognitive": trace.events}, {"id": "old", "success": True}], [], [])["runs"]
+        self.assertEqual(len(rows[0]["events"]), MAX_EVENTS)
+        self.assertEqual(rows[1]["events"], [])
+
+    def test_retrieval_reports_selected_count_and_observer_failure_is_isolated(self):
+        from core.context_engine import RememberedTurn, retrieve
+        trace = ActivityTrace(1, lambda _: (_ for _ in ()).throw(RuntimeError("UI offline")))
+        with activity_scope(trace):
+            selected = retrieve([RememberedTurn(1, "planilha mensal privada", "saldo privado"),
+                                 RememberedTurn(2, "navegador", "site")], "planilha", limit=1)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(trace.events[0]["count"], 1)
+        self.assertNotIn("privad", str(trace.events))
+
     def test_route_of_a_plan(self):
         self.assertEqual(route_of({"learned_key": "k", "fast_path": "abrir"}), "aprendido")
         self.assertEqual(route_of({"fast_path": "abrir"}), "atalho")

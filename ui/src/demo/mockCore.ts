@@ -2,6 +2,24 @@
 // Fala o mesmo protocolo do desktop/server.py por um socket falso. Dados ficticios.
 
 import type { SocketLike } from "../lib/core";
+import type { CognitiveEvent } from "../lib/cognitive";
+
+const COGNITIVE_FIXTURE: CognitiveEvent[] = [
+  { ms: 100, stage: "stimulus", agent: "", status: "started" },
+  { ms: 200, stage: "understanding", agent: "", status: "completed" },
+  { ms: 300, stage: "memory", agent: "DATA", status: "observed", count: 1, refs: ["Fórmulas"] },
+  { ms: 400, stage: "context", agent: "DATA", status: "completed", count: 320, action: "selected_characters" },
+  { ms: 550, stage: "planning", agent: "MAESTRO", status: "started" },
+  { ms: 700, stage: "decision", agent: "", status: "completed" },
+  { ms: 1000, stage: "transmission", agent: "DATA", status: "completed" },
+  { ms: 1200, stage: "execution", agent: "DATA", status: "started", action: "create_excel" },
+  { ms: 1900, stage: "verification", agent: "DATA", status: "verified", action: "create_excel" },
+  { ms: 2600, stage: "execution", agent: "DATA", status: "started", action: "write_excel" },
+  { ms: 3300, stage: "verification", agent: "DATA", status: "verified", action: "write_excel" },
+  { ms: 4000, stage: "execution", agent: "FILE", status: "started", action: "save_file" },
+  { ms: 4700, stage: "verification", agent: "FILE", status: "verified", action: "save_file" },
+  { ms: 5000, stage: "learning", agent: "MAESTRO", status: "verified", action: "plan_promoted" },
+].map((e, seq) => ({ count: 0, refs: [], action: "", ...e, seq }) as CognitiveEvent);
 
 type Json = Record<string, unknown>;
 type LibFixture = { verified_on: string; topics: Array<{ id: string; level: string; title: string; intro: string; markdown: string } & Json> };
@@ -133,6 +151,7 @@ const METHODS: Record<string, (args: unknown[]) => unknown> = {
   journalSave: ([payload]) => ({ ok: true, entry: { ...JSON.parse(String(payload)), id: "j1" } }),
   harnessPanorama: () => ({
     ok: true,
+    runs: [{ id: "demo-cognitive", when: "2026-11-27T09:12:00", ok: true, route: "conversa→maestro", events: COGNITIVE_FIXTURE, dropped: 0 }],
     routing: {
       total: 48,
       routes: [
@@ -362,6 +381,7 @@ function simulate(task: string, emit: (name: string, payload: unknown) => void) 
   ];
   const at = (ms: number, fn: () => void) => setTimeout(fn, ms);
   at(100, () => emit("phaseChanged", { msg: "Entendendo o pedido", run_id: ++demoRun }));
+  COGNITIVE_FIXTURE.forEach((e) => at(e.ms + 20, () => emit("cognitiveActivity", { ...e, run_id: demoRun })));
   at(700, () => emit("planReady", { plan: { route: "conversa→maestro", steps: steps.map((d) => ({ description: d })) } }));
   steps.forEach((d, i) => {
     at(1200 + i * 1400, () => emit("stepStart", { step: i + 1, desc: d, total: steps.length, progress: (i / steps.length) * 100 }));

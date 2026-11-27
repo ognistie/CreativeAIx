@@ -296,6 +296,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
 
     def _emit(self, event: str, payload: Any = None) -> None:
         if self._is_current():
+            from core.panorama import capture_event
+            capture_event(event, payload)
             self._touch()                  # qualquer evento da tarefa conta como avanco para o vigia
             bus.emit(event, payload)
 
@@ -325,7 +327,10 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 run.read_replanner = lambda observation, choices: choose_read_strategy(
                     self._ai_client, config.get_model("maestro"), observation, choices)
             bind_cancel(run.interrupted)
-            with budget_scope(run.budget):
+            from core.panorama import ActivityTrace, activity_scope, activity
+            trace = ActivityTrace(self._tls.run_id, lambda e: self._emit("cognitive_activity", e))
+            self._tls.cognitive_trace = trace
+            with budget_scope(run.budget), activity_scope(trace):
                 self._run_inner(task, dry_run, gen_report, run_id, run=run)
         except Exception as error:
             # Falha antes do try interno (registro, metricas): a tarefa termina com erro em vez de deixar o app
@@ -411,6 +416,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
 
         try:
             self._emit("phase", {"phase": "maestro", "msg": "Entendendo o pedido...", "run_id": self._tls.run_id})
+            from core.panorama import activity
+            activity("stimulus", status="started")
             self._log("INFO", "MAESTRO", f"Recebida tarefa: {task[:80]}")
 
             # Conversa: "agora abra esse segundo video" vira um pedido
@@ -530,7 +537,10 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     if not plan and tool_in(said):
                         handed = extcode_plan(route_task, self.session)
                         plan = handed if handed and not handed.get("reroute") else None
-            plan = plan or self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
+            if not plan:
+                from core.panorama import activity
+                activity("planning", agent="MAESTRO", status="started")
+                plan = self.maestro.analyze(route_task, conversation=conversation, continue_in=target or "")
             if plan.get("learned_key"):
                 self._log("INFO", "MAESTRO", plan.get("analysis", "Plano aprendido"))
             # Por onde o pedido passou: o panorama do harness mostra ao vivo e soma o trafego no historico
@@ -689,6 +699,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 original_task = subtask.get("original_task", agent_task)
                 dep = subtask.get("depends_on")
 
+                from core.panorama import activity
+                activity("transmission", agent=agent_name, status="completed")
                 self._emit("phase", {"phase": "agent", "msg": f"{agent_name} Agent..."})
                 self._log("INFO", agent_name, f"Iniciando: {agent_task[:80]}")
 
@@ -797,6 +809,7 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     start_time = time.time()
 
                     self._emit("step_start", {
+                        "agent": agent_name,
                         "step": step_n,
                         "total": step_n + len(agent_steps) - j - 1,
                         "desc": f"[{agent_name}] {desc}",
@@ -822,6 +835,13 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                     # Segunda conferencia fora do handler (core/verification.py): falso sucesso nao ensina nada
                     from core.verification import apply_independent_check
                     result = apply_independent_check(action, params, result)
+                    from core.panorama import activity
+                    from core.verification import classify
+                    outcome = classify(result)
+                    activity("verification", agent=agent_name, action=action,
+                             status="verified" if outcome == "verified" else "uncertain" if outcome in ("uncertain", "partial")
+                             else "blocked" if result.get("status") in ("rejected", "needs_confirmation")
+                             else "completed" if result.get("success") else "failed")
                     if result.get("false_success"):
                         entry["runtime"]["false_successes"] = entry["runtime"].get("false_successes", 0) + 1
                         self._log("WARN", agent_name, f"Conferência independente divergiu: {action}")
@@ -941,6 +961,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 try:
                     mem = self.memory.record(task, subtasks, all_success)
                     if mem.get("saved"):
+                        from core.panorama import activity
+                        activity("learning", agent="MAESTRO", status="completed", action="route_recorded")
                         self._log("INFO", "MEMORY",
                                   f"Rota registrada ({'sucesso' if all_success else 'falha'})")
                 except Exception as mem_err:
@@ -958,6 +980,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                         status = None
                     entry["learned"] = bool(learn_source.get("learned_key"))
                     if status == "promoted" and not learn_source.get("learned_key"):
+                        from core.panorama import activity
+                        activity("learning", agent="MAESTRO", status="verified", action="plan_promoted")
                         self._log("INFO", "MEMORY", "Aprendi este tipo de pedido: das próximas vezes, sem chamar a IA")
                     elif status in ("candidate", "blocked") and learn_source.get("learned_key"):
                         self._log("WARN", "MEMORY", "O plano aprendido falhou; volto a planejar com a IA")
@@ -1033,6 +1057,10 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                 entry["metrics"] = self._metrics_delta(
                     metrics_before, self._ai_client.metrics)
                 try:
+                    trace = getattr(self._tls, "cognitive_trace", None)
+                    if trace is not None:
+                        entry["cognitive"] = list(trace.events)
+                        entry["cognitive_dropped"] = trace.dropped
                     history_store.append(entry)
                     self._emit("history_changed", {"entry": entry})
                 except Exception as hist_err:

@@ -225,6 +225,16 @@ class PolicyAndPricingTests(unittest.TestCase):
 
 
 class ControllerChatTests(unittest.TestCase):
+    def test_cognitive_trace_is_persisted_without_task_content(self):
+        c = self.controller(chat_error=RuntimeError("offline fixture"))
+        entry = self.run_task(c, "crie uma planilha de gastos privados")
+        self.assertEqual(entry["cognitive"][0]["stage"], "stimulus")
+        self.assertIn("planning", [e["stage"] for e in entry["cognitive"]])
+        self.assertNotIn("gastos privados", str(entry["cognitive"]))
+        observed = [p for name, p in self.events if name == "cognitive_activity"]
+        self.assertTrue(observed)
+        self.assertTrue(all(e["run_id"] == 1 for e in observed))
+
     def controller(self, chat_result=None, chat_error=None):
         from desktop.controller import Controller
         from core.session import Session

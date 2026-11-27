@@ -75,8 +75,9 @@ describe("camera", () => {
 
   it("clamps zoom and tilt", () => {
     const c = clampCamera({ ...cam, pitch: 3, dist: 10 });
-    expect(c.pitch).toBeLessThanOrEqual(1.25);
-    expect(c.dist).toBeGreaterThanOrEqual(320);
+    expect(c.pitch).toBeLessThanOrEqual(1.5);
+    expect(c.dist).toBeGreaterThanOrEqual(85);
+    expect(clampCamera({ ...cam, dist: 150 }).dist).toBe(150);
   });
 
   it("curves start and end at the nodes and bend in the middle", () => {

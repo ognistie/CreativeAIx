@@ -7,6 +7,7 @@ signal apiUsage(QString) -> void
 signal assistantMessage(QString) -> void
 signal cancelled(QString) -> void
 signal codingStatus(QString) -> void
+signal cognitiveActivity(QString) -> void
 signal contextExtracted(QString) -> void
 signal conversationsChanged(QString) -> void
 signal creatorReady(QString) -> void

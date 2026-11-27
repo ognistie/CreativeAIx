@@ -1,5 +1,11 @@
 # Changelog
 
+## Observatório cognitivo (2026-11-27)
+
+- Organização orgânica 3D, cinco vistas, inspeção de regiões/conexões e replay dos eventos registrados.
+- Telemetria local de memória, contexto, despacho, modelos, ferramentas, verificação e aprendizado; sem execução pelo replay.
+- Correção da contagem de encaminhamentos e respeito à redução de movimento; prova visual isolada e regressões reproduzíveis.
+
 All notable changes to Creative AIx (formerly AI Farm Agent) will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
@@ -9,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Harness panorama in 3D** (`ui/src/lib/panorama.ts`, `views/lab/HarnessPanorama.tsx`) replaces the pixel spinal-cord memory view. One interactive scene (perspective camera, drag to orbit, wheel to zoom, views Geral/Rotas/Memória/Evolução, floor shadows and depth fog, no new dependency): the routing layer (request → understanding → direct answer / model-free shortcut / learned plan / continue / chat / Maestro → policies → agents, thickness from real traffic), the agents' memory (Maestro at the center, agents in orbit, each agent's notes around it, shared memory between owners) and the self-improvement layer (learned plans as candidate/promoted/blocked crystals, Lab hypotheses). Live: the current request's route lights up, pulses run to the working agent and the outcome flashes. Opens in Lab › Memória and as a **Panorama** panel beside the chat.
+- **Observatório cognitivo 3D**: organização funcional orgânica, cinco vistas, inspeção de regiões e sinapses, navegação de memórias, sinais observados e replay do histórico instrumentado. Disponível no Lab e no painel Panorama; sem dependência adicional.
 - `harnessPanorama` (read-only RPC, `app/core/panorama.py`): routing traffic from history, learned plans with the agents they use, Lab hypotheses. Each history entry now records its `route`, also sent with `planReady`.
 - **Learned plans (bounded self-improvement).** A request type that succeeds three times in a row with the same plan is planned without calling the Maestro model from then on (`app/core/learned_plans.py`). A failure demotes the template, two block it, and a change to the Maestro prompt or plan policies makes every template stale. Only routing is learned: plan validation, per-agent tool policy and the effect gate run on every execution. Local state, personal data redacted; `learning.autopilot: false` turns it off.
 - **Model-free shortcuts** for opening a folder, a Windows Settings page and searching on an explicitly named site (Google, YouTube).

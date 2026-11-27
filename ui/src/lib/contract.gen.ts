@@ -144,6 +144,7 @@ export interface Events {
   assistantMessage: unknown;
   cancelled: unknown;
   codingStatus: unknown;
+  cognitiveActivity: unknown;
   contextExtracted: unknown;
   conversationsChanged: unknown;
   creatorReady: unknown;

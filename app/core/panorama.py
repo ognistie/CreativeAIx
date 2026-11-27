@@ -17,6 +17,99 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from typing import Iterable, Optional
+from contextvars import ContextVar
+from contextlib import contextmanager
+from time import monotonic
+from threading import RLock
+
+# Observacao local e limitada: nao executa ferramentas, nao transporta prompts e nao decide permissoes.
+STAGES = frozenset({"stimulus", "understanding", "memory", "context", "planning", "decision",
+                    "transmission", "execution", "verification", "learning", "recovery", "model"})
+STATES = frozenset({"started", "observed", "completed", "verified", "failed", "blocked", "uncertain", "cancelled"})
+MAX_EVENTS = 256
+_trace = ContextVar("cognitive_trace", default=None)
+
+
+class ActivityTrace:
+    def __init__(self, run_id, publish=lambda event: None):
+        self.run_id, self.publish = run_id, publish
+        self.started, self.events, self.dropped = monotonic(), [], 0
+        self._lock = RLock()
+
+    def record(self, stage, *, agent="", status="observed", count=0, refs=(), action=""):
+        with self._lock:
+            self._record(stage, agent=agent, status=status, count=count, refs=refs, action=action)
+
+    def _record(self, stage, *, agent, status, count, refs, action):
+        if stage not in STAGES or status not in STATES:
+            return
+        if len(self.events) >= MAX_EVENTS:
+            self.dropped += 1
+            return
+        event = {"seq": len(self.events), "ms": round((monotonic() - self.started) * 1000),
+                 "stage": stage, "agent": str(agent).upper()[:32], "status": status,
+                 "count": max(0, int(count)), "refs": [str(r)[:160] for r in refs][:16],
+                 "action": str(action)[:64]}
+        self.events.append(event)
+        try:
+            self.publish({**event, "run_id": self.run_id})
+        except Exception:
+            pass  # A falha do observatorio nao altera a execucao da tarefa.
+
+
+@contextmanager
+def activity_scope(trace):
+    token = _trace.set(trace)
+    try:
+        yield trace
+    finally:
+        _trace.reset(token)
+
+
+def activity(stage, **metadata):
+    trace = _trace.get()
+    if trace is not None:
+        trace.record(stage, **metadata)
+
+
+def activity_callback():
+    """Captura apenas o observador para leitores de stdout; nao transfere permissoes para a thread."""
+    trace = _trace.get()
+    return trace.record if trace is not None else lambda *args, **kwargs: None
+
+
+def capture_event(name, payload):
+    """Traduz eventos existentes sem interpretar frases como evidencias de atividade."""
+    p = payload if isinstance(payload, dict) else {}
+    if name == "resolved":
+        activity("understanding", status="completed")
+    elif name == "plan_ready":
+        activity("decision", status="completed", count=len(p.get("plan", {}).get("steps", [])))
+    elif name == "plan_review" and p:
+        activity("decision", status="blocked")
+    elif name == "step_start":
+        activity("execution", status="started", agent=p.get("agent", ""), action=p.get("action", ""))
+    elif name in ("cancelled", "error"):
+        activity("decision", status="cancelled" if name == "cancelled" else "failed")
+
+
+def recorded_runs(history):
+    """Replay so de eventos capturados, nunca inferido do sucesso da tarefa."""
+    out = []
+    for row in history:
+        if not isinstance(row, dict) or row.get("dry_run"):
+            continue
+        events = []
+        for e in (row.get("cognitive") or [])[:MAX_EVENTS]:
+            if not isinstance(e, dict) or e.get("stage") not in STAGES or e.get("status") not in STATES:
+                continue
+            events.append({k: e[k] for k in ("seq", "ms", "stage", "agent", "status", "count", "refs", "action") if k in e})
+        out.append({"id": str(row.get("id") or ""), "when": str(row.get("started_at") or ""),
+                    "ok": bool(row.get("success")), "route": _route_of_entry(row), "events": events,
+                    "dropped": row.get("cognitive_dropped", 0)})
+        if len(out) == 12:
+            break
+    return out
 
 # Rotas na ordem do caminho de um pedido (a interface desenha os nos nesta ordem)
 ROUTES = ("resposta", "atalho", "aprendido", "continuar", "conversa", "maestro")
@@ -128,4 +221,5 @@ def evolution(plans: Iterable[dict], science: Iterable[dict]) -> dict:
 
 
 def build(history: Iterable[dict], plans: Iterable[dict], science: Iterable[dict]) -> dict:
-    return {"routing": routing(history), "evolution": evolution(plans, science)}
+    history = list(history)
+    return {"routing": routing(history), "evolution": evolution(plans, science), "runs": recorded_runs(history)}
