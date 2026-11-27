@@ -1,5 +1,6 @@
 """Estado compartilhado da tarefa, do planejamento ao último resultado."""
 from dataclasses import dataclass, field
+from copy import deepcopy
 from time import monotonic
 from typing import Callable
 import re
@@ -10,7 +11,7 @@ from core.lab_budget import Budget
 from core.lab_budget import RequestLimit, budget_scope
 from core.step_runtime import StepRuntime
 from core.task_schedule import TaskSchedule
-from core.verification import classify, file_identity
+from core.verification import apply_independent_check, classify, file_identity
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,7 @@ class RunContext:
 
     def execute_step(self, agent, action, params, dispatch, *, authorize_patch, allow_directory,
                      adaptive=True, phase_iv=False, retry=False, before_retry=lambda: None,
-                     on_patch=lambda _patch: None) -> dict:
+                     on_patch=lambda _patch: None, review=lambda _params, result: result) -> dict:
         """Admite, observa e adapta um passo com a mesma política em qualquer ponto de entrada."""
         from core.file_recovery import alternative_copy, alternative_read
 
@@ -76,7 +77,12 @@ class RunContext:
             return None
 
         def guarded_dispatch(arguments):
-            return budget_stop() or dispatch(arguments)
+            stopped = budget_stop()
+            if stopped:
+                return stopped
+            effective = deepcopy(arguments)
+            result = apply_independent_check(action, effective, dispatch(arguments))
+            return review(effective, result)
 
         original = dict(params)
         if action == "browser_read" and agent == "WEB":

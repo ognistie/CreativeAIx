@@ -61,6 +61,8 @@ def classify(result: dict) -> str:
         return "policy_stop"
     if status in ("uncertain", "partial"):
         return status
+    if result.get("false_success") is True:
+        return "false_success"
     if result.get("success") is True:
         return "verified" if result.get("verified") is True else "operational"
     if result.get("effect_started") is False:
@@ -100,7 +102,18 @@ def independent_check(action: str, params: dict, result: dict) -> dict | None:
                 a, b = bounded_content(src), bounded_content(dst)
                 ok = a is not None and a == b
                 return record(dst, "sha256_equal", ok, "conteúdo igual" if ok else "conteúdo diferente ou grande demais")
-            return record(dst, "destination_present", os.path.exists(dst), "presente" if os.path.exists(dst) else "ausente")
+            return record(dst, "sha256_equal", False, "origem ou destino regular ausente")
+        if action == "read_file":
+            path = expand(p.get("path", ""))
+            before = file_identity(path)
+            if before is None or not stat.S_ISREG(before[3]):
+                return record(path, "stable_text_excerpt", False, "arquivo regular indisponível")
+            with open(path, encoding="utf-8") as stream:
+                observed = os.fstat(stream.fileno())
+                text = stream.read(5000)
+            ok = (before[1:3] == (observed.st_dev, observed.st_ino)
+                  and before == file_identity(path) and text == result.get("result"))
+            return record(path, "stable_text_excerpt", ok, "trecho conferido" if ok else "arquivo ou trecho divergente")
         if action == "write_file":
             path, content = expand(p.get("path", "")), p.get("content", "")
             digest = bounded_content(path)
@@ -146,5 +159,6 @@ def apply_independent_check(action: str, params: dict, result: dict) -> dict:
         return result
     out = {**result, "independent_check": check}
     if not check["ok"]:
-        out.update(verified=False, false_success=True)
+        out.update(success=False, verified=False, false_success=True, status="false_success",
+                   result="A conferência independente encontrou divergência no resultado.")
     return out

@@ -138,16 +138,36 @@ class ReplyMixin:
         from agents.chat_agent import ChatAgent
         run_id = self._tls.run_id
         self._emit("phase", {"phase": "agent", "msg": "Pensando na resposta...", "run_id": run_id})
-        buffer: list = []
-        last = [0.0]
+        pending: list[str] = []
+        sent: list[str] = []
+        offset, seq, last = 0, 0, 0.0
         steps = {"n": 0, "open": {}}
 
+        def emit_stream(op: str, text: str) -> None:
+            nonlocal seq, last, offset
+            self._emit("answer_delta", {"v": 1, "run_id": run_id, "seq": seq, "op": op,
+                                        "offset": offset, "text": text})
+            seq += 1
+            last = time.monotonic()
+            length = len(text.encode("utf-16-le", errors="surrogatepass")) // 2
+            offset = offset + length if op == "append" else length
+
+        def on_reset(text: str) -> None:
+            pending.clear()
+            sent[:] = [text]
+            emit_stream("replace", text)
+
         def on_text(piece: str) -> None:
-            buffer.append(piece)
+            pending.append(piece)
             now = time.monotonic()
-            if now - last[0] >= 0.06:                 # ~16 quadros/s: fluido sem inundar o socket
-                last[0] = now
-                self._emit("answer_delta", {"run_id": run_id, "text": "".join(buffer)})
+            if now - last >= 0.06:  # ~16 eventos/s, com checkpoints esparsos para reparar lacunas.
+                batch = "".join(pending)
+                pending.clear()
+                sent.append(batch)
+                if seq % 32 == 0:
+                    emit_stream("replace", "".join(sent))
+                else:
+                    emit_stream("append", batch)
 
         def on_tool(name: str, label: str, ok, result: str) -> None:
             if ok is None:
@@ -169,18 +189,24 @@ class ReplyMixin:
                 agent = self.chat = ChatAgent(client=self._ai_client, config=self._config)
             result = agent.respond(said, self.session, task=task, on_text=on_text, on_tool=on_tool,
                                    should_stop=lambda: not self._alive(), spoken=spoken,
-                                   allow_actions=allow_actions)
+                                   allow_actions=allow_actions, on_reset=on_reset)
         except LLMCancelled as error:
+            if seq:
+                on_reset("")
             # Prazo da chamada estourado: parar e avisar. Cair no Maestro seria uma segunda espera longa.
             self._log("WARN", "CHAT", str(error))
             return ChatResult("failed", str(error))
         except Exception as error:
+            if seq:
+                on_reset("")
             self._log("WARN", "CHAT", f"Conversa indisponível ({type(error).__name__}); seguindo sem ela.")
             return None
         finally:
             self._emit_usage()
-        if buffer:
-            self._emit("answer_delta", {"run_id": run_id, "text": "".join(buffer)})
+        if result.kind == "answer":
+            emit_stream("final", result.text)
+        elif seq:
+            on_reset("")
         used = sorted(set(result.tools_used) - {"executar_no_computador", "abrir_no_computador"})
         entry["subtasks"] = [{"agent": "CHAT", "task": "conversa" + (f" ({', '.join(used)})" if used else "")}]
         return result

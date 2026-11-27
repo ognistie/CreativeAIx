@@ -105,11 +105,13 @@ def stats(items: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         return {"total": 0, "success_rate": 0.0, "total_cost_usd": 0.0,
                 "avg_duration_ms": 0}
     ok = sum(1 for it in items if it.get("success"))
-    cost = sum(float(it.get("metrics", {}).get("cost_usd", 0.0)) for it in items)
+    from core.quality_metrics import measured_cost
+    costs = [cost for it in items if (cost := measured_cost(it.get("metrics") or {})) is not None]
     dur = sum(int(it.get("duration_ms", 0)) for it in items)
     return {
         "total": len(items),
         "success_rate": round(ok / len(items) * 100, 1),
-        "total_cost_usd": round(cost, 4),
+        "total_cost_usd": round(sum(costs), 4),
+        "unknown_cost_runs": len(items) - len(costs),
         "avg_duration_ms": round(dur / len(items)),
     }

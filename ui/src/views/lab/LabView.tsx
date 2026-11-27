@@ -81,7 +81,10 @@ export function LabView() {
 
   const apply = (m: Move) => {
     if (m.agent) setAgent(m.agent);
-    if (m.note !== undefined) setNote(m.note);
+    if (m.note !== undefined) {
+      setNote(m.note);
+      if (m.note) setMemTab("conhecimento");
+    }
     else if (m.agent) setNote("");
     if (m.tab) setTab(m.tab);
     if (m.area) setArea(m.area);

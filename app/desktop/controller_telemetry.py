@@ -55,6 +55,7 @@ class TelemetryMixin:
             "output_tokens": m["total_output_tokens"],
             "cache_read_tokens": m.get("total_cache_read_tokens", 0),
             "cost_usd": round(m["total_cost_usd"], 5),
+            "unknown_cost_calls": m.get("unknown_cost_calls", 0),
             "by_model": m.get("calls_by_model", {}),
         }
         self._emit("api_usage", payload)
@@ -87,6 +88,8 @@ class TelemetryMixin:
             "cache_read_tokens": d("total_cache_read_tokens"),
             "cache_write_tokens": d("total_cache_write_tokens"),
             "cost_usd": round(d("total_cost_usd"), 6),
+            "unknown_cost_calls": d("unknown_cost_calls"),
+            "cost_known": d("unknown_cost_calls") == 0,
             "llm_ms": d("total_llm_ms"),
             "by_agent": by_agent,
             "truncated": d("truncated"),

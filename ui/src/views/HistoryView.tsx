@@ -19,13 +19,14 @@ interface Entry {
   error?: string;
   agents?: string[];
   subtasks?: Array<{ agent?: string }>;
-  metrics?: { api_calls?: number; tokens_est?: number; cost_usd?: number };
+  metrics?: { api_calls?: number; tokens_est?: number; cost_usd?: number; cost_known?: boolean };
 }
 
 interface Stats {
   total?: number;
   success_rate?: number;
   total_cost_usd?: number;
+  unknown_cost_runs?: number;
   avg_duration_ms?: number;
 }
 
@@ -84,7 +85,8 @@ export function HistoryView() {
           <Stat icon="layers" label="Execuções" value={String(stats.total ?? items.length)} />
           <Stat icon="check-circle" label="Deram certo" value={`${String(stats.success_rate ?? 0).replace(".", ",")}%`} />
           <Stat icon="clock" label="Tempo médio" value={fmtDuration(stats.avg_duration_ms ?? 0)} />
-          <Stat icon="chart" label="Custo total" value={fmtCost(stats.total_cost_usd ?? 0)} />
+          <Stat icon="chart" label={stats.unknown_cost_runs ? "Subtotal com custo registrado" : "Custo total"}
+            value={stats.unknown_cost_runs === stats.total && stats.total ? "Desconhecido" : fmtCost(stats.total_cost_usd ?? 0)} />
         </div>
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -137,7 +139,9 @@ export function HistoryView() {
                     <span className="flex items-center gap-1">
                       <Icon name="clock" size={11} /> {fmtDuration(e.duration_ms ?? 0)}
                     </span>
-                    <span>{fmtCost(e.metrics?.cost_usd ?? 0)}</span>
+                    <span>{e.metrics?.cost_usd === undefined || e.metrics.cost_known === false
+                      || (e.metrics.cost_usd === 0 && e.metrics.cost_known !== true && e.metrics.api_calls !== 0)
+                      ? "Custo desconhecido" : fmtCost(e.metrics.cost_usd)}</span>
                   </span>
                   <span aria-hidden className="grid w-9 shrink-0 place-items-center text-fg-muted">
                     <Icon name={open === e.id ? "chevron-up" : "chevron-down"} size={14} />

@@ -24,6 +24,7 @@ export interface Usage {
   calls: number;
   tokens_est: number;
   cost_usd: number;
+  unknown_cost_calls?: number;
 }
 
 export interface Artifacts {
@@ -56,7 +57,7 @@ export interface TaskState {
   dryRun: boolean;
   usageNow: Usage;
   usageBase: Usage;
-  finalMetrics: { api_calls: number; tokens_est: number; cost_usd: number } | null;
+  finalMetrics: { api_calls: number; tokens_est: number; cost_usd: number; cost_known?: boolean } | null;
   artifacts: Artifacts;
   plan: Array<{ agent: string; text: string }>;
   /** Por onde o pedido passou (atalho, aprendido, conversa, maestro, "conversa→maestro"): panorama do harness */
@@ -69,6 +70,7 @@ export interface TaskState {
   runId: number | null;
   /** Resposta da conversa enquanto o modelo escreve (answerDelta); a final chega em answerReady. */
   streamText: string;
+  streamSeq: number;
   cognitive: CognitiveEvent[];
 }
 
@@ -101,6 +103,7 @@ export const initialTaskState: TaskState = {
   review: null,
   runId: null,
   streamText: "",
+  streamSeq: -1,
   cognitive: [],
 };
 
@@ -197,8 +200,17 @@ function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
       const runId = s.runId === null && s.status === "running" && id !== null ? id : s.runId;
       return { ...s, busy: true, runId, phaseMsg: str(p.msg) || s.phaseMsg };
     }
-    case "answerDelta":
-      return s.runId !== null && runOf(p.run_id) === s.runId ? { ...s, streamText: str(p.text) } : s;
+    case "answerDelta": {
+      if (s.runId === null || runOf(p.run_id) !== s.runId || s.status !== "running") return s;
+      if (p.v === undefined) return s.streamSeq < 0 ? { ...s, streamText: str(p.text) } : s;
+      if (p.v !== 1 || typeof p.seq !== "number" || !Number.isSafeInteger(p.seq)
+          || p.seq <= s.streamSeq || typeof p.text !== "string") return s;
+      if (p.op === "replace" || p.op === "final") return { ...s, streamText: p.text, streamSeq: p.seq };
+      if (p.op === "append" && p.seq === s.streamSeq + 1 && p.offset === s.streamText.length) {
+        return { ...s, streamText: s.streamText + p.text, streamSeq: p.seq };
+      }
+      return s;
+    }
     case "planReady": {
       const steps = (((p.plan as P | undefined)?.steps as P[] | undefined) ?? []).map((st) => {
         const a = parseAgent(str(st.description));
@@ -343,7 +355,9 @@ export function usageLine(s: TaskState, elapsedMs: number): string {
   const tokens = m ? m.tokens_est : s.usageNow.tokens_est - s.usageBase.tokens_est;
   const cost = m ? m.cost_usd : s.usageNow.cost_usd - s.usageBase.cost_usd;
   const parts = [fmtDuration(elapsedMs)];
-  if (calls > 0) parts.push(`${calls} ${calls === 1 ? "chamada" : "chamadas"}`, `${fmtTokens(tokens)} tokens`, fmtCost(cost));
+  if (calls > 0) parts.push(`${calls} ${calls === 1 ? "chamada" : "chamadas"}`, `${fmtTokens(tokens)} tokens`,
+    (m ? m.cost_known === false : (s.usageNow.unknown_cost_calls ?? 0) > (s.usageBase.unknown_cost_calls ?? 0))
+      ? "custo desconhecido" : fmtCost(cost));
   return parts.join("  ·  ");
 }
 

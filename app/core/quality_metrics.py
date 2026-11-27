@@ -13,6 +13,7 @@ Métricas (por 100 pedidos quando é taxa):
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
@@ -57,6 +58,18 @@ def _percentile(values: list[float], q: float) -> Optional[float]:
     return round(values[lo] + (values[hi] - values[lo]) * (k - lo), 2)
 
 
+def measured_cost(metrics: dict) -> float | None:
+    cost = metrics.get("cost_usd")
+    if type(cost) not in (int, float) or not math.isfinite(cost) or cost < 0:
+        return None
+    if metrics.get("cost_known") is False or metrics.get("unknown_cost_calls"):
+        return None
+    # Linhas antigas podem trazer um zero padrão sem nenhuma medição.
+    if cost == 0 and metrics.get("cost_known") is not True and metrics.get("api_calls") != 0:
+        return None
+    return float(cost)
+
+
 def compute(history: Iterable[dict], authz: Iterable[dict], last: int = 200) -> dict:
     """Métricas dos últimos `last` pedidos; os registros de autorização contam só a partir do mais antigo deles."""
     runs = [r for r in history if not str(r.get("error") or "").startswith(("clarification", "limitation"))][-last:]
@@ -65,7 +78,7 @@ def compute(history: Iterable[dict], authz: Iterable[dict], last: int = 200) -> 
     gate = [a for a in authz if since is None or (_when(a, "at") or since) >= since]
     per100 = (lambda count: round(100 * count / n, 1)) if n else (lambda count: None)
     seconds = [r["duration_ms"] / 1000 for r in runs if isinstance(r.get("duration_ms"), (int, float))]
-    costs = [float((r.get("metrics") or {}).get("cost_usd") or 0) for r in runs]
+    costs = [cost for r in runs if (cost := measured_cost(r.get("metrics") or {})) is not None]
     verified = sum(r.get("success") is True and r.get("verified") is True for r in runs)
     measured_runtime = [r["runtime"] for r in runs if isinstance(r.get("runtime"), dict)]
     unrequested = [a for a in gate if a.get("requested") is False]
@@ -73,7 +86,10 @@ def compute(history: Iterable[dict], authz: Iterable[dict], last: int = 200) -> 
         "pedidos": n,
         "taxa_sucesso": round(sum(1 for r in runs if r.get("success")) / n, 3) if n else None,
         "taxa_sucesso_verificado": round(verified / n, 3) if n else None,
-        "custo_por_sucesso_verificado_usd": round(sum(costs) / verified, 5) if verified else None,
+        "custo_por_sucesso_verificado_usd": round(sum(costs) / verified, 5) if verified and len(costs) == n else None,
+        "custo_medido_usd": round(sum(costs), 5) if costs else None,
+        "pedidos_com_custo_medido": len(costs),
+        "pedidos_sem_custo_medido": n - len(costs),
         "tokens_total": sum((r.get("metrics") or {}).get("tokens_est", 0) or 0 for r in runs),
         "tentativas_adicionais": sum(r.get("retries", 0) for r in measured_runtime),
         "passos_recuperados": sum(r.get("recovered", 0) for r in measured_runtime),
@@ -86,7 +102,7 @@ def compute(history: Iterable[dict], authz: Iterable[dict], last: int = 200) -> 
         "acoes_nao_pedidas_executadas": sum(1 for a in unrequested
                                             if a.get("decision") in ("allowed", "approved_once")),
         "efeito_antes_de_falhar_por_100": per100(sum(1 for r in runs if r.get("effects_done") and not r.get("success"))),
-        "custo_por_pedido_usd": round(sum(costs) / n, 5) if n else None,
+        "custo_por_pedido_usd": round(sum(costs) / n, 5) if n and len(costs) == n else None,
         "latencia_p50_s": _percentile(seconds, 0.5),
         "latencia_p95_s": _percentile(seconds, 0.95),
     }

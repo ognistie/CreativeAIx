@@ -96,7 +96,8 @@ class AdaptiveSteps(unittest.TestCase):
 
                 runtime = StepRuntime(5, None, self.cancel)
                 self.assertTrue(runtime.run(execute, retry=True)["success"])
-                self.assertEqual(runtime.recovered, 1)
+                self.assertEqual(runtime.retries, 1)
+                self.assertEqual(runtime.recovered, 0)  # clique aceito sem pós-condição verificada
                 uncertain = runtime.run(execute, retry=True)
                 self.assertEqual(uncertain["status"], "uncertain")
                 self.assertEqual(adapter.call_count, 3)

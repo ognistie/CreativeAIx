@@ -225,6 +225,28 @@ class PolicyAndPricingTests(unittest.TestCase):
 
 
 class ControllerChatTests(unittest.TestCase):
+    def test_retry_replaces_already_visible_text_and_history_matches_final(self):
+        from agents.chat_agent import ChatAgent
+        client = Mock()
+
+        def converse(*args, on_text, **kwargs):
+            if client.converse.call_count == 1:
+                on_text("trecho descartado")
+                raise ValueError("JSON interrompido")
+            on_text("Resposta final 🧠")
+            return reply()
+
+        client.converse.side_effect = converse
+        c = self.controller()
+        c.chat = ChatAgent(client=client, config=config())
+        self.run_task(c, "o que é RAG?")
+        events = [p for name, p in self.events if name == "answer_delta"]
+        self.assertEqual(events[0]["text"], "trecho descartado")
+        self.assertEqual((events[1]["op"], events[1]["text"]), ("replace", ""))
+        self.assertEqual((events[-1]["op"], events[-1]["text"]), ("final", "Resposta final 🧠"))
+        answer = next(p["msg"] for name, p in self.events if name == "answer")
+        self.assertEqual(answer, events[-1]["text"])
+        self.assertEqual(c.session.turns[-1].summary, answer)
     def test_cognitive_trace_is_persisted_without_task_content(self):
         c = self.controller(chat_error=RuntimeError("offline fixture"))
         entry = self.run_task(c, "crie uma planilha de gastos privados")

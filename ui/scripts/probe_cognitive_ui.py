@@ -93,7 +93,30 @@ def main():
 
     def light():
         result["checks"]["note_navigation"] = True
-        QTimer.singleShot(1000, lambda: (shot("light-note"), compact()))
+        QTimer.singleShot(1000, lambda: (shot("light-note"), architecture()))
+
+    def architecture():
+        js("(()=>{const map=document.querySelector('.hp-architecture');map.open=true;"
+           "map.querySelectorAll('button')[4].click();})()")
+        wait_for("document.querySelector('.hp-inspector select')?.value==='stage:politicas' && "
+                 "document.querySelectorAll('.hp-inspector optgroup').length>=8", architecture_ready)
+
+    def architecture_ready():
+        result["checks"]["architecture_navigation"] = True
+        js("(()=>{const tabs=[...document.querySelectorAll('.lab-memory-editor button')];"
+           "tabs.find(b=>b.textContent.trim()==='Memória e contexto').click();"
+           "const s=document.querySelector('.hp-inspector select');"
+           "s.value=[...s.options].find(o=>o.value.startsWith('note:')).value;"
+           "s.dispatchEvent(new Event('change',{bubbles:true}));})()")
+        wait_for("[...document.querySelectorAll('.hp-inspector button')].some(b=>b.textContent==='Abrir nota')", open_from_inspector)
+
+    def open_from_inspector():
+        js("[...document.querySelectorAll('.hp-inspector button')].find(b=>b.textContent==='Abrir nota').click()")
+        wait_for("!!document.querySelector('.lab-note h3')", inspector_ready)
+
+    def inspector_ready():
+        result["checks"]["note_from_context"] = True
+        compact()
 
     def compact():
         js("[...document.querySelectorAll('nav button')].find(b=>b.textContent.includes('Nova conversa')).click()")
@@ -109,7 +132,7 @@ def main():
 
     def finish():
         shot("compact")
-        result["ok"] = all(result["checks"].values()) and len(result["checks"]) == 5 and not errors
+        result["ok"] = all(result["checks"].values()) and len(result["checks"]) == 7 and not errors
         print(json.dumps(result, ensure_ascii=True, indent=2), flush=True)
         app.exit(0 if result["ok"] else 1)
 

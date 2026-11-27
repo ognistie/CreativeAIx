@@ -94,6 +94,12 @@ def _fingerprint(data: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _evaluation_digest(run: dict) -> str:
+    # Feedback posterior é editorial e não participa da decisão de promoção.
+    data = {**run, "results": [{k: v for k, v in row.items() if k != "feedback"} for row in run["results"]]}
+    return _fingerprint(data)
+
+
 @lru_cache(maxsize=1)
 def _engine_revision():
     root = Path(__file__).resolve().parents[1]
@@ -142,6 +148,7 @@ class Lab:
         self.folder = Path(personal) / ".cerebro" / "lab" if personal else None
         self._lock = threading.RLock()
         self._active_runs: set[str] = set()
+        self._promotion_evidence: dict[str, str] = {}
 
     # ── arquivos ────────────────────────────────────────────────────
     def _need(self) -> Path:
@@ -446,6 +453,15 @@ class Lab:
             self._write(path, run)
             self._publish_development_evidence(run, es)
             ledger.finish(task_id, "completed" if run["status"] == "concluido" else "cancelled")
+            # A etiqueta do pedido e os campos do JSON gravado não atestam inferência.
+            # O comprovante fica no processo que executou a avaliação, separado do relatório editável.
+            if (origin == "real" and planner is real_planner and run["status"] == "concluido"
+                    and split != "development" and not strategies and len(versions) > 1 and run["results"]
+                    and all(row.get("applied") and row["metrics"]["calls"] > 0 for row in run["results"])):
+                with self._lock:
+                    self._promotion_evidence[run["id"]] = _evaluation_digest(run)
+                    if len(self._promotion_evidence) > 100:
+                        del self._promotion_evidence[next(iter(self._promotion_evidence))]
             return run
         finally:
             self._active_runs.discard(run["id"])
@@ -489,7 +505,7 @@ class Lab:
             self._write(f"runs/{run_id}.json", run)
         return hit
 
-    def promotion_check(self, version_id: str) -> dict:
+    def promotion_check(self, version_id: str, *, require_improvement: bool = False) -> dict:
         """Pode publicar? So com evidencia: um experimento REAL recente com esta versao e a publicada, no conjunto
         atual, todos os casos rodados, sem caso que a publicada passou e esta falhou, e taxa >= a da publicada."""
         v = self.version(version_id)
@@ -508,7 +524,15 @@ class Lab:
                 continue
             if r.get("status") != "concluido" or r["set"] not in current:
                 continue
-            run = self.run_detail(r["id"])
+            try:
+                run = self.run_detail(r["id"])
+                digest = _evaluation_digest(run)
+            except (FileNotFoundError, ValueError, KeyError, TypeError, AttributeError):
+                continue
+            with self._lock:
+                evidence = self._promotion_evidence.get(r["id"])
+            if evidence != digest:
+                continue
             if run.get("runtime_strategies"):
                 continue  # Um estudo de runtime não fundamenta a promoção de instruções.
             if run.get("dataset_snapshot", {}).get("hash") != _fingerprint(current[r["set"]]):
@@ -546,22 +570,25 @@ class Lab:
                 reasons.append("a candidata não teve caso aprovado")
             if sm < sb:
                 reasons.append(f"taxa de sucesso menor ({sm:.0%} contra {sb:.0%})")
+            elif require_improvement and sm == sb:
+                reasons.append("RSI exige ganho na taxa de sucesso verificado em avaliação com casos reservados")
             return {"ok": not reasons, "reasons": reasons, "run": r["id"],
                     "versus": published["id"], "rates": [sm, sb], "warning": ""}
-        return {"ok": False, "reasons": ["falta um experimento real com casos reservados desta versão contra a publicada no conjunto atual"],
+        return {"ok": False, "reasons": ["falta avaliação com inferência observada, casos reservados e registro íntegro nesta sessão do Lab"],
                 "run": ""}
 
-    def promote(self, version_id: str, harness) -> dict:
+    def promote(self, version_id: str, harness, *, require_improvement: bool = False) -> dict:
         with self._lock:
             version = self.version(version_id)
             if version is None:
                 raise FileNotFoundError("versão não encontrada")
             self.versions(version["agent"], harness)
-            check = self.promotion_check(version_id)
+            check = self.promotion_check(version_id, require_improvement=require_improvement)
             if not check["ok"]:
                 raise ValueError("não dá para promover: " + "; ".join(check["reasons"]))
             previous = check["versus"]
             published = self.publish(version_id, harness)
+            self._promotion_evidence.pop(check["run"], None)
             self._write(f"promotions/{v_safe_id(version_id)}.json", {
                 "version": version_id, "previous": previous, "run": check["run"],
                 "actor": "operador local", "when": datetime.now().isoformat(timespec="seconds"),

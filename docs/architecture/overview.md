@@ -4,6 +4,7 @@ Estado revisado em 2026-11-26 (versão `0.1.0-internal`). Um app só: `python ap
 
 Incrementos e evidências da evolução operacional: [harness-evolution.md](harness-evolution.md).
 O [observatório cognitivo](cognitive-observatory.md) documenta as regiões 3D, eventos observados, replay e seus limites de evidência.
+O [relatório Master Engineering](master-engineering-validation.md) registra a baseline, o diff candidato e a matriz A01–A18.
 
 ## Visão geral
 

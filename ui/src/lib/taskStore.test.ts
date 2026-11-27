@@ -108,6 +108,25 @@ describe("taskReducer", () => {
     expect(s.turns.at(-1)?.summary).toBe(long);              // antes: cortado em 400 letras
   });
 
+  it("repairs lost deltas and rejects stale, duplicate and cancelled stream updates", () => {
+    const delta = (seq: number, op: string, text: string, offset = 0, run_id = 7) =>
+      ev("answerDelta", { v: 1, seq, op, text, offset, run_id });
+    let s = run([
+      { type: "start", text: "teste", dryRun: false, now: 0 },
+      ev("phaseChanged", { run_id: 7 }),
+      delta(0, "replace", "🧠"),
+      delta(1, "append", " válido", 2),
+      delta(1, "append", " duplicado", 2),
+      delta(3, "append", " lacuna", 9),
+      delta(2, "replace", "outro", 0, 6),
+    ]);
+    expect(s.streamText).toBe("🧠 válido");
+    s = run([delta(4, "replace", "checkpoint"), delta(3, "replace", "atrasado")], s);
+    expect(s.streamText).toBe("checkpoint");
+    s = run([delta(6, "final", "resposta definitiva"), ev("cancelled", {}), delta(7, "replace", "tardio")], s);
+    expect(s.streamText).toBe("resposta definitiva");
+  });
+
   it("reopens a saved conversation", () => {
     const s = taskReducer(initialTaskState, {
       type: "showConversation",

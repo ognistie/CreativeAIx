@@ -49,7 +49,7 @@ DEV_ORIGINS = ("http://localhost:1420", "http://127.0.0.1:1420")
 # tests/test_bridge_contract.py garante que esta lista e a do Bridge andam juntas.
 QT_WINDOW_ONLY = frozenset({"cursorPos"})
 RPC_METHODS = frozenset({
-    "activitySummary", "agentProfile", "appearance", "approvePlan", "approvePlanSteps", "attachFiles",
+    "activitySummary", "agentProfile", "answerSnapshot", "appearance", "approvePlan", "approvePlanSteps", "attachFiles",
     "brainCreate", "brainCreateFolder", "brainDelete", "brainGraph", "brainOverview", "brainRead",
     "brainRename", "brainRestore", "brainSave", "brainSearch", "closeMini", "codingAgentsCheck",
     "creatorApply", "creatorDiscard", "creatorPropose", "deleteConversation", "devAct", "devCheck",

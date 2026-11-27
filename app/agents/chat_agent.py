@@ -374,7 +374,8 @@ class ChatAgent:
                 on_text: Optional[Callable[[str], None]] = None,
                 on_tool: Optional[Callable[[str, str, Optional[bool], str], None]] = None,
                 should_stop: Optional[Callable[[], bool]] = None, spoken: bool = False,
-                allow_actions: bool = True) -> ChatResult:
+                allow_actions: bool = True,
+                on_reset: Optional[Callable[[str], None]] = None) -> ChatResult:
         """said: a fala da pessoa; task: o pedido entendido (followup), se diferente.
         on_text(trecho): texto conforme chega. on_tool(nome, rotulo, ok, resultado): ok=None ao comecar.
         spoken: pedido falado; a resposta sera lida em voz alta (curta, sem Markdown).
@@ -432,6 +433,7 @@ class ChatAgent:
         resumed = False                            # volta que continua a anterior (pause_turn): mesmo paragrafo
         while rounds < self.max_rounds:
             rounds += 1
+            checkpoint = len(shown)
             if shown and not resumed and not "".join(shown).endswith("\n"):
                 emit("\n\n")                       # texto de uma volta nova comeca em paragrafo proprio
             before = len(shown)
@@ -457,7 +459,10 @@ class ChatAgent:
             except ValueError:
                 # JSON de ferramenta que o SDK nao conseguiu ler: refaz a volta (limitado). Erros da API sobem.
                 # O texto parcial desta volta sai da resposta: a volta refeita o escreve de novo.
-                del shown[before:]
+                changed = len(shown) != checkpoint
+                del shown[checkpoint:]
+                if changed and on_reset is not None:
+                    on_reset("".join(shown))
                 json_retries += 1
                 if json_retries > 2:
                     raise

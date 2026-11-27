@@ -26,9 +26,10 @@ skills: 6
 - Edicao apenas no projeto confiavel da sessao, com hashes e backup; desfazer deve preservar trabalho posterior do usuario.
 
 ## Como navegar e executar
-- create_project: manifesto -> builder deterministico -> conferencia de hashes/sintaxe.
-- edit_project: read_project -> expected_hashes -> staging/backup -> publicacao e conferencia.
-- API, GUI e scripts sao entregas de fontes; testes e execucao sao etapas separadas.
+
+1. Traduza o pedido em requisitos verificáveis. Preserve estrutura e convenções do projeto. Para edições, confira a versão dos arquivos e preserve as mudanças existentes.
+2. Entregue caminhos reais e diga quais verificações ocorreram. Existência e sintaxe dos arquivos não demonstram funcionamento.
+3. Para editar, use read_project, expected_hashes e edit_project. Para criar, use create_project. Executar é uma etapa separada.
 
 ## Playbooks
 - [[Playbook - Site estatico]]

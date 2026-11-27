@@ -39,6 +39,13 @@ export function wireTaskEvents(): void {
   for (const name of TASK_EVENTS) {
     core().on(name, (payload: unknown) => dispatchTask({ type: "event", name, payload, now: Date.now() }));
   }
+  core().onStatus((status) => {
+    const runId = taskStore.get().runId;
+    if (status !== "open" || runId === null || taskStore.get().status !== "running") return;
+    void core().call("answerSnapshot", String(runId)).then((payload) => {
+      dispatchTask({ type: "event", name: "answerDelta", payload, now: Date.now() });
+    }).catch(() => {}); // o próximo checkpoint ou evento final continua reparando o fluxo.
+  });
 }
 
 export function useTask(): TaskState {

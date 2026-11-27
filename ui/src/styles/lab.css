@@ -196,6 +196,12 @@
 .hp-inspector strong { color: var(--text-primary); font-size: 13px; }
 .hp-inspector p { margin: 6px 0; line-height: 1.6; overflow-wrap: anywhere; }
 .hp-inspector ul { max-height: 120px; overflow: auto; }
+.hp-architecture { border: 1px solid var(--edge); border-radius: 12px; padding: 12px; }
+.hp-architecture summary { cursor: pointer; color: var(--text-primary); font-weight: 600; }
+.hp-architecture ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 8px; margin-top: 12px; }
+.hp-architecture li { display: grid; gap: 5px; align-content: start; padding: 10px; border: 1px solid var(--edge); border-radius: 8px; font-size: 12px; }
+.hp-architecture button { justify-self: start; color: var(--accent); font-weight: 650; text-align: left; }
+.hp-architecture p { color: var(--text-secondary); }
 .hp-error { color: var(--text-primary); font-size: 12px; padding: 8px; border: 1px solid var(--edge); border-radius: 8px; }
 .is-compact .hp-timeline { max-height: 125px; overflow-y: auto; }
 .is-compact .hp-timeline select { width: 100%; }

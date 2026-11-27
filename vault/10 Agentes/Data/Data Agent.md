@@ -26,9 +26,10 @@ skills: 3
 - Dados do usuario ou exemplos identificados; nao inventar informacao pessoal, financeira ou fiscal.
 
 ## Como navegar e executar
-- create_workbook -> XLSX novo -> reabrir e conferir abas, celulas, formulas e graficos.
-- Sem referencias externas ou entre abas; sem instalacao durante tarefas.
-- Formula gravada nao e formula recalculada, e estrutura de grafico nao e QA visual no Excel.
+
+1. Defina colunas, unidades e período antes de montar a planilha. Separe dados recebidos de exemplos e mantenha cada tabela com cabeçalhos claros.
+2. Reabra o arquivo para conferir abas, células e fórmulas declaradas. Informe se as fórmulas foram gravadas mas ainda não recalculadas.
+3. Use create_workbook. Não inclua referências externas ou entre abas.
 
 ## Playbooks
 - [[Playbook - Planilha com grafico]]

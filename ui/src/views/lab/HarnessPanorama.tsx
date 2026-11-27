@@ -5,11 +5,12 @@ import { core, demoMode } from "../../lib/host";
 import { useTask } from "../../lib/stores";
 import { fmtDuration } from "../../lib/taskStore";
 import {
-  clampCamera, curvePoints, layoutPanorama, traceLit, pick, project, STAGES, VIEWS,
+  clampCamera, curvePoints, layoutPanorama, traceLit, pick, project, markerRadius, STAGES, VIEWS,
   type Camera, type EvolutionData, type LiveLit, type RoutingData, type Scene, type SceneNode, type Vec3,
 } from "../../lib/panorama";
 import { COGNITIVE_STAGES, STATUS_LABEL, animationTime, signalProgress, detailLevel, eventsAt, eventSource, type CognitiveRun } from "../../lib/cognitive";
 import { useAgentKnowledge, type Knowledge } from "./knowledge";
+import { HarnessArchitecture } from "./HarnessArchitecture";
 import { AGENTS, AGENT_LOOK, call } from "./types";
 
 // Panorama do harness em 3D (lib/panorama.ts): roteamento embaixo, memoria dos agentes no meio, evolucao (planos
@@ -349,9 +350,9 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
     const order = sc.nodes.map((n) => ({ n, p: P(n.pos) })).filter((x) => x.p.visible).sort((x, y) => y.p.depth - x.p.depth);
     const sinceOutcome = (now - outcomeAt.current) / 1000;
     for (const { n, p } of order) {
-      const R = Math.max(n.kind === "note" ? 1.6 : 3, n.r * p.k);
+      const R = markerRadius(n, p.k);
       let alpha = fog(p.depth);
-      if (focus && n.kind === "note" && n.agent !== focus) alpha *= 0.22;
+      if (focus && n.kind === "note" && n.agent !== focus) alpha *= 0.66;
       if (focus && n.kind === "agent" && n.id !== focus) alpha *= 0.65;
       if (n.kind === "stage" && !lit.has(n.id) && (n.weight ?? 0) === 0) alpha *= 0.55;
       ctx.globalAlpha = alpha;
@@ -370,6 +371,13 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
       else if (n.kind === "plan") drawCrystal(ctx, p.x, p.y, R, n.color, 0, n.status === "promoted");
       else if (n.kind === "core" || n.kind === "agent") drawNeuron(ctx, p.x, p.y, R, n.color);
       else drawSphere(ctx, p.x, p.y, R, n.color);
+      if (n.kind === "note" || n.kind === "shared") {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, R, 0, Math.PI * 2);
+        ctx.lineWidth = glowOn ? 2 : 1;
+        ctx.strokeStyle = th.dark ? "#ecebf6" : "#293244";
+        ctx.stroke();
+      }
       if (n.kind === "core") drawOrbit(ctx, n, c, w, h, 0, th);
       // Resultado do ultimo pedido: anel verde (ok) ou vermelho (falhou) que se desfaz
       if (clock && lv?.outcome && sinceOutcome < 1.2 && (n.kind === "agent" && lit.has(n.id) || n.id === "MAESTRO")) {
@@ -503,9 +511,17 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
   return (
     <section className={cn("harness-panorama", compact && "is-compact")} aria-label="Panorama do harness">
       {harnessError && <p className="hp-error" role="status">{harnessError} As regiões continuam navegáveis; dados de atividade não disponíveis.</p>}
+      {!compact && <HarnessArchitecture onFocus={(id) => {
+        const region = scene.byId.get(id);
+        if (!region) return;
+        setInspected(id);
+        setConnection("");
+        goal.current = { ...goal.current, target: region.pos, dist: 400 };
+      }} />}
       <div ref={wrap} className="hp-stage" tabIndex={0} onKeyDown={onKey}
         aria-label="Cena 3D do harness. Arraste para girar em 360 graus; roda aproxima, setas giram, W A S D deslocam o foco, zero volta a visão.">
         <canvas ref={canvas} className="hp-canvas" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          onPointerCancel={() => { down.current = null; dragging.current = false; setTip(null); }}
           onPointerLeave={() => { hoverId.current = ""; setTip(null); }} onDoubleClick={() => goTo(view)} />
 
         <div className={cn("hp-live", task.busy && "is-on")} aria-live="polite">
@@ -561,7 +577,12 @@ export function HarnessPanorama({ knowledge, compact = false, selected = "", not
           <label>Região ou unidade
             <select aria-label="Inspecionar região ou unidade" value={inspected} onChange={(e) => setInspected(e.target.value)}>
               <option value="">Escolha uma região, agente ou memória</option>
-              {scene.nodes.map((n) => <option key={n.id} value={n.id}>{KIND_LABEL[n.kind]} · {n.label || n.id}</option>)}
+              <optgroup label="Componentes e atividade">
+                {scene.nodes.filter((n) => !n.rel).map((n) => <option key={n.id} value={n.id}>{KIND_LABEL[n.kind]} · {n.label || n.id}</option>)}
+              </optgroup>
+              {AGENTS.map((agent) => <optgroup key={agent} label={`Notas · ${AGENT_LOOK[agent]!.name}`}>
+                {scene.nodes.filter((n) => n.rel && n.agent === agent).map((n) => <option key={n.id} value={n.id}>{n.label}</option>)}
+              </optgroup>)}
             </select>
           </label>
           <strong>{inspectedNode?.label || "Explore uma região"}</strong>

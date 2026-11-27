@@ -33,6 +33,31 @@ def _names(signatures: set, kind: str) -> set:
 
 
 class BridgeContract(unittest.TestCase):
+    def test_answer_snapshot_recovers_stream_only_for_current_run(self):
+        from unittest.mock import patch
+        from desktop.bridge_core import BridgeCore
+        from desktop.event_bus import EventBus
+        from desktop.server import Dispatcher
+
+        bus = EventBus()
+        bridge = BridgeCore()
+        bridge._running = False
+        bridge._emit = lambda *_: None
+        with patch("desktop.bridge_core.bus", bus):
+            bridge._wire_bus()
+        rpc = Dispatcher(bridge)
+
+        def snapshot(run):
+            return rpc.handle({"jsonrpc": "2.0", "id": 1, "method": "answerSnapshot", "params": [run]})["result"]
+
+        bus.emit("phase", {"run_id": 7})
+        for seq, op, text in [(0, "replace", "rascunho"), (1, "replace", "🧠"), (2, "append", " final")]:
+            bus.emit("answer_delta", {"v": 1, "run_id": 7, "seq": seq, "op": op, "text": text})
+        self.assertEqual(snapshot("7")["text"], "🧠 final")
+        self.assertFalse(snapshot("8")["ok"])
+        bus.emit("session_reset", {})
+        self.assertFalse(snapshot("7")["ok"])
+
     def test_qt_signatures_are_unchanged(self):
         from desktop.bridge import Bridge
         text = (APP / "tests" / "fixtures" / "bridge_contract.txt").read_text(encoding="utf-8")

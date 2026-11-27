@@ -82,5 +82,5 @@ class StepRuntime:
                 self.actions += 1
                 self.retries += 1
                 result = call()
-                self.recovered += int(result.get("success") is True)
+                self.recovered += int(classify(result) == "verified")
         return result

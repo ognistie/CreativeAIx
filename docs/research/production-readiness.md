@@ -1,5 +1,7 @@
 # Avaliação de liberação — 2026-10-31
 
+Atualização do candidato sobre `2b50072`: a [validação Master Engineering](../architecture/master-engineering-validation.md) cobre verificação adaptativa, consistência do streaming e cobertura de custo. A decisão de produção continua pendente para L1–L5, devido à cobertura nativa, privacidade, isolamento e credenciais históricas ainda não verificados. A avaliação de outubro abaixo é histórica.
+
 **Decisão: não publicar como produção. A pendência de curadoria foi resolvida.**
 As verificações locais de código passaram. As exclusões de referências foram avaliadas e
 consolidadas por autorização do proprietário; a automação autônoma de interfaces ainda não

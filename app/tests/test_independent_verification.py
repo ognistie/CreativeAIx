@@ -74,6 +74,31 @@ class IndependentVerification(unittest.TestCase):
         out = apply_independent_check("create_folder", {"path": str(self.dir / "x")}, self.ok())
         self.assertFalse(verified_success([out]))
 
+    def test_adaptive_copy_verifies_the_dispatched_source_before_counting_recovery(self):
+        from core.automation_files import FileActions
+        from core.run_context import RunContext
+        nested = self.dir / "nested"
+        nested.mkdir()
+        (nested / "status.txt").write_text("verde", encoding="utf-8")
+        for tampered in (False, True):
+            with self.subTest(tampered=tampered):
+                target = self.dir / f"resultado-{tampered}.txt"
+                params = {"source": str(self.dir / "status.txt"), "destination": str(target)}
+                run = RunContext(f"Copie status.txt em {self.dir} para {target}", lambda: False)
+
+                def dispatch(effective):
+                    result = FileActions()._copy_file(effective)
+                    if tampered and result.get("success"):
+                        target.write_text("divergente", encoding="utf-8")
+                    return result
+
+                result = run.execute_step("FILE", "copy_file", params, dispatch,
+                                          authorize_patch=lambda p: p["source"] == str(nested / "status.txt"),
+                                          allow_directory=lambda p: Path(p).is_relative_to(self.dir))
+                self.assertEqual(result["outcome"], "false_success" if tampered else "verified")
+                self.assertEqual(result["independent_check"]["method"], "sha256_equal")
+                self.assertEqual(run.runtime.recovered, 0 if tampered else 1)
+
     def test_workbook_correct_tabs_with_wrong_cells_cannot_teach(self):
         from openpyxl import Workbook
         from core.step_runtime import verified_success

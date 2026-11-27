@@ -822,6 +822,15 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                         return self.engine.execute(action, arguments, dry_run=dry_run)
 
                     from core.action_policy import authorize
+                    review_step = getattr(agent, "review_step", None)
+
+                    def review(effective, observed):
+                        if callable(review_step) and observed.get("status") not in (
+                            "needs_confirmation", "action_limit", "timeout", "cancelled", "uncertain", "partial", "budget_limit"
+                        ):
+                            return review_step({**step, "params": effective}, observed)
+                        return observed
+
                     result = run.execute_step(
                         agent_name, action, params, dispatch, retry=action in RETRY_ACTIONS,
                         adaptive=objective_replan, phase_iv=not objective_replan,
@@ -829,19 +838,16 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                         allow_directory=lambda path: not authorize("FILE", said, "list_files", {"path": path}),
                         on_patch=lambda patch: self._ledger_call(ledger.note, task_id, "replan", step=step_n,
                                                                strategy=patch.strategy, observation=patch.observation),
-                        before_retry=lambda: self._ledger_call(ledger.step_retry, task_id, step_n, action))
+                        before_retry=lambda: self._ledger_call(ledger.step_retry, task_id, step_n, action),
+                        review=review)
                     entry["runtime"].update(actions=runtime.actions, retries=runtime.retries,
                                             recovered=runtime.recovered, replans=runtime.replans)
-                    # Segunda conferencia fora do handler (core/verification.py): falso sucesso nao ensina nada
-                    from core.verification import apply_independent_check
-                    result = apply_independent_check(action, params, result)
                     from core.panorama import activity
-                    from core.verification import classify
-                    outcome = classify(result)
+                    outcome = result["outcome"]
                     activity("verification", agent=agent_name, action=action,
                              status="verified" if outcome == "verified" else "uncertain" if outcome in ("uncertain", "partial")
                              else "blocked" if result.get("status") in ("rejected", "needs_confirmation")
-                             else "completed" if result.get("success") else "failed")
+                             else "completed" if result.get("success") and outcome != "false_success" else "failed")
                     if result.get("false_success"):
                         entry["runtime"]["false_successes"] = entry["runtime"].get("false_successes", 0) + 1
                         self._log("WARN", agent_name, f"Conferência independente divergiu: {action}")
@@ -855,11 +861,6 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
 
                     # frase final do piloto; so vale se ele foi o ULTIMO passo do pedido
                     turn["say"] = getattr(self.engine, "last_say", "") or ""
-
-                    # Subagente de conferencia pos-passo (ex.: ContentGuard do
-                    # WebAgent marca prompt injection no conteudo lido).
-                    if hasattr(agent, "review_step"):
-                        result = agent.review_step(step, result)
 
                     if not result.get("success", True):
                         all_success = False
@@ -896,6 +897,8 @@ class Controller(ReplyMixin, GateMixin, TelemetryMixin):
                         "step": step_n,
                         "total": step_n + len(agent_steps) - j - 1,
                         "ok": result.get("success", False),
+                        "verified": result.get("verified") is True,
+                        "outcome": outcome,
                         "result": result.get("result", ""),
                         "desc": f"[{agent_name}] {desc}",
                         "action": action,

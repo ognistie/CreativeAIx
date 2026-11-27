@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -44,6 +45,18 @@ def sloppy_planner(version, task):
         fora = str(Path(ws).parent / "fora" / "foto.jpg")
         return {"steps": [{"action": "move_file", "params": {"source": ws + "\\foto.jpg", "destination": fora}}]}
     return good_planner(version, task)
+
+
+def run_with_observed_fixture(lab, ids, planner):
+    """Substitui a fronteira oficial de inferência apenas para testar avaliação e publicação offline."""
+    def transport_fixture(version, task, *, workspace, context):
+        plan = planner(version, task.replace("{ws}", str(workspace)))
+        plan["applied"] = {k: version["params"][k] for k in ("model", "effort", "max_tokens")}
+        plan.setdefault("metrics", {})["calls"] = 1
+        return plan
+
+    with patch("core.lab.real_planner", transport_fixture):
+        return lab.run("arquivos-basico", ids, transport_fixture, origin="real")
 
 
 class ExecutedPathIsTheValidatedPath(unittest.TestCase):
@@ -324,13 +337,21 @@ class LabOptimization(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.lab.promote(v["id"], self.h)
         self.lab.run("arquivos-basico", [self.base["id"], v["id"]], self.planner_by_instructions, origin="real")
+        self.assertFalse(self.lab.promotion_check(v["id"])["ok"], "uma etiqueta real não basta")
+        run = run_with_observed_fixture(self.lab, [self.base["id"], v["id"]], self.planner_by_instructions)
+        self.assertFalse(Lab(self.dir).promotion_check(v["id"])["ok"], "o registro em disco não é comprovante")
+        original = self.lab.run_detail(run["id"])
+        run["results"][0]["status"] = "alterado"
+        self.lab._write(f"runs/{run['id']}.json", run)
+        self.assertFalse(self.lab.promotion_check(v["id"])["ok"])
+        self.lab._write(f"runs/{run['id']}.json", original)
         check = self.lab.promotion_check(v["id"])
         self.assertTrue(check["ok"], check)
         self.lab.promote(v["id"], self.h)
         self.assertEqual(self.h.load()["agents"]["FILE"]["instructions"], "Confira o destino antes de copiar.")
         # uma variante que piora em um caso que a publicada passa nao pode ser promovida
         worse = self.lab.create_variant("FILE", v["id"], "Copie para onde achar melhor.")
-        self.lab.run("arquivos-basico", [v["id"], worse["id"]], self.planner_by_instructions, origin="real")
+        run_with_observed_fixture(self.lab, [v["id"], worse["id"]], self.planner_by_instructions)
         check = self.lab.promotion_check(worse["id"])
         self.assertFalse(check["ok"])
         self.assertTrue(any("piorou em: copiar" in r for r in check["reasons"]))

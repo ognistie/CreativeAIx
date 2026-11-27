@@ -1045,6 +1045,11 @@ class BridgeCore:
             pass
 
     def _wire_bus(self) -> None:
+        self._stream_lock = threading.Lock()
+        self._stream_run = None
+        self._stream_chunks: list[str] = []
+        self._stream_seq = -1
+        self._stream_size = 0
         m = {
             "phase":              self._on_phase,
             "plan_ready":         lambda p: self._emit("planReady", _to_json(p)),
@@ -1062,8 +1067,8 @@ class BridgeCore:
             "history_changed":    lambda p: self._emit("historyChanged", _to_json(p)),
             "resolved":           lambda p: self._emit("resolved", _to_json(p)),
             "answer":             self._on_answer,
-            "answer_delta":       lambda p: self._emit("answerDelta", _to_json(p)),
-            "session_reset":      lambda p: self._emit("sessionReset", _to_json(p)),
+            "answer_delta":       self._on_answer_delta,
+            "session_reset":      self._on_session_reset,
             "voice_state":        lambda p: self._emit("voiceState", _to_json(p)),
             "voice_level":        lambda p: self._emit("voiceLevel", _to_json(p)),
             "voice_heard":        lambda p: self._emit("voiceHeard", _to_json(p)),
@@ -1078,6 +1083,11 @@ class BridgeCore:
             bus.on(ev, cb)
 
     def _on_phase(self, payload: dict) -> None:
+        run_id = payload.get("run_id")
+        if type(run_id) is int:
+            with self._stream_lock:
+                if run_id != self._stream_run:
+                    self._reset_stream(run_id)
         self._emit("phaseChanged", _to_json(payload))
         # quando entra em fase "maestro" pela primeira vez, running=True
         if not self._running:
@@ -1095,6 +1105,41 @@ class BridgeCore:
 
     def _on_answer(self, payload: dict) -> None:
         self._emit("answerReady", _to_json(payload))
+
+    def _reset_stream(self, run_id) -> None:
+        self._stream_run, self._stream_seq, self._stream_size = run_id, -1, 0
+        self._stream_chunks.clear()
+
+    def _on_session_reset(self, payload: dict) -> None:
+        with self._stream_lock:
+            self._reset_stream(None)
+        self._emit("sessionReset", _to_json(payload))
+
+    def _on_answer_delta(self, payload: dict) -> None:
+        with self._stream_lock:
+            text, seq, op = payload.get("text"), payload.get("seq"), payload.get("op")
+            if (payload.get("v") == 1 and type(seq) is int and seq > self._stream_seq
+                    and self._stream_run is not None and payload.get("run_id") == self._stream_run
+                    and isinstance(text, str) and op in ("append", "replace", "final")):
+                if op != "append":
+                    self._stream_chunks.clear()
+                    self._stream_size = 0
+                self._stream_seq = seq
+                self._stream_size += len(text)
+                if self._stream_size <= 512_000:
+                    self._stream_chunks.append(text)
+                else:
+                    self._stream_chunks.clear()
+        self._emit("answerDelta", _to_json(payload))
+
+    def answerSnapshot(self, run_id: str) -> str:
+        """Retorna somente o texto transmitido da execução solicitada, para reconexão."""
+        with self._stream_lock:
+            if (self._stream_run is None or run_id != str(self._stream_run) or self._stream_seq < 0
+                    or self._stream_size > 512_000):
+                return _to_json({"ok": False})
+            return _to_json({"ok": True, "v": 1, "run_id": self._stream_run, "op": "replace",
+                             "seq": self._stream_seq, "text": "".join(self._stream_chunks)})
 
     def _on_cancelled(self, payload: dict) -> None:
         self._emit("cancelled", _to_json(payload))

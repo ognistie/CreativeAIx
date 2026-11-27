@@ -15,6 +15,15 @@ def run(ok=True, seconds=2.0, cost=0.01, **extra):
 
 
 class QualityMetrics(unittest.TestCase):
+    def test_partial_coverage_does_not_report_unknown_calls_as_free(self):
+        rows = [run(verified=True), run(metrics={"cost_usd": 0, "cost_known": False}),
+                run(metrics={"cost_usd": 0, "api_calls": 0}), run(metrics={})]
+        result = compute(rows, [])
+        self.assertEqual(result["pedidos_com_custo_medido"], 2)
+        self.assertEqual(result["pedidos_sem_custo_medido"], 2)
+        self.assertEqual(result["custo_medido_usd"], 0.01)
+        self.assertIsNone(result["custo_por_pedido_usd"])
+        self.assertIsNone(result["custo_por_sucesso_verificado_usd"])
     def test_rates_per_hundred_and_latency(self):
         history = [run(), run(), run(ok=False, error=STALL, status="cancelled", seconds=90),
                    run(ok=False, status="cancelled", error="cancelado pelo usuario", seconds=4),

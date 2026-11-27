@@ -274,7 +274,7 @@ def _run_round(lab, spec, propose, planner, cancel, on_event, limits):
         spent += sum(float((run.get("summary") or {}).get(v, {}).get("cost_usd") or 0) for v in (base["id"], variant["id"]))
         summary = run.get("summary") or {}
         rates = {v: (summary.get(v) or {}).get("success_rate") for v in (base["id"], variant["id"])}
-        verdict = lab.promotion_check(variant["id"]) if spec.origin == "real" else \
+        verdict = lab.promotion_check(variant["id"], require_improvement=True) if spec.origin == "real" else \
             {"ok": False, "reasons": ["rodada simulada não vale como evidência para promover"]}
         record = EvaluationRecord(candidate=variant["id"], baseline=base["id"], run=run["id"], origin=spec.origin,
                                   rates=rates, verdict_ok=bool(verdict.get("ok")), reasons=list(verdict.get("reasons", [])))
@@ -309,8 +309,8 @@ def decide(lab, harness, candidate: str, decision: str, operator: str) -> dict:
     published = next((v for v in lab.versions(version["agent"], harness) if v.get("published")), None)
     memory = ScientificMemory(lab)
     if decision == "promover":
-        check = lab.promotion_check(candidate)
-        lab.promote(candidate, harness)       # recusa sozinho sem evidência real com holdout
+        check = lab.promotion_check(candidate, require_improvement=True)
+        lab.promote(candidate, harness, require_improvement=True)
         record = PromotionDecision(candidate=candidate, decision="promover", operator=operator,
                                    previous=(published or {}).get("id", ""), run=check.get("run", ""),
                                    when=datetime.now().isoformat(timespec="seconds"))

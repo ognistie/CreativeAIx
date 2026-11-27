@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from core.lab import Lab
 from core.rsi import ExperimentSpec, InstructionMutation, ScientificMemory, admit, decide, run_round
-from tests.test_lab import good_planner, sloppy_planner
+from tests.test_lab import good_planner, sloppy_planner, run_with_observed_fixture
 
 GOOD = "Confira o destino antes de copiar e use os nomes do pedido."
 BAD = "Copie para onde achar melhor."
@@ -170,7 +170,7 @@ class RsiRound(unittest.TestCase):
         with self.assertRaises(ValueError):
             decide(self.lab, self.h, candidate, "promover", "operador local")
         # avaliação com os casos reservados (rodada completa), feita fora da rodada de pesquisa
-        self.lab.run("arquivos-basico", [self.base["id"], candidate], by_instructions, origin="real")
+        run_with_observed_fixture(self.lab, [self.base["id"], candidate], by_instructions)
         with self.assertRaises(PermissionError):
             decide(self.lab, self.h, candidate, "promover", "  ")
         record = decide(self.lab, self.h, candidate, "promover", "operador local")
@@ -181,6 +181,14 @@ class RsiRound(unittest.TestCase):
         self.assertEqual(restored["id"], self.base["id"])
         results = [r["result"] for r in ScientificMemory(self.lab).entries()]
         self.assertIn("promovida", results)
+
+    def test_tied_evaluation_is_not_an_rsi_promotion(self):
+        candidate = self.lab.create_variant("FILE", self.base["id"], GOOD)
+        run_with_observed_fixture(self.lab, [self.base["id"], candidate["id"]], good_planner)
+        self.assertTrue(self.lab.promotion_check(candidate["id"])["ok"])
+        with self.assertRaisesRegex(ValueError, "RSI exige ganho"):
+            decide(self.lab, self.h, candidate["id"], "promover", "operador local")
+        self.assertEqual(self.published()["id"], self.base["id"])
 
     def test_rejection_is_final_for_that_hypothesis(self):
         out = run_round(self.lab, self.spec(), lambda *a: GOOD, by_instructions)

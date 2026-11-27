@@ -37,6 +37,14 @@ operação que o envolveu, e não uma certificação independente de cada agente
 
 ## Navegação e renderização
 
+A aba Memória inclui um mapa de nove camadas do harness, da entrada e conversa até execução, verificação e pesquisa.
+Cada camada descreve a responsabilidade e permite focar sua região na cena. O mapa é estrutural. A atividade da
+execução continua vindo dos eventos observados.
+
+Notas têm contorno contrastante e diâmetro mínimo de 10 pixels no canvas. Em áreas densas, o clique escolhe a nota
+cujo centro está mais próximo do ponteiro. A profundidade desempata marcadores no mesmo ponto. O inspetor agrupa
+as notas por agente e o editor preserva a lista completa, inclusive fora dos limites de desenho do panorama.
+
 Cinco vistas: Geral, Atividade, Contexto, Memória e Evolução. Arrastar gira 360°; roda e +/- aproximam;
 setas inclinam/giram; WASD e Q/E deslocam o foco; zero restaura a vista. Selecionar uma região permite entrar
 nela. Agentes e notas preservam a navegação e edição existentes; sinapses mostram seus extremos e peso.

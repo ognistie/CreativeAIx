@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampCamera, curvePoints, fibonacciSphere, layoutPanorama, liveLit, pick, project, VIEWS, type PanoramaInput } from "./panorama";
+import { clampCamera, curvePoints, fibonacciSphere, layoutPanorama, pick, project, VIEWS, type PanoramaInput } from "./panorama";
 
 const input: PanoramaInput = {
   agents: [
@@ -94,34 +94,16 @@ describe("camera", () => {
     expect(pick(scene.nodes, VIEWS.geral, 1000, 700, p.x, p.y)?.id).toBe("MAESTRO");
     expect(pick(scene.nodes, VIEWS.geral, 1000, 700, -500, -500)).toBeNull();
   });
+
+  it("a closer marker does not steal a click centered on the note behind it", () => {
+    const note = { id: "note", kind: "note" as const, pos: [0, 0, 0] as const, r: 1, color: "#fff" };
+    const front = { ...note, id: "front", pos: [5, 0, 300] as const };
+    const camera = { ...cam, yaw: 0, pitch: 0 };
+    expect(pick([front, note], camera, 800, 600, 400, 300)?.id).toBe("note");
+  });
 });
 
-describe("liveLit", () => {
-  const scene = layoutPanorama(input);
-  const base = { busy: true, status: "running", route: "", planAgents: [], steps: [], review: false };
-
-  it("lights only the entry while the request is being understood", () => {
-    const lit = liveLit(base, scene.edges);
-    expect(lit.path).toEqual(["route:stage:pedido>stage:entendimento"]);
-  });
-
-  it("follows the chat handing an action to the Maestro and down to the agent", () => {
-    const lit = liveLit({ ...base, route: "conversa→maestro", planAgents: ["DESKTOP"], steps: [{ agent: "DESKTOP", state: "running" }] }, scene.edges);
-    expect(lit.path).toEqual([
-      "route:stage:pedido>stage:entendimento", "route:stage:entendimento>stage:conversa", "route:stage:conversa>MAESTRO",
-      "route:MAESTRO>stage:politicas", "traffic:DESKTOP",
-    ]);
-    expect([...lit.working]).toEqual(["DESKTOP"]);
-  });
-
-  it("a chat answer stays in the chat and a finished run flashes its outcome", () => {
-    const chat = liveLit({ ...base, steps: [{ agent: "CHAT", state: "ok" }] }, scene.edges);
-    expect(chat.nodes.has("stage:conversa")).toBe(true);
-    expect(chat.nodes.has("stage:politicas")).toBe(false);
-    expect(liveLit({ ...base, busy: false, status: "done", route: "atalho" }, scene.edges).outcome).toBe("ok");
-    expect(liveLit({ ...base, busy: false, status: "idle" }, scene.edges).path).toEqual([]);
-  });
-
+describe("distribuição", () => {
   it("spreads points evenly on a sphere", () => {
     const pts = fibonacciSphere(20, 50);
     for (const p of pts) expect(Math.hypot(...p)).toBeCloseTo(50, 0);

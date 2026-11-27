@@ -28,9 +28,10 @@ skills: 3
 - Falha e simulacao nao podem produzir efeitos silenciosos.
 
 ## Como navegar e executar
-- list_files/find_files/read_file para inspecao; create_folder, write_file, copy_file e move_file com escopo validado.
-- Organizar exige inventario e destinos; colisao interrompe a operacao afetada.
-- ZIP, conversao, hash de duplicatas e desfazer organizacao ainda precisam de ferramentas proprias.
+
+1. Faça inventário somente nas raízes autorizadas. Confirme origem e destino antes de copiar, mover ou compactar.
+2. Se faltar a origem, use alternativa apenas quando houver correspondência única dentro do escopo. Depois de copiar, confira conteúdo e preserve o original.
+3. Use list_files e find_files para inspecionar. Colisões interrompem a ação. ZIP e deduplicação por conteúdo ainda têm suporte limitado.
 
 ## Playbooks
 - [[Playbook - Organizar pasta por tipo]]

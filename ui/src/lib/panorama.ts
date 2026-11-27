@@ -303,30 +303,29 @@ export function curvePoints(a: Vec3, b: Vec3, lift: number, steps = 14): Vec3[] 
 }
 
 /** No mais proximo do ponteiro (o da frente ganha empates), ou null. */
+export function markerRadius(node: SceneNode, scale: number): number {
+  return Math.max(node.kind === "note" || node.kind === "shared" ? 5 : 3, node.r * scale);
+}
+
 export function pick(nodes: SceneNode[], c: Camera, w: number, h: number, px: number, py: number, slack = 6): SceneNode | null {
   let best: SceneNode | null = null;
   let bestDepth = Infinity;
+  let bestDistance = Infinity;
   for (const n of nodes) {
     const p = project(n.pos, c, w, h);
     if (!p.visible) continue;
-    const rr = Math.max(n.r * p.k, 4) + slack;
-    if ((p.x - px) ** 2 + (p.y - py) ** 2 <= rr * rr && p.depth < bestDepth) {
+    const rr = markerRadius(n, p.k) + slack;
+    const distance = (p.x - px) ** 2 + (p.y - py) ** 2;
+    if (distance <= rr * rr && (distance < bestDistance || (distance === bestDistance && p.depth < bestDepth))) {
       best = n;
       bestDepth = p.depth;
+      bestDistance = distance;
     }
   }
   return best;
 }
 
 // ── ao vivo ─────────────────────────────────────────────────────────────────
-export interface LiveInput {
-  busy: boolean;
-  status: string;
-  route: string;
-  planAgents: string[];
-  steps: Array<{ agent: string; state: string }>;
-  review: boolean;
-}
 export interface LiveLit {
   /** nos acesos (estagios, agentes, Maestro) */
   nodes: Set<string>;
@@ -336,42 +335,6 @@ export interface LiveLit {
   working: Set<string>;
   /** resultado final para o flash: ok | fail | "" */
   outcome: "ok" | "fail" | "";
-}
-
-/** O que acende na cena para o pedido atual. */
-export function liveLit(s: LiveInput, sceneEdges: SceneEdge[]): LiveLit {
-  const nodes = new Set<string>();
-  const path: string[] = [];
-  const working = new Set<string>();
-  const outcome: LiveLit["outcome"] = s.busy ? "" : s.status === "done" ? "ok" : s.status === "failed" ? "fail" : "";
-  if (!s.busy && !outcome) return { nodes, path, working, outcome };
-  const has = (id: string) => sceneEdges.some((e) => e.id === id);
-  const hop = (a: string, b: string) => {
-    nodes.add(a);
-    nodes.add(b);
-    const id = `route:${a}>${b}`;
-    if (has(id)) path.push(id);
-  };
-  hop("stage:pedido", "stage:entendimento");
-  const chatSteps = s.steps.some((x) => x.agent === "CHAT");
-  const [first, then] = (s.route || (chatSteps ? "conversa" : "")).split("→");
-  const stageOf = (r: string) => (ROUTE_STAGE[r] === CORE ? CORE : ROUTE_STAGE[r] ? `stage:${ROUTE_STAGE[r]}` : "");
-  const entry = stageOf(first ?? "");
-  if (entry) hop("stage:entendimento", entry);
-  if (then) hop(entry, stageOf(then));
-  const last = then ? stageOf(then) : entry;
-  const acting = s.planAgents.filter((a) => a !== "CHAT");
-    if (acting.length && last && last !== "stage:resposta" && last !== "stage:conversa") {
-    hop(last, "stage:politicas");
-    for (const a of acting) {
-      nodes.add(a);
-      if (has(`traffic:${a}`)) path.push(`traffic:${a}`);
-    }
-  }
-  if (s.review) nodes.add("stage:politicas");
-  for (const st of s.steps) if (st.state === "running" && st.agent && st.agent !== "CHAT") working.add(st.agent);
-  if (chatSteps && s.busy) working.add("stage:conversa");
-  return { nodes, path, working, outcome };
 }
 
 /** Apenas os sinais explicitamente observados acendem o observatorio. Sem dados, a cena fica quieta. */

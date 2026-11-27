@@ -7,6 +7,7 @@ export const PROTOCOL_VERSION = 1;
 export interface Methods {
   activitySummary: [args: [], result: unknown];
   agentProfile: [args: [agent: string], result: unknown];
+  answerSnapshot: [args: [run_id: string], result: unknown];
   appearance: [args: [], result: unknown];
   approvePlan: [args: [ok: boolean, token: string], result: null];
   approvePlanSteps: [args: [token: string, skipped_json: string], result: null];

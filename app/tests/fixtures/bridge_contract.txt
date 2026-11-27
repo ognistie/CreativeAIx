@@ -71,6 +71,7 @@ slot forceStop() -> void
 slot getSettings() -> QString
 slot harnessGet() -> QString
 slot harnessPanorama() -> QString
+slot answerSnapshot(QString) -> QString
 slot harnessRestore(QString) -> QString
 slot harnessSave(QString,QString) -> QString
 slot harnessPatch(QString,QString) -> QString

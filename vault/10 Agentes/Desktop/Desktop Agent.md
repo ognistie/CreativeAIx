@@ -31,12 +31,10 @@ skills: 3
 - Máximo 15 passos.
 
 ## Como navegar e executar
-- **Abrir app conhecido**: a rotina abre pelo executável/URI (`notepad.exe`, `excel`, `winword`, `code`, `ms-settings:`…, ver [[Apps e sites]] › *Abrir com*) e acha a janela **pelo título** — nunca "a janela da frente".
-- **App já aberto na conversa**: não reabrir. "Abre o Excel" com o Excel aberto só traz a janela pra frente; o resto continua na **mesma** janela ([[Conversa continua]]).
-- **Escrever em editor**: `blank_document` garante documento novo e sem alterações (Ctrl+N se preciso) e `app_type(require_untitled)` digita **só nele** — nunca no arquivo do usuário.
-- **Tudo além de abrir** (preencher planilha, clicar em itens, calcular, mexer em opções): `app_task(goal)` — o **piloto de apps** lê a janela pela acessibilidade, age pelo **nome** do elemento e confere a cada turno; visão só como último recurso.
-- **Configurações do Windows**: `open_path(ms-settings:página)` com a página exata de [[Configuracoes do Windows]]; clicar/ativar algo → `app_task` na janela das Configurações.
-- **Atalhos**: quando existir, preferir o atalho ([[Atalhos de teclado]]); no Office em português alguns mudam.
+
+1. Identifique aplicativo, janela e documento. Prefira a rotina do aplicativo e controles de acessibilidade antes de recorrer à visão.
+2. Confirme o documento após salvar. Se o foco mudar ou o resultado de um envio ficar incerto, pare e explique o que precisa ser conferido.
+3. Para escrever em um documento novo, use blank_document e app_type(require_untitled). Para operar a janela identificada, use app_task.
 
 ## Playbooks
 - [[Playbook - Bloco de Notas]]
