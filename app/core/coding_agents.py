@@ -295,7 +295,7 @@ def parse_event(tool: str, line: str) -> Optional[dict]:
                     if path:
                         out.append({"kind": "file", "text": f"{block.get('name', 'tool')}: {path}", "path": str(path)})
                     else:
-                        out.append({"kind": "tool", "text": f"{block.get('name', 'tool')}"})
+                        out.append({"kind": "tool", "text": f"{block.get('name', 'tool')}", "tool": str(block.get("name") or "tool")})
             return {"kind": "many", "events": out} if out else None
         if kind == "result":
             ok = not ev.get("is_error") and ev.get("subtype") == "success"
@@ -312,7 +312,8 @@ def parse_event(tool: str, line: str) -> Optional[dict]:
             if it == "agent_message" and kind == "item.completed" and str(item.get("text", "")).strip():
                 return {"kind": "text", "text": str(item["text"]).strip()}
             if it == "mcp_tool_call" and kind == "item.started":
-                return {"kind": "tool", "text": f"MCP {item.get('server', '')}.{item.get('tool', '')}"}
+                return {"kind": "tool", "text": f"MCP {item.get('server', '')}.{item.get('tool', '')}",
+                        "tool": f"MCP:{item.get('server', '')}.{item.get('tool', '')}"}
             if it == "command_execution" and kind == "item.started":
                 return {"kind": "tool", "text": f"comando: {str(item.get('command', ''))[:160]}"}
             if it == "file_change" and kind == "item.completed":
@@ -412,6 +413,8 @@ def run(tool: str, prompt: str, folder: str, *, on_progress: Optional[Callable[[
     texts, files, outside, errors = [], [], [], []
     final = {"ok": None, "text": "", "cost": None}
     say(f"{name} comecou em {folder}")
+    from core.panorama import activity_callback
+    observe_activity = activity_callback()
 
     def on_line(line: str) -> None:
         for ev in _flatten(parse_event(tool, line)):
@@ -428,6 +431,9 @@ def run(tool: str, prompt: str, folder: str, *, on_progress: Optional[Callable[[
                     files.append(str(path))
                     say(f"{name}: {ev['text'][:200]}")
             elif k == "tool":
+                # Nome estrutural somente: comandos, argumentos, saidas e credenciais ficam fora da cena.
+                if ev.get("tool"):
+                    observe_activity("execution", agent="EXTCODE", status="started", action=ev["tool"])
                 say(f"{name}: {ev['text'][:200]}")
             elif k == "error":
                 errors.append(ev["text"])

@@ -7,6 +7,7 @@ signal apiUsage(QString) -> void
 signal assistantMessage(QString) -> void
 signal cancelled(QString) -> void
 signal codingStatus(QString) -> void
+signal cognitiveActivity(QString) -> void
 signal contextExtracted(QString) -> void
 signal conversationsChanged(QString) -> void
 signal creatorReady(QString) -> void
@@ -69,6 +70,7 @@ slot executeTask(QString,bool,bool) -> void
 slot forceStop() -> void
 slot getSettings() -> QString
 slot harnessGet() -> QString
+slot harnessPanorama() -> QString
 slot harnessRestore(QString) -> QString
 slot harnessSave(QString,QString) -> QString
 slot harnessPatch(QString,QString) -> QString

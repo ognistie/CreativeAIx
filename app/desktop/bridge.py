@@ -28,6 +28,7 @@ class Bridge(QObject, BridgeCore):
     stepDone           = Signal(str)
     apiUsage           = Signal(str)
     contextExtracted   = Signal(str)
+    cognitiveActivity  = Signal(str)
     taskDone           = Signal(str)
     executionFinished  = Signal(str)
     reportReady        = Signal(str)
@@ -421,6 +422,10 @@ class Bridge(QObject, BridgeCore):
     @Slot(str, result=str)
     def rsiHistory(self, agent: str) -> str:
         return BridgeCore.rsiHistory(self, agent)
+
+    @Slot(result=str)
+    def harnessPanorama(self) -> str:
+        return BridgeCore.harnessPanorama(self)
 
     @Slot(str, str, bool, result=str)
     def rsiDecide(self, candidate: str, decision: str, confirmed: bool) -> str:

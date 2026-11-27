@@ -3,6 +3,7 @@
 Estado revisado em 2026-11-26 (versão `0.1.0-internal`). Um app só: `python app/main.py`.
 
 Incrementos e evidências da evolução operacional: [harness-evolution.md](harness-evolution.md).
+O [observatório cognitivo](cognitive-observatory.md) documenta as regiões 3D, eventos observados, replay e seus limites de evidência.
 
 ## Visão geral
 
@@ -84,6 +85,7 @@ A integração entre conversa, visão, resultados e seus limites está em [voice
 | Preferências e Harness | `core/user_settings.py`, `core/harness.py` | validados por esquema |
 | Aparência | `app/design/theme.json` → `ui/src/styles/tokens.css` | contraste AA conferido no gate |
 | Papéis de parede gerativos | `ui/src/lib/scenes.ts`, `lib/wallpaper/` | cena → buffer → estilo; ver [wallpapers.md](wallpapers.md) |
+| Panorama do harness (3D, ao vivo) | `core/panorama.py` (`harnessPanorama`), `ui/src/lib/panorama.ts`, `views/lab/HarnessPanorama.tsx` | roteamento (tráfego do histórico, campo `route`), memória dos agentes e evolução (planos aprendidos, hipóteses do Lab); sinais de eventos observados (`cognitiveActivity`), inspeção e replay sem reexecutar efeitos |
 
 ## Contrato da interface
 

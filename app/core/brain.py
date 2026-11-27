@@ -363,6 +363,9 @@ class Brain:
             sources += names
             size += len(text) + 2
         self.last_sources[agent] = sources
+        from core.panorama import activity
+        activity("memory", agent=agent, count=len(sources), refs=sources)
+        activity("context", agent=agent, count=size, status="completed", action="selected_characters")
         self.last_skills[agent] = [n for n in sk_names if n in sources]
         if sources:
             logger.info(f"[{agent}] segundo cerebro: {', '.join(sources)}")

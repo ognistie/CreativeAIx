@@ -23,9 +23,9 @@ const AREAS: Array<{ id: LabArea; title: string; lead: string; art: (typeof AGEN
     why: "Saber, com números, se a mudança melhorou antes de colocar no dia a dia.",
     how: "Crie a variante, escolha os casos e rode. Promova só o que passar." },
   { id: "memory", title: "Memória", art: "WEB", lead: "Veja e edite o que os agentes lembram.",
-    what: "A árvore do Cérebro vista de longe: onde cada agente se liga e o que eles usam em comum.",
+    what: "O harness em 3D: por onde os pedidos passam, a memória de cada agente e o que o sistema aprendeu, ao vivo.",
     why: "Entender de onde vem o contexto de uma resposta e limpar o que está velho ou errado.",
-    how: "Clique num agente na árvore e edite a memória e o contexto logo abaixo." },
+    how: "Gire e aproxime a cena, clique num agente ou numa nota e edite logo abaixo." },
 ];
 
 export function LabHub({ onOpen }: { onOpen: (area: LabArea) => void }) {

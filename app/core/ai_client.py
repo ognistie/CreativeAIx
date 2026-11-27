@@ -275,6 +275,8 @@ class AIClient:
         stop = getattr(_scope, "should_stop", None)
         if callable(stop) and stop():
             raise LLMCancelled("Execução interrompida antes de chamar o modelo.")
+        from core.panorama import activity
+        activity("model", agent=agent, status="started", action=model)
         if kind != "anthropic":
             return self._local(model, system, [{"role": "user", "content": self._build_content(user_content, images)}],
                                max_tokens=max_tokens, schema=json_schema, agent=agent)
@@ -358,7 +360,10 @@ class AIClient:
         on_text(trecho) recebe o texto conforme chega; should_stop() True interrompe o streaming (a
         resposta parcial ainda volta, com stop_reason "cancelled").
         Cache: system marcado e cache automatico no fim do historico (o prefixo cresce a cada volta)."""
-        if _gate(model, "conversa e busca remotas") != "anthropic":
+        provider = _gate(model, "conversa e busca remotas")
+        from core.panorama import activity
+        activity("model", agent=agent, status="started", action=model)
+        if provider != "anthropic":
             return self._local(model, system, messages, max_tokens=max_tokens, tools=tools or (),
                                agent=agent, on_text=on_text, should_stop=should_stop, conversation=True)
         params: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages,
@@ -568,6 +573,8 @@ class AIClient:
         usage = resp.usage
         input_tokens = usage.input_tokens or 0
         output_tokens = usage.output_tokens or 0
+        from core.panorama import activity
+        activity("model", agent=agent, status="completed", action=model, count=input_tokens + output_tokens)
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
         cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
 

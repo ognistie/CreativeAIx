@@ -59,7 +59,7 @@ RPC_METHODS = frozenset({
     "journalSummarize", "journalUseInBrain", "labArchive", "labCancel", "labCreateVariant", "labDataset", "labDiff", "labDraftRoute", "labEvalSets",
     "labFeedback", "labObserve", "labPromote", "labPromotionCheck", "labPublish", "labReport", "labResearch", "labRollback",
     "labRun", "labRunDetail", "labRuns", "labSkills", "labToolTest", "labTraining", "labVersions",
-    "rsiHistory", "rsiDecide",
+    "rsiHistory", "rsiDecide", "harnessPanorama",
     "libraryCatalog", "librarySearch", "libraryTopic", "loadConversations", "loadHistory", "mainActivated", "newSession",
     "openBrainFolder", "openConversation", "providerCustomRemove", "providerCustomSave", "providerKeyRemove", "providerKeySave", "providerModels", "providerStatus", "renameConversation", "restoreMain",
     "saveSettings", "setIntroSeen", "setLiveConversation", "setTitleBarColor", "studioAgent", "studioSave", "studioSource", "suggestionApprove",

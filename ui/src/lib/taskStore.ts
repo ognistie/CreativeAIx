@@ -2,6 +2,7 @@
 // Os eventos do nucleo (Signals do Bridge) e as acoes da tela entram aqui; a tela so desenha.
 
 export type TaskStatus = "idle" | "running" | "done" | "failed" | "cancelled" | "clarify" | "limited";
+import { cognitiveEvent, type CognitiveEvent } from "./cognitive";
 
 export interface Turn {
   said: string;
@@ -58,6 +59,8 @@ export interface TaskState {
   finalMetrics: { api_calls: number; tokens_est: number; cost_usd: number } | null;
   artifacts: Artifacts;
   plan: Array<{ agent: string; text: string }>;
+  /** Por onde o pedido passou (atalho, aprendido, conversa, maestro, "conversa→maestro"): panorama do harness */
+  planRoute: string;
   steps: Step[];
   replies: string[];
   turns: Turn[];
@@ -66,6 +69,7 @@ export interface TaskState {
   runId: number | null;
   /** Resposta da conversa enquanto o modelo escreve (answerDelta); a final chega em answerReady. */
   streamText: string;
+  cognitive: CognitiveEvent[];
 }
 
 const ZERO: Usage = { calls: 0, tokens_est: 0, cost_usd: 0 };
@@ -90,12 +94,14 @@ export const initialTaskState: TaskState = {
   finalMetrics: null,
   artifacts: { folder: "", files: [], url: "" },
   plan: [],
+  planRoute: "",
   steps: [],
   replies: [],
   turns: [],
   review: null,
   runId: null,
   streamText: "",
+  cognitive: [],
 };
 
 /** Respostas da conversa sao longas (analises); o que sai da tela vai inteiro para a conversa. */
@@ -179,6 +185,12 @@ export function taskReducer(s: TaskState, a: TaskAction): TaskState {
 
 function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
   switch (name) {
+    case "cognitiveActivity": {
+      if (s.runId === null || p.run_id !== s.runId) return s;
+      const event = cognitiveEvent(p);
+      if (!event || s.cognitive.length >= 256 || event.seq <= (s.cognitive.at(-1)?.seq ?? -1)) return s;
+      return { ...s, cognitive: [...s.cognitive, event] };
+    }
     case "phaseChanged": {
       // A 1a fase de uma execucao traz o run_id: a partir dai a tela so aceita eventos atrasados dela
       const id = runOf(p.run_id);
@@ -192,7 +204,7 @@ function onEvent(s: TaskState, name: string, p: P, now: number): TaskState {
         const a = parseAgent(str(st.description));
         return { agent: a.agent || str(st.action), text: a.text };
       });
-      return { ...s, plan: steps, phaseMsg: "Executando" };
+      return { ...s, plan: steps, planRoute: str((p.plan as P | undefined)?.route), phaseMsg: "Executando" };
     }
     case "stepStart": {
       const a = parseAgent(str(p.desc));
@@ -305,6 +317,7 @@ function mergeArtifacts(cur: Artifacts, p: P): Artifacts {
 
 /** Eventos que a tela de tarefa consome. */
 export const TASK_EVENTS = [
+  "cognitiveActivity",
   "phaseChanged", "planReady", "stepStart", "stepDone", "logEntry", "apiUsage", "contextExtracted", "taskDone",
   "executionFinished", "reportReady", "planReview", "cancelled", "errorRaised", "resolved", "voiceReply",
   "assistantMessage", "voiceChat", "answerReady", "answerDelta", "historyChanged",

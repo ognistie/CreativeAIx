@@ -36,6 +36,7 @@ export interface Methods {
   forceStop: [args: [], result: null];
   getSettings: [args: [], result: unknown];
   harnessGet: [args: [], result: unknown];
+  harnessPanorama: [args: [], result: unknown];
   harnessPatch: [args: [payload: string, label: string], result: unknown];
   harnessRestore: [args: [version_id: string], result: unknown];
   harnessSave: [args: [payload: string, label: string], result: unknown];
@@ -143,6 +144,7 @@ export interface Events {
   assistantMessage: unknown;
   cancelled: unknown;
   codingStatus: unknown;
+  cognitiveActivity: unknown;
   contextExtracted: unknown;
   conversationsChanged: unknown;
   creatorReady: unknown;

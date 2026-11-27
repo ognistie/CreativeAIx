@@ -519,6 +519,8 @@ class Maestro:
                 from agents.memory_agent import MemoryAgent
                 self._memory = MemoryAgent()
             routes = self._memory.find_routes(task, k=2)
+            from core.panorama import activity
+            activity("memory", agent="MAESTRO", count=len(routes), action="workflow_routes")
             if routes:
                 print(f"[Maestro] {len(routes)} rota(s) da memoria como referencia")
         except Exception as mem_err:
@@ -530,6 +532,8 @@ class Maestro:
         try:
             from core.brain import get_brain
             refs = get_brain().find_references(task, k=2)
+            from core.panorama import activity
+            activity("memory", agent="MAESTRO", count=len(refs), refs=[r["title"] for r in refs], action="references")
             if refs:
                 print(f"[Maestro] {len(refs)} referencia(s) do segundo cerebro")
                 hint += ("\n" if hint else "") + "REFERENCIA (segundo cerebro, so pista — nao copie valores):\n"
@@ -572,6 +576,8 @@ class Maestro:
             hint = (hint + "\n\n" if hint else "") + "CONTEXTO DA CONVERSA:\n" + conversation
         if continue_in:
             hint += f"\nCONTINUAR EM: {continue_in}"
+        from core.panorama import activity
+        activity("context", agent="MAESTRO", count=len(hint), status="completed", action="selected_characters")
 
         plan = self._ask(task, hint)
         if not plan.get("subtasks"):

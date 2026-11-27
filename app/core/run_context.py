@@ -98,6 +98,8 @@ class RunContext:
                          "read_file": ("path", alternative_read, "unique_read_in_source_tree")}.get(action)
 
         def replan(result):
+            from core.panorama import activity
+            activity("recovery", agent=agent, status="started", action=action)
             reason = result.get("failure_reason", "")
             identity = None
             selected = None

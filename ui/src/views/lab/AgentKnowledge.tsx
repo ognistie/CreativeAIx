@@ -4,7 +4,7 @@ import { Button, EmptyState, Icon, Skeleton } from "../../components/ui";
 import { core, openExternal } from "../../lib/host";
 import { cn } from "../../lib/cn";
 import { AGENT_LOOK, call } from "./types";
-import { AGENT_FOLDERS, noteTitle, type Knowledge } from "./MemorySpine";
+import { AGENT_FOLDERS, noteTitle, type Knowledge } from "./knowledge";
 
 // Conhecimento de um agente no Cerebro: as notas da pasta dele e as que ele usa de outras pastas. Abrir uma nota mostra
 // a leitura (com os [[links]] navegaveis), as ligacoes de ida e volta e a edicao. Salvar grava na camada pessoal do
